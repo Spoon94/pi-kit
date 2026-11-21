@@ -1,8 +1,9 @@
 # pi-kit · wip：todo + bg 融合设计方案
 
-> 状态：草案 v0.1（未实现）
+> 状态：草案 v0.2（未实现）
 > 范围：`extensions/wip.ts` 一个扩展，取代 `@juicesharp/rpiv-todo` + `pi-bg-run`
 > 本文只谈设计与取舍，不含实现代码
+> P0 假设已验证完毕 → [`p0-findings.md`](./p0-findings.md)（Q1/Q4 推翻了 v0.1 的两处设计，已回写）
 
 ---
 
@@ -194,7 +195,7 @@ bg_run ──▶ jobs.spawn ──▶ monitor(child exit / 轮询) ──▶ aut
 | `session_shutdown` | 释放本会话槽位；**不杀作业**（保持现状语义），作业保留 `sessionId` 供下次归位 |
 | `tool_execution_end` | 本地工具调用后刷新；`autofill` 自身也 `requestRender` |
 | `agent_start` | 隐藏上轮 completed；可选注入 20 字以内的当前 WIP 摘要 |
-| `agent_before_settle` | 续跑兜底闸（见 §5.3），每轮最多一次 |
+| `agent_before_settle` | 续跑兜底闸（见 §5.3）；**while 循环里反复触发，必须闩锁** |
 | `tool_call` | 预检（早失败、好文案）+ 审计 |
 
 ---
@@ -207,9 +208,15 @@ bg_run ──▶ jobs.spawn ──▶ monitor(child exit / 轮询) ──▶ aut
 |---|---|---|
 | L1 预检 | `tool_call` 事件读快照，明显违规直接 `{block:true, reason}` | 早失败，文案由渲染层展示 |
 | L2 提交 | `todo.execute()` 内**同步**读改写（无 await 跨越） | 唯一权威判定；并发批次里第二个调用必然看到第一个的结果 |
-| L3 串行 | `executionMode: "sequential"` | 禁止同批次并行调用造成顺序不确定 |
+| L3 串行（可选） | `executionMode: "sequential"`，配置 `sequentialTodo`，**默认关** | 只买顺序确定性与预检可靠性 |
 
 L1 不能替代 L2：并行工具调用的预检是**先全部跑完**再执行，两个 `update → in_progress` 都会通过预检；只有提交时的读改写能拦下第二个。
+
+**L2 自身即充分**：`execute()` 从读快照到 `appendEntry` 全程同步、无 `await`，JS 单线程 ⇒ 即使并行模式，两个调用的临界区也不会交错。R1 恒成立。
+
+**L3 默认关的原因**（P0 附带发现 A）：`executionMode:"sequential"` 会串行化**整个批次**——批次里只要有一个 `todo`，同批的 `read`/`grep` 也全变串行。代价大于收益，故降级为可选项。
+
+**预检必须跳过嵌套调用**：带 `parentToolCallId` 的调用（如 `verify` 内部跑的 bash）不再预检，否则自己拦自己。
 
 ### 4.2 规则表
 
@@ -231,7 +238,7 @@ L1 不能替代 L2：并行工具调用的预检是**先全部跑完**再执行�
 |---|---|---|
 | `job` 退出码 | 子进程 `exit`/`close` 事件（自进程） | 高（`known:true`） |
 | `job` 恢复态 | 重启后进程已消失 | 低（`known:false`，只能阻断、不能通过） |
-| `todo verify` | 扩展自己 `ctx.executeTool("bash", {command})` 跑 verify 命令 | 高（走权限与钩子） |
+| `todo verify` | 扩展在 `todo.execute()` 内 `ctx.executeTool("bash", {command})` | 高（走同一套权限与钩子） |
 | `tool_result` 补录 | 模型跑的 bash 命令与 `verify.command` 同构且成功 | 中（便利，不作为唯一依据） |
 | `manual` | `force + reason` | 留痕，不算通过 |
 
@@ -268,6 +275,8 @@ L1 不能替代 L2：并行工具调用的预检是**先全部跑完**再执行�
 
 幂等：以 `job.reconcile` 状态机驱动（`pending → notified → acked`），重复 `onExit`、重复启动都不会二次追加证据。
 
+**硬约束（P0 Q5）：回调里不能跑命令。** `ctx.executeTool` 需要“当前模型发起的工具调用”上下文（没有 assistant 消息就直接 `isError`）。所以自动回填**只用作业退出码**作证据，绝不在 `onExit` 里跑验证命令；需要重验时，在唤醒消息里指示模型调 `todo verify`。
+
 人工干预优先：用户/模型已把任务改成 `completed` 或 `pending` 时，回填只记证据不动状态。
 
 ### 5.3 续跑：四条通道
@@ -276,10 +285,25 @@ L1 不能替代 L2：并行工具调用的预检是**先全部跑完**再执行�
 |---|---|---|
 | 模型空闲 | `sendMessage(..., {deliverAs:"steer", triggerTurn:true})` | 立刻新起一轮 |
 | 模型正在跑 | 同上 | 当前工具调用结束后送达（pi 的既定语义，不中断执行） |
-| 本轮最后一个工具刚结束、即将 settle | `agent_before_settle` 返回 `{entries, continue:true}` | 兜住"最后一个工具就是 bg_run/kill"的空窗，每轮最多一次 |
+| 本轮最后一个工具刚结束、即将 settle | `agent_before_settle` 返回 `{entries:[custom_message], continue:true}` | 兜住"最后一个工具就是 bg_run/kill"的空窗 |
 | 启动补偿 | `session_start` 对账 `reconcile !== "acked"` 的作业 | 补发一条 catch-up，覆盖"pi 关着时作业跑完" |
 
+#### 两条硬约束（P0 Q4 实测，违反即出 bug）
+
+**① `continue:true` 必须配一条 `custom_message` entry。**
+正常一轮以 assistant 文本收尾，此时 `canContinue:false`；只给 `continue:true` 会被丢弃并报 boundary 错误。custom message 在 LLM 投影里是 **user 角色**，追加它才能把 `finalRole` 翻成 `user`、让续跑合法。二者**成对出现，缺一不可**。
+
+**② 闩锁是正确性必需，不是防抖优化。**
+`agent_before_settle` 处在一个 `while` 循环里——每次 `agent.continue()` 之后都会**再次触发**。无条件 `continue:true` = **无限唤醒循环**。因此：
+
+```
+wakeLatch: 请求续跑时置位 → 只有「新证据到达」或 agent_start 才清除
+boundary handler: wakeLatch 已置位 → 直接返回 undefined（不再请求）
+```
+
 **防抖**：同一批（250ms 窗口）内完成的多个作业合成一条消息；每作业只唤醒一次；每会话 `maxWakePerSession`（默认 20）上限；**没有下一任务且无失败待处理时，`continue` 置 false**（只报告，不空转）。
+
+**天然安全的部分**：handler 抛异常会被 `emitBoundary` 捕获并 `emitError`，不打断 run。但 `entries` 结构非法会导致整批 `{entries:[], continue:false}` 被丢弃——追加的 entry 必须严格合法。
 
 ### 5.4 消息格式（既是通知，也是压缩后的上下文）
 
@@ -315,7 +339,7 @@ board 1/2 done · #2 跑全量回归 (pending, unblocked)
 - 一个面板，一个折叠键，一个溢出摘要——与现在 rpiv-todo 的观感一致，只是多了作业那一列。
 - `/wip`（总览）/`/todos`（纯文本）/`/bg`（作业面板，含 tail 与 kill）三个入口都保留。
 - `/wip doctor`：一条命令列出「无绑定作业的 in_progress」「evidence 过期」「sidecar 与快照不一致」「孤儿作业」，用于排障。
-- 配置分层：`~/.config/pi-kit/config.json`（首选）→ `pi.getSettings().wip`（兼容老 `bgRun` 键）→ 默认值。
+- 配置分层：`~/.config/pi-kit/config.json`（首选）→ `pi.getSettings().wip` → `pi.getSettings().bgRun`（旧键兼容）→ 默认值。**绝不读 `ctx.settings`**——P0 Q2 证实该字段不存在。
 
 ### 6.3 默认值（都不需要改）
 
@@ -344,7 +368,7 @@ board 1/2 done · #2 跑全量回归 (pending, unblocked)
 | sidecar 损坏 | 静默吞掉 → 全部作业消失 | 读失败即把原文件改名 `jobs.json.corrupt-<ts>` 保留现场，从空开始并 notify |
 | 写一半崩溃 | `writeFileSync` 非原子 | tmp + `rename`（POSIX 原子），失败重试一次 |
 | pid 复用 | 可能把陌生进程当自己的作业 | 落 `startStamp`（`ps -p <pid> -o lstart=`），恢复时比对，不符即判"已结束/未知" |
-| 同名工具装了两个包 | 未定义 | `session_start` 用 `getAllTools()` 查 `todo` 的 `sourceInfo`，不是自己就 notify 冲突 |
+| 同名工具装了两个包 | **先注册者胜，静默忽略后来者**（P0 Q1） | `session_start` 用 `getAllTools()` 查 `todo` 的 `sourceInfo`；不是自己则 notify **error** 并**不注册自己的事件处理器**（避免半生效） |
 | 任务被删但作业在跑 | —— | 自动解绑，作业标 orphan，面板独立显示 |
 | `pane`/UI 不可用（headless） | 旧包各自判断 `hasUI` | UI 全部走适配层，headless 下所有刷新变 no-op |
 
@@ -417,7 +441,7 @@ board 1/2 done · #2 跑全量回归 (pending, unblocked)
 | 快照格式 | 继续写 `rpiv-todo-state`，字段是超集；旧包的 replay 校验忽略未知键，双向可读 |
 | 作业 sidecar | 继续用 `/tmp/bg-run/<hash>/jobs.json`，字段超集；首次启动补 `exitCodeKnown/reconcile/sessionId` |
 | 配置 | 先读 `~/.config/pi-kit/config.json`，回落到 `pi.getSettings().bgRun`（旧键）与 `wip` |
-| 卸载顺序 | 停 pi → 移除两个旧包 → 装 `pi-kit` → `/reload` → 跑验收 → `/wip doctor` |
+| 卸载顺序 | 停 pi → **必须移除两个旧包**（不是可选）→ 装 `pi-kit` → `/reload` → 跑验收 → `/wip doctor`。原因：同名工具先注册者胜，追加安装会被静默忽略（P0 Q1） |
 | 回滚 | 重装两个旧包即可；新快照旧包能读 |
 
 ---
@@ -434,12 +458,15 @@ board 1/2 done · #2 跑全量回归 (pending, unblocked)
 | F4 | 成功作业后不调用任何工具 | 任务自动 completed，overlay 立刻变 `✓` |
 | F5 | 恢复路径（进程消失） | `known:false`，任务**不**自动完成 |
 | F6 | 空闲时作业完成 | ≤ 1s 起新轮，消息含日志尾与 `next:` |
-| F7 | 最后一个工具是 bg_run 就结束本轮 | `before_settle` 续跑一次，不重复 |
+| F7 | 最后一个工具是 bg_run 就结束本轮 | `before_settle` 携 `custom_message` entry 续跑一次；**随后不再重复**（闩锁生效，无无限循环） |
 | F8 | 关闭 pi 期间作业完成 | 下次启动收到 catch-up 且只一次 |
 | F9 | `/compact` 后 `list` | 任务、evidence、绑定全在 |
 | F10 | 同 cwd 两个会话各开作业 | 通知各回各家 |
 | F11 | 旧会话（旧格式快照）启动 | 任务原样出现，可继续操作 |
 | F12 | sidecar 损坏 | 从空开始 + notify + 原文件留档 |
+| F13 | 旧包未卸载就装 `pi-kit` | 启动即 error 告警；**不注册事件处理器**，不出现半生效 |
+| F14 | 批次里 `todo` + 5 个 `read` | 默认仍并行（`sequentialTodo:false`）；开启后整批串行 |
+| F15 | `verify` 内部跑 bash | 不被自己的预检拦住（跳过 `parentToolCallId`） |
 
 ### 10.2 故障注入
 
@@ -454,8 +481,8 @@ board 1/2 done · #2 跑全量回归 (pending, unblocked)
 
 | 阶段 | 内容 | 出口 |
 |---|---|---|
-| P0 | 假设验证：同名工具冲突、`ctx.settings` 是否存在、`before_settle` 的 continue 语义、`executeTool` 权限路径 | 四个问题有实测结论 |
-| P1 | `board/` + `tool/`（R1-R9、`verify`、`isError`、`executionMode`） | F1/F2/F3/F9 通过，可替代 rpiv-todo |
+| P0 ✅ | 假设验证：四个问题已全部从 pi dist 源码取证，见 [`p0-findings.md`](./p0-findings.md) | 完成；Q4/Q1 推翻了原设计两处，已回写本文 |
+| P1 | `board/` + `tool/`（R1-R9、`verify`、`isError`、预检跳过嵌套调用） | F1/F2/F3/F9 通过，可替代 rpiv-todo |
 | P2 | `jobs/`（事件优先监控、`exitCodeKnown`、原子写、pid 校验、定向通知） | F5/F10/F12 通过 |
 | P3 | `bind/` + `wake/`（绑定、回填、四通道、预算、补偿） | F4/F6/F7/F8 通过 |
 | P4 | `ui/`（统一面板、列配置、`/wip doctor`、`/bg` 面板） | 观感对齐 rpiv-todo |
@@ -471,7 +498,7 @@ board 1/2 done · #2 跑全量回归 (pending, unblocked)
 | 错误返回不是错误 | `tool/response-envelope.ts:87-101`（无 `isError`） | R7 |
 | 恢复态伪造退出码 | `pi-bg-run`：`index.js:142`（completed/null）vs `:355→:329`（failed） | `exitCodeKnown` |
 | 先记 `notifiedAt` 再发送 | `index.js:334-336` | `reconcile` 状态机 |
-| 配置读 `ctx.settings`（不存在） | `index.js:806` | `pi.getSettings()` + 自建 config |
+| 配置读 `ctx.settings`（**已证实不存在**） | `index.js:806`；runner.js:621-695 无此字段 | `pi.getSettings()` + 自建 config；旧包那张配置表从未生效 |
 | 每作业一个轮询 timer | `index.js:51-80` | 事件优先 + 单 timer |
 | 面板 500ms 无条件 tick | `index.js:507` | 无作业停表 |
 | 每渲染读配置 | `rpiv-todo` `config.ts:37-42` | 配置缓存 |

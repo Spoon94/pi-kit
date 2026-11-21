@@ -64,7 +64,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   let lastModelAdvanced = false;
   let wired = false;
   let collapsed = false;
-  let conflict = detectToolConflict(pi.getAllTools(), OWN_SOURCE);
+  let conflict = false;   // 加载期不得调用 action method；真正的判定在 session_start
   let wakeSeq = 0;
 
   const getCfg = createConfigLoader({
@@ -467,22 +467,26 @@ export default function vigilTodo(pi: ExtensionAPI): void {
         output(ctx, text);
       }),
     });
-
-    const collapseKey = getCfg().collapseKey;
-    if (collapseKey !== "off") {
-      try {
-        pi.registerShortcut(collapseKey as Parameters<ExtensionAPI["registerShortcut"]>[0], {
-          description: "Toggle vigil-todo panel",
-          handler: (ctx) => {
-            activeCtx = ctx;
-            initSession(ctx);
-            collapsed = !collapsed;
-            refreshOverlay();
-          },
-        });
-      } catch { /* 非法按键配置不致命 */ }
-    }
   }
+
+  let collapseRegistered = false;
+  const registerCollapseShortcut = (): void => {
+    if (collapseRegistered) return;
+    const collapseKey = getCfg().collapseKey;
+    if (collapseKey === "off") return;
+    try {
+      pi.registerShortcut(collapseKey as Parameters<ExtensionAPI["registerShortcut"]>[0], {
+        description: "Toggle vigil-todo panel",
+        handler: (ctx) => {
+          activeCtx = ctx;
+          initSession(ctx);
+          collapsed = !collapsed;
+          refreshOverlay();
+        },
+      });
+      collapseRegistered = true;
+    } catch { /* 非法按键配置不致命 */ }
+  };
 
   // ── 事件接线（冲突自检通过后） ────────────────────────────────────────
   const wire = (): void => {
@@ -583,6 +587,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     }
     initSession(ctx);
     wire();
+    registerCollapseShortcut();
     refreshOverlay();
   });
 }

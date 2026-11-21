@@ -4806,3 +4806,728 @@ git commit -m "feat(vigil-todo): 扩展接线、性能基准、迁移文档与�
 ## Execution Handoff
 
 执行方式已由人指定：**build 实现 → check 审核代码 → piper 终审**。全部 Task 在 `feat/vigil-todo` 单分支完成，最终 PR 由人审核合并。
+
+---
+
+## 增补：八方面贯穿（规格 §16）
+
+以下 T21–T24 落实规格 §16。前 20 个 Task 已完成（204 测试通过 / typecheck 干净），本增补在同一分支继续。
+
+### Task 21: 清理 todo（选择性 clear、孤儿防护、purged 标记、retention）
+
+**Files:**
+- Create: `src/board/cleanup.ts`
+- Modify: `src/board/reducer.ts`（`clear` 走 cleanup）、`src/board/invariants.ts`（`MutationParams` 加 `scope`/`force`）、`src/jobs/types.ts`（`purged?`）、`src/bind/adopt.ts`（过滤 purged）、`src/bind/sweep.ts`（catchUpScan 过滤 purged + retention）、`src/lib/config.ts`（`taskRetentionMs`）
+- Test: `tests/board/cleanup.test.ts`
+
+**Interfaces:**
+- Consumes: T1–T20
+- Produces:
+  - `ClearScope = "completed" | "deleted" | "settled" | "all"`
+  - `planCleanup(state, scope, force, facts): { remove: number[]; skipped: number[]; error?: string }`
+  - `applyCleanup(state, plan, now): BoardState`
+  - `markPurged(jobs, taskIds, tasks): string[]`（返回被标记的 rootId）
+  - `retentionCandidates(state, retentionMs, now): number[]`
+
+- [ ] **Step 1: 写失败测试**
+
+```ts
+// tests/board/cleanup.test.ts
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { expect, it } from "vitest";
+import { applyCleanup, markPurged, planCleanup, retentionCandidates } from "../../src/board/cleanup.js";
+import { applyMutation } from "../../src/board/reducer.js";
+import { emptyBoard, type BoardState, type Task } from "../../src/board/types.js";
+import type { JobFacts, RuleContext } from "../../src/board/invariants.js";
+import { createJobStore } from "../../src/jobs/store.js";
+import type { Job } from "../../src/jobs/types.js";
+import { adoptableRoots } from "../../src/bind/adopt.js";
+import { createBoardStore } from "../../src/board/store.js";
+import { DEFAULTS } from "../../src/lib/config.js";
+
+const facts = (running: number[] = [], backoff: number[] = []): JobFacts => ({
+  hasRunning: (id) => running.includes(id), hasBackoff: (id) => backoff.includes(id),
+  startedAt: () => 0, exists: () => true,
+});
+const ctx = (f = facts()): RuleContext => ({ wipLimit: 3, now: 1000, facts: f });
+const t = (id: number, o: Partial<Task> = {}): Task => ({ id, subject: `t${id}`, status: "pending", ...o });
+const b = (tasks: Task[]): BoardState => ({ ...emptyBoard(), tasks, nextId: tasks.length + 1 });
+
+it("默认 scope=settled：只清 completed 与 deleted，保留 pending/in_progress/parked", () => {
+  const s = b([t(1, { status: "completed" }), t(2, { status: "deleted" }), t(3), t(4, { status: "in_progress" }),
+               t(5, { status: "parked", park: { reason: "r", at: 1, from: "pending" } })]);
+  const p = planCleanup(s, undefined, undefined, facts());
+  expect(p.remove.sort()).toEqual([1, 2]);
+  expect(applyCleanup(s, p, 1000).tasks.map((x) => x.id)).toEqual([3, 4, 5]);
+});
+
+it("scope=completed / deleted 各自只清一类", () => {
+  const s = b([t(1, { status: "completed" }), t(2, { status: "deleted" })]);
+  expect(planCleanup(s, "completed", undefined, facts()).remove).toEqual([1]);
+  expect(planCleanup(s, "deleted", undefined, facts()).remove).toEqual([2]);
+});
+
+it("scope=all 无 force 被拒（R18）", () => {
+  const s = b([t(1)]);
+  expect(planCleanup(s, "all", undefined, facts()).error).toMatch(/force/);
+});
+
+it("scope=all + force 但有 running 作业被拒，文案指向 halt（R18）", () => {
+  const s = b([t(1, { status: "in_progress" })]);
+  const p = planCleanup(s, "all", true, facts([1]));
+  expect(p.error).toMatch(/halt/);
+});
+
+it("scope=all + force 但有退避链被拒（R18）", () => {
+  expect(planCleanup(b([t(1, { status: "in_progress" })]), "all", true, facts([], [1])).error).toMatch(/halt/);
+});
+
+it("任何 scope 下绑 running 作业的任务被跳过并列出（R18 部分成功）", () => {
+  const s = b([t(1, { status: "completed", jobs: ["bg_a"] }), t(2, { status: "completed" })]);
+  const p = planCleanup(s, "completed", undefined, facts([1]));
+  expect(p.remove).toEqual([2]);
+  expect(p.skipped).toEqual([1]);
+});
+
+it("adoptedAway 冻结任务允许被清理（R17 对 clear 放行）", () => {
+  const s = b([t(1, { status: "completed", metadata: { adoptedAway: { session: "B" } } })]);
+  expect(planCleanup(s, "completed", undefined, facts()).remove).toEqual([1]);
+});
+
+it("clear 经 reducer 时默认不再全清（防回归）", () => {
+  let s = applyMutation(emptyBoard(), { action: "create", subject: "a" }, ctx()).state;
+  s = applyMutation(s, { action: "update", id: 1, status: "in_progress" }, ctx()).state;
+  const r = applyMutation(s, { action: "clear" }, ctx());
+  expect(r.state.tasks).toHaveLength(1);          // in_progress 不被默认清掉
+});
+
+it("clear scope=all force 在无作业时可全清", () => {
+  const s = b([t(1), t(2, { status: "completed" })]);
+  const r = applyMutation(s, { action: "clear", scope: "all", force: true }, ctx());
+  expect(r.state.tasks).toHaveLength(0);
+  expect(r.op.kind).toBe("clear");
+});
+
+it("清理保留 counters（不得重置 turnsUsed 绕过保险丝）", () => {
+  const s = b([t(1, { status: "completed" })]);
+  s.counters.turnsUsed = 42;
+  const r = applyMutation(s, { action: "clear", scope: "all", force: true }, ctx());
+  expect(r.state.counters.turnsUsed).toBe(42);
+});
+
+const job = (id: string, o: Partial<Job> = {}): Job => ({
+  id, label: id, command: "true", logPath: "/tmp/a.log", cwd: "/tmp", pid: 1,
+  status: "completed", exitCode: 0, exitCodeKnown: true, startedAt: 1, endedAt: 2,
+  fpVerdict: "fresh", interferers: [], overlapUnfinished: [], rootId: id, attempt: 1,
+  taskId: 1, sessionId: "S", evidenceApplied: false, finalized: true,
+  finalResult: { ok: true, note: "done", trigger: "external", at: 2 }, notifyState: "pending", ...o,
+});
+
+it("markPurged 标记绑定链的 root（R19）", () => {
+  const jobs = createJobStore(mkdtempSync(join(tmpdir(), "vigil-clean-")));
+  jobs.put(job("R"));
+  const roots = markPurged(jobs, [1], [t(1, { status: "completed", jobs: ["R"] })]);
+  expect(roots).toEqual(["R"]);
+  expect(jobs.get("R")?.purged).toBe(true);
+});
+
+it("purged 链不再被收养（修「清了又回来」）", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vigil-clean-"));
+  const jobs = createJobStore(dir); const boards = createBoardStore();
+  boards.commit("NEW", emptyBoard());
+  jobs.put(job("R", { sessionId: "OLD", purged: true }));
+  expect(adoptableRoots({ boards, jobs, cfg: DEFAULTS, now: 100_000, sessionId: "NEW", dir,
+    readOldBoard: () => emptyBoard(), notify: () => {} })).toEqual([]);
+});
+
+it("retention 只候选 completed/deleted，绝不包含 parked", () => {
+  const s = b([t(1, { status: "completed", statusSince: 10 }), t(2, { status: "deleted", statusSince: 10 }),
+               t(3, { status: "parked", statusSince: 10, park: { reason: "r", at: 10, from: "pending" } }),
+               t(4, { status: "completed", statusSince: 900 })]);
+  expect(retentionCandidates(s, 100, 1000).sort()).toEqual([1, 2]);
+});
+
+it("retentionMs=0 关闭，不产生候选", () => {
+  const s = b([t(1, { status: "completed", statusSince: 1 })]);
+  expect(retentionCandidates(s, 0, 100_000)).toEqual([]);
+});
+```
+
+- [ ] **Step 2: 运行确认失败**
+
+Run: `npm test -- tests/board/cleanup.test.ts`
+Expected: FAIL — `src/board/cleanup.js` 不存在
+
+- [ ] **Step 3: 实现 cleanup**
+
+```ts
+// src/board/cleanup.ts
+import type { JobFacts } from "./invariants.js";
+import type { BoardState, Task } from "./types.js";
+import type { JobStore } from "../jobs/store.js";
+
+export type ClearScope = "completed" | "deleted" | "settled" | "all";
+export interface CleanupPlan { remove: number[]; skipped: number[]; error?: string }
+
+const inScope = (t: Task, scope: ClearScope): boolean =>
+  scope === "all" ? true
+  : scope === "completed" ? t.status === "completed"
+  : scope === "deleted" ? t.status === "deleted"
+  : t.status === "completed" || t.status === "deleted";
+
+export function planCleanup(state: BoardState, scope: ClearScope | undefined, force: boolean | undefined, facts: JobFacts): CleanupPlan {
+  const s = scope ?? "settled";
+  if (s === "all") {
+    if (force !== true) return { remove: [], skipped: [], error: `clear scope:"all" 需要 force:true` };
+    const busy = state.tasks.filter((t) => facts.hasRunning(t.id) || facts.hasBackoff(t.id));
+    if (busy.length) {
+      return { remove: [], skipped: busy.map((t) => t.id),
+        error: `${busy.map((t) => `#${t.id}`).join(" ")} 有作业在跑或退避中 → bg_kill({job_id:"…"}) 或 /vigil-todo halt` };
+    }
+  }
+  const remove: number[] = []; const skipped: number[] = [];
+  for (const t of state.tasks) {
+    if (!inScope(t, s)) continue;
+    if (facts.hasRunning(t.id)) { skipped.push(t.id); continue; }   // 部分成功优于孤儿
+    remove.push(t.id);
+  }
+  return { remove, skipped };
+}
+
+export function applyCleanup(state: BoardState, plan: CleanupPlan, _now: number): BoardState {
+  const drop = new Set(plan.remove);
+  return { ...state, tasks: state.tasks.filter((t) => !drop.has(t.id)) };
+}
+
+/** 清理任务时同步标记 sidecar，避免 adopt/sweep 重新导入（R19）。 */
+export function markPurged(jobs: JobStore, taskIds: number[], tasks: Task[]): string[] {
+  const drop = new Set(taskIds);
+  const roots = new Set<string>();
+  for (const t of tasks) {
+    if (!drop.has(t.id)) continue;
+    for (const id of t.jobs ?? []) {
+      const j = jobs.get(id);
+      if (j) roots.add(j.rootId);
+    }
+  }
+  for (const id of roots) {
+    const root = jobs.get(id);
+    if (root) jobs.put({ ...root, purged: true });
+  }
+  if (roots.size) jobs.save();
+  return [...roots];
+}
+
+export function retentionCandidates(state: BoardState, retentionMs: number, now: number): number[] {
+  if (retentionMs <= 0) return [];
+  return state.tasks
+    .filter((t) => (t.status === "completed" || t.status === "deleted")
+      && (t.statusSince ?? 0) > 0 && now - (t.statusSince ?? 0) >= retentionMs)
+    .map((t) => t.id);
+}
+```
+
+- [ ] **Step 4: 接线 reducer、types、adopt、sweep、config**
+
+1. `src/board/invariants.ts` 的 `MutationParams` 增 `scope?: "completed"|"deleted"|"settled"|"all"; force?: boolean;`
+2. `src/board/reducer.ts` 的 `clear` 分支替换为：
+
+```ts
+  if (p.action === "clear") {
+    const plan = planCleanup(state, p.scope, p.force, ctx.facts);
+    if (plan.error) return err(state, plan.error);
+    return { state: applyCleanup(state, plan, ctx.now), op: { kind: "clear", count: plan.remove.length } };
+  }
+```
+
+3. `src/jobs/types.ts` 的 `Job` 增 `purged?: boolean;`
+4. `src/bind/adopt.ts` 的 `adoptableRoots` 在 `finalized` 判定后加 `if (root.purged) continue;`
+5. `src/bind/sweep.ts` 的 `catchUpScan` 加 `if (root.purged) continue;`；`sweepAll` 末尾按 `cfg.taskRetentionMs` 走 `retentionCandidates` → `planCleanup`/`applyCleanup`/`markPurged`
+6. `src/lib/config.ts` 增 `taskRetentionMs: number`（默认 **0**，min 0）
+7. `src/tool/register.ts` 的 `todo.execute` 在 `op.kind==="clear"` 时调用 `markPurged`，并把 `skipped` 写进返回文案
+
+- [ ] **Step 5: 运行确认通过**
+
+Run: `npm test && npm run typecheck`
+Expected: PASS（新增 15 例；既有 204 例不得回归）
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/board/cleanup.ts src/board/reducer.ts src/board/invariants.ts src/jobs/types.ts src/bind/adopt.ts src/bind/sweep.ts src/lib/config.ts src/tool/register.ts tests/board/cleanup.test.ts
+git commit -m "feat(vigil-todo): 选择性清理、孤儿防护与 purged 标记（规格 §16.7）"
+```
+
+---
+
+### Task 22: 强制中断（halt/resume 与复活防护）
+
+**Files:**
+- Create: `src/bind/halt.ts`
+- Modify: `src/board/types.ts`（counters 加 halted）、`src/board/replay.ts`（解码 halted）、`src/wake/deliver.ts`（首行闸门）、`src/bind/sweep.ts`（三处短路）、`src/tool/register.ts`（halted 列只读）、`extensions/vigil-todo.ts`（命令与 before_settle 短路）
+- Test: `tests/bind/halt.test.ts`
+
+**Interfaces:**
+- Consumes: T1–T21
+- Produces:
+  - `HaltDeps { boards: BoardStore; jobs: JobStore; now: number; sessionId: string; kill(idOrRoot: string, by: "self"|"external"): void; notify(n: string): void }`
+  - `halt(d: HaltDeps): { killed: number; parked: number; alreadyHalted: boolean }`
+  - `resume(d: HaltDeps): boolean`
+  - `isHalted(state: BoardState): boolean`
+  - `reapHaltedLeftovers(d: HaltDeps): number`
+
+- [ ] **Step 1: 写失败测试**
+
+```ts
+// tests/bind/halt.test.ts
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { beforeEach, expect, it } from "vitest";
+import { halt, isHalted, reapHaltedLeftovers, resume, type HaltDeps } from "../../src/bind/halt.js";
+import { createBoardStore } from "../../src/board/store.js";
+import { emptyBoard } from "../../src/board/types.js";
+import { replayBranch } from "../../src/board/replay.js";
+import { createJobStore } from "../../src/jobs/store.js";
+import type { Job } from "../../src/jobs/types.js";
+import { DEFAULTS } from "../../src/lib/config.js";
+import { tryDeliver } from "../../src/wake/deliver.js";
+import { adoptableRoots } from "../../src/bind/adopt.js";
+import { catchUpScan, sweepRespawns } from "../../src/bind/sweep.js";
+
+let boards: ReturnType<typeof createBoardStore>;
+let jobs: ReturnType<typeof createJobStore>;
+let d: HaltDeps;
+let killed: string[];
+const j = (id: string, o: Partial<Job> = {}): Job => ({
+  id, label: id, command: "sleep 99", logPath: "/tmp/a.log", cwd: "/tmp", pid: 999_999,
+  status: "running", exitCode: null, exitCodeKnown: false, startedAt: 1, endedAt: null,
+  fpVerdict: "unknown", interferers: [], overlapUnfinished: [], rootId: id, attempt: 1,
+  taskId: 1, sessionId: "S", evidenceApplied: false, notifyState: "pending", ...o,
+});
+
+beforeEach(() => {
+  boards = createBoardStore(); jobs = createJobStore(mkdtempSync(join(tmpdir(), "vigil-halt-")));
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "训练", status: "in_progress", inProgressSince: 0, jobs: ["A"] },
+             { id: 2, subject: "别的", status: "pending" }];
+  b.nextId = 3; boards.commit("S", b);
+  killed = [];
+  d = { boards, jobs, now: 1000, sessionId: "S", kill: (id) => { killed.push(id); }, notify: () => {} };
+});
+
+it("halt 置 halted 并落快照（跨重启保持）", () => {
+  jobs.put(j("A"));
+  halt(d);
+  expect(isHalted(boards.get("S"))).toBe(true);
+  const snap = { action: "update", params: {}, tasks: boards.get("S").tasks, nextId: 3, counters: boards.get("S").counters };
+  expect(replayBranch([{ type: "custom", customType: "rpiv-todo-state", data: snap }]).counters.halted).toBe(true);
+});
+
+it("halt 杀本会话作业并清退避（全局取消）", () => {
+  jobs.put(j("A")); jobs.put(j("B", { status: "failed", exitCode: 1, endedAt: 2, retryAt: 5000, taskId: 2 }));
+  const r = halt(d);
+  expect(killed.sort()).toEqual(["A", "B"]);
+  expect(jobs.get("B")?.retryAt).toBeUndefined();
+  expect(r.killed).toBe(2);
+});
+
+it("halt 不杀别的会话的作业（项目共享边界）", () => {
+  jobs.put(j("A")); jobs.put(j("OTHER", { sessionId: "OTHER" }));
+  halt(d);
+  expect(killed).toEqual(["A"]);
+});
+
+it("受影响任务 parked 且不写 lastFailure", () => {
+  jobs.put(j("A"));
+  halt(d);
+  const t = boards.get("S").tasks[0];
+  expect(t.status).toBe("parked");
+  expect(t.park?.reason).toContain("强制中断");
+  expect(t.lastFailure).toBeUndefined();
+});
+
+it("halt 幂等，重复调用只补杀残留", () => {
+  jobs.put(j("A"));
+  expect(halt(d).alreadyHalted).toBe(false);
+  expect(halt(d).alreadyHalted).toBe(true);
+});
+
+it("halted 时 tryDeliver 第一行返回 none（早于 maxTurns）", () => {
+  jobs.put(j("A", { status: "completed", exitCode: 0, exitCodeKnown: true, endedAt: 2, finalized: true, evidenceApplied: true }));
+  const b = boards.get("S");
+  b.tasks[0].evidence = [{ ok: true, kind: "job", origin: "async", chainFinal: true, at: 500, known: true, fp: "fresh", ref: "A" }];
+  b.counters.turnsUsed = 0;
+  boards.commit("S", b);
+  halt(d);
+  expect(tryDeliver({ board: boards.get("S"), jobs, cfg: DEFAULTS, now: 2000, trigger: "async", modelAdvanced: true, capacityFull: false }).kind).toBe("none");
+});
+
+it("halted 时 sweepRespawns 不 respawn（复活防护）", () => {
+  jobs.put(j("A", { status: "failed", exitCode: 1, endedAt: 2, retryAt: 100 }));
+  halt(d);
+  let calls = 0;
+  const sd = { boards, jobs, cfg: DEFAULTS, now: 2000, sessionId: "S", respawn: () => { calls++; return { ok: true }; }, notify: () => {}, isIdle: () => true };
+  expect(sweepRespawns(sd)).toBe(0);
+  expect(calls).toBe(0);
+});
+
+it("halted 时 catchUpScan 为空（复活防护）", () => {
+  jobs.put(j("A", { status: "completed", exitCode: 0, endedAt: 2, finalized: true, evidenceApplied: true, notifyState: "sent", notifySentAt: 0 }));
+  halt(d);
+  expect(catchUpScan({ boards, jobs, cfg: DEFAULTS, now: 900_000, sessionId: "S", respawn: () => ({ ok: true }), notify: () => {}, isIdle: () => true })).toEqual([]);
+});
+
+it("halted 时不收养孤儿（复活防护）", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vigil-halt-"));
+  jobs.put(j("ORPH", { sessionId: "OLD", status: "completed", exitCode: 0, endedAt: 2, finalized: true }));
+  halt(d);
+  expect(adoptableRoots({ boards, jobs, cfg: DEFAULTS, now: 100_000, sessionId: "S", dir, readOldBoard: () => emptyBoard(), notify: () => {} })).toEqual([]);
+});
+
+it("resume 解除 halted 但不重置 turnsUsed（不得绕过保险丝）", () => {
+  const b = boards.get("S"); b.counters.turnsUsed = 49; boards.commit("S", b);
+  halt(d);
+  expect(resume(d)).toBe(true);
+  expect(isHalted(boards.get("S"))).toBe(false);
+  expect(boards.get("S").counters.turnsUsed).toBe(49);
+});
+
+it("未 halted 时 resume 返回 false", () => {
+  expect(resume(d)).toBe(false);
+});
+
+it("halt 后崩溃残留作业由启动 sweep 补杀", () => {
+  jobs.put(j("A"));
+  halt(d);
+  killed.length = 0;
+  jobs.put(j("A"));                       // 模拟崩溃后 sidecar 仍是 running
+  expect(reapHaltedLeftovers(d)).toBe(1);
+  expect(killed).toEqual(["A"]);
+});
+```
+
+- [ ] **Step 2: 运行确认失败**
+
+Run: `npm test -- tests/bind/halt.test.ts`
+Expected: FAIL — 模块不存在
+
+- [ ] **Step 3: 实现 halt**
+
+```ts
+// src/bind/halt.ts
+import type { BoardStore } from "../board/store.js";
+import type { BoardState } from "../board/types.js";
+import { requestKill } from "../jobs/kill.js";
+import type { JobStore } from "../jobs/store.js";
+
+export interface HaltDeps {
+  boards: BoardStore; jobs: JobStore; now: number; sessionId: string;
+  kill(idOrRoot: string, by: "self" | "external"): void;
+  notify(note: string): void;
+}
+
+export const isHalted = (state: BoardState): boolean => state.counters.halted === true;
+
+export function halt(d: HaltDeps) {
+  const board = d.boards.get(d.sessionId);
+  const alreadyHalted = isHalted(board);
+  const mine = d.jobs.all().filter((j) => j.sessionId === d.sessionId);
+  const targets = mine.filter((j) => j.status === "running" || j.retryAt != null);
+  const affected = new Set<number>();
+  for (const j of targets) {
+    d.kill(j.rootId, "self");
+    if (typeof j.taskId === "number") affected.add(j.taskId);
+  }
+  const tasks = board.tasks.map((t) => {
+    if (!affected.has(t.id) || t.status !== "in_progress") return t;
+    return { ...t, status: "parked" as const, statusSince: d.now,
+      park: { reason: "用户强制中断", at: d.now, from: "in_progress" as const } };
+  });
+  d.boards.commit(d.sessionId, { ...board, tasks,
+    counters: { ...board.counters, halted: true, haltedAt: d.now } });
+  d.notify(`已强制中断：取消 ${targets.length} 条作业链，${affected.size} 个任务 parked。用 /vigil-todo resume 恢复`);
+  return { killed: targets.length, parked: affected.size, alreadyHalted };
+}
+
+export function resume(d: HaltDeps): boolean {
+  const board = d.boards.get(d.sessionId);
+  if (!isHalted(board)) return false;
+  const counters = { ...board.counters };
+  delete counters.halted; delete counters.haltedAt;
+  d.boards.commit(d.sessionId, { ...board, counters });   // turnsUsed 不重置
+  d.notify("已恢复自主推进");
+  return true;
+}
+
+/** halt 落盘后崩溃 ⇒ 启动补杀本会话残留 running（不留孤儿）。 */
+export function reapHaltedLeftovers(d: HaltDeps): number {
+  if (!isHalted(d.boards.get(d.sessionId))) return 0;
+  const left = d.jobs.all().filter((j) => j.sessionId === d.sessionId && j.status === "running");
+  for (const j of left) d.kill(j.rootId, "self");
+  return left.length;
+}
+```
+
+- [ ] **Step 4: 接线五处短路 + 类型 + 命令**
+
+1. `src/board/types.ts`：`BoardCounters` 增 `halted?: boolean; haltedAt?: number;`
+2. `src/board/replay.ts`：`decodeSnapshot` 保留 `halted`/`haltedAt`（布尔与数字校验，非法丢弃）
+3. `src/wake/deliver.ts`：`tryDeliver` **第一行**改为 `if (i.board.counters.halted) return { kind: "none" };`，置于 maxTurns 判定**之前**
+4. `src/bind/sweep.ts`：`sweepRespawns` / `catchUpScan` 开头 `if (d.boards.get(d.sessionId).counters.halted) return …0/[]`
+5. `src/bind/adopt.ts`：`adoptableRoots` 开头同上返回 `[]`
+6. `src/tool/register.ts`：`READONLY_FIELDS` 增 `halted`、`haltedAt`（模型不得 halt/resume）
+7. `extensions/vigil-todo.ts`：注册 `/vigil-todo halt` 与 `/vigil-todo resume`（**仅命令，不给模型工具**）；`agent_before_settle` 在 halted 时返回 undefined；`session_start` 调 `reapHaltedLeftovers`；timer 在 halted 且无 running 时停表
+
+- [ ] **Step 5: 运行确认通过**
+
+Run: `npm test && npm run typecheck`
+Expected: PASS（新增 12 例；既有全部不回归）
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/bind/halt.ts src/board/types.ts src/board/replay.ts src/wake/deliver.ts src/bind/sweep.ts src/bind/adopt.ts src/tool/register.ts extensions/vigil-todo.ts tests/bind/halt.test.ts
+git commit -m "feat(vigil-todo): 强制中断与五处复活防护（规格 §16.8）"
+```
+
+---
+
+### Task 23: 配置契约、热更新矩阵与可扩展性边界守卫
+
+**Files:**
+- Create: `tests/arch/boundaries.test.ts`, `docs/configuration.md`
+- Modify: `src/lib/config.ts`（导出 `CONFIG_KEYS` 元数据）、`src/board/invariants.ts`（`halted` 只读已在 T22）
+- Test: `tests/lib/config.test.ts`（追加）
+
+**Interfaces:**
+- Consumes: T1–T22
+- Produces:
+  - `CONFIG_KEYS: Record<keyof VigilConfig, { type: "int"|"int[]"|"string"; min?: number; reload: boolean; default: unknown }>`
+  - `docs/configuration.md`（全键表 + 生效时机）
+
+- [ ] **Step 1: 写失败测试 — 边界守卫**
+
+```ts
+// tests/arch/boundaries.test.ts
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { expect, it } from "vitest";
+
+const ROOT = new URL("../../", import.meta.url).pathname;
+const walk = (dir: string): string[] => {
+  const out: string[] = [];
+  for (const e of readdirSync(dir)) {
+    const p = join(dir, e);
+    if (statSync(p).isDirectory()) out.push(...walk(p));
+    else if (p.endsWith(".ts")) out.push(p);
+  }
+  return out;
+};
+const importsOf = (f: string): string[] =>
+  [...readFileSync(f, "utf8").matchAll(/from\s+["']([^"']+)["']/g)].map((m) => m[1]);
+
+it("board/ 不得 import pi 或 extensions（纯状态机）", () => {
+  const bad: string[] = [];
+  for (const f of walk(join(ROOT, "src/board"))) {
+    for (const spec of importsOf(f)) {
+      if (spec.includes("@earendil-works") || spec.includes("extensions/")) bad.push(`${f} → ${spec}`);
+    }
+  }
+  expect(bad).toEqual([]);
+});
+
+it("jobs/ 不得 import bind/wake/ui/tool（作业子系统不懂编排）", () => {
+  const bad: string[] = [];
+  for (const f of walk(join(ROOT, "src/jobs"))) {
+    for (const spec of importsOf(f)) {
+      if (/\/(bind|wake|ui|tool)\//.test(spec)) bad.push(`${f} → ${spec}`);
+    }
+  }
+  expect(bad).toEqual([]);
+});
+
+it("ui/ 不得调用写入口（只读）", () => {
+  const bad: string[] = [];
+  for (const f of walk(join(ROOT, "src/ui"))) {
+    const src = readFileSync(f, "utf8");
+    for (const call of [".commit(", ".put(", ".save(", "appendEntry("]) {
+      if (src.includes(call)) bad.push(`${f} → ${call}`);
+    }
+  }
+  expect(bad).toEqual([]);
+});
+```
+
+- [ ] **Step 2: 写失败测试 — 配置契约**
+
+追加到 `tests/lib/config.test.ts`：
+
+```ts
+import { CONFIG_KEYS, DEFAULTS, resolveConfig } from "../../src/lib/config.js";
+
+it("CONFIG_KEYS 覆盖 VigilConfig 全部键，无遗漏无多余", () => {
+  expect(Object.keys(CONFIG_KEYS).sort()).toEqual(Object.keys(DEFAULTS).sort());
+});
+
+it("每个键的 default 与 DEFAULTS 一致（文档不会漂移）", () => {
+  for (const [k, meta] of Object.entries(CONFIG_KEYS)) {
+    expect(meta.default).toEqual((DEFAULTS as Record<string, unknown>)[k]);
+  }
+});
+
+it("只有 collapseKey 需要 reload", () => {
+  const needReload = Object.entries(CONFIG_KEYS).filter(([, m]) => m.reload).map(([k]) => k);
+  expect(needReload).toEqual(["collapseKey"]);
+});
+
+it("taskRetentionMs 默认 0（自动删任务默认关闭）", () => {
+  expect(DEFAULTS.taskRetentionMs).toBe(0);
+  expect(resolveConfig({}).taskRetentionMs).toBe(0);
+});
+
+it("逐键非法值只影响该键，其他键仍生效", () => {
+  const c = resolveConfig({ file: { wipLimit: -5, maxTurns: 7 } });
+  expect(c.wipLimit).toBe(DEFAULTS.wipLimit);
+  expect(c.maxTurns).toBe(7);
+});
+```
+
+- [ ] **Step 3: 运行确认失败**
+
+Run: `npm test -- tests/arch tests/lib/config.test.ts`
+Expected: FAIL — `CONFIG_KEYS` 未导出；边界测试若已有违规也会失败（照实修）
+
+- [ ] **Step 4: 实现 CONFIG_KEYS 与文档**
+
+在 `src/lib/config.ts` 导出与 `DEFAULTS` 同源的元数据（**default 直接引用 DEFAULTS，避免两处漂移**）：
+
+```ts
+export const CONFIG_KEYS: Record<keyof VigilConfig, { type: "int" | "int[]" | "string"; min?: number; reload: boolean; default: unknown }> = {
+  wipLimit: { type: "int", min: 1, reload: false, default: DEFAULTS.wipLimit },
+  retries: { type: "int", min: 0, reload: false, default: DEFAULTS.retries },
+  retryDelaysMs: { type: "int[]", min: 0, reload: false, default: DEFAULTS.retryDelaysMs },
+  staleReverify: { type: "int", min: 0, reload: false, default: DEFAULTS.staleReverify },
+  maxTurns: { type: "int", min: 1, reload: false, default: DEFAULTS.maxTurns },
+  maxConcurrentJobs: { type: "int", min: 1, reload: false, default: DEFAULTS.maxConcurrentJobs },
+  completedTtlMs: { type: "int", min: 1, reload: false, default: DEFAULTS.completedTtlMs },
+  taskRetentionMs: { type: "int", min: 0, reload: false, default: DEFAULTS.taskRetentionMs },
+  tailLines: { type: "int", min: 1, reload: false, default: DEFAULTS.tailLines },
+  maxTailBytes: { type: "int", min: 1, reload: false, default: DEFAULTS.maxTailBytes },
+  maxWidgetLines: { type: "int", min: 3, reload: false, default: DEFAULTS.maxWidgetLines },
+  collapseKey: { type: "string", reload: true, default: DEFAULTS.collapseKey },
+  notifyRetryMs: { type: "int", min: 1, reload: false, default: DEFAULTS.notifyRetryMs },
+  heartbeatStaleMs: { type: "int", min: 1, reload: false, default: DEFAULTS.heartbeatStaleMs },
+  hungSuspectMs: { type: "int", min: 1, reload: false, default: DEFAULTS.hungSuspectMs },
+  wakeMergeMs: { type: "int", min: 0, reload: false, default: DEFAULTS.wakeMergeMs },
+  adoptRecheckMs: { type: "int", min: 1, reload: false, default: DEFAULTS.adoptRecheckMs },
+};
+```
+
+`docs/configuration.md`：按规格 §16.3 的表逐键列出（类型、默认、生效时机），并写明优先级链与「非法值逐项退回默认」。
+
+- [ ] **Step 5: 运行确认通过**
+
+Run: `npm test && npm run typecheck`
+Expected: PASS（新增 8 例）
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/lib/config.ts tests/arch tests/lib/config.test.ts docs/configuration.md
+git commit -m "feat(vigil-todo): 配置契约与热更新矩阵、模块边界自动化守卫（规格 §16.3/§16.5）"
+```
+
+---
+
+### Task 24: 自验证强化（规格↔测试映射、doctor 扩展、八方面矩阵）
+
+**Files:**
+- Create: `tests/selfcheck/spec-coverage.test.ts`, `docs/quality-matrix.md`
+- Modify: `src/ui/panel.ts`（doctor 增四项）
+- Test: `tests/ui/panel.test.ts`（追加 doctor 断言）
+
+**Interfaces:**
+- Consumes: T1–T23
+- Produces:
+  - `renderDoctor(state, jobs, conflict, degraded?, extra?: { purgedRoots: number; retentionOverdue: number; orphanJobs: number })`
+  - `docs/quality-matrix.md`（8 方面 × 设计/实现/测试 的证据表）
+
+- [ ] **Step 1: 写失败测试 — 规格覆盖自检**
+
+```ts
+// tests/selfcheck/spec-coverage.test.ts
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { expect, it } from "vitest";
+
+const ROOT = new URL("../../", import.meta.url).pathname;
+const walk = (dir: string): string[] => {
+  const out: string[] = [];
+  for (const e of readdirSync(dir)) {
+    const p = join(dir, e);
+    if (statSync(p).isDirectory()) out.push(...walk(p));
+    else if (p.endsWith(".ts")) out.push(p);
+  }
+  return out;
+};
+
+it("规格 §13 的每个 F 编号都在测试文本中出现（规格与测试不脱节）", () => {
+  const spec = readFileSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"), "utf8");
+  const table = spec.slice(spec.indexOf("## 13. 验收用例"), spec.indexOf("## 14."));
+  const ids = [...new Set([...table.matchAll(/\bF(\d+)\b/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
+  expect(ids.length).toBeGreaterThanOrEqual(105);
+  const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
+  const missing = ids.filter((n) => !new RegExp(`\\bF${n}\\b`).test(corpus));
+  expect(missing).toEqual([]);
+});
+
+it("八方面矩阵文档存在且覆盖 8 行", () => {
+  const doc = readFileSync(join(ROOT, "docs/quality-matrix.md"), "utf8");
+  for (const k of ["性能", "容灾", "可自定义", "易用性", "可扩展性", "自验证", "清理", "强制中断"]) {
+    expect(doc).toContain(k);
+  }
+});
+```
+
+- [ ] **Step 2: 写失败测试 — doctor 扩展**
+
+追加到 `tests/ui/panel.test.ts`：
+
+```ts
+it("doctor 报 halted / purged / 超期 / 孤儿作业", () => {
+  const b = emptyBoard();
+  b.counters.halted = true;
+  b.tasks = [{ id: 1, subject: "old", status: "completed", statusSince: 1 }];
+  const text = renderDoctor(b, jobs(), false, undefined, { purgedRoots: 2, retentionOverdue: 1, orphanJobs: 3 });
+  expect(text).toContain("强制中断");
+  expect(text).toContain("2");
+  expect(text).toContain("超期");
+  expect(text).toContain("孤儿作业");
+});
+```
+
+- [ ] **Step 3: 运行确认失败**
+
+Run: `npm test -- tests/selfcheck tests/ui/panel.test.ts`
+Expected: FAIL — 文档缺失 / doctor 签名不匹配 / 若有 F 编号未覆盖会列出
+
+- [ ] **Step 4: 补齐 F 编号覆盖与 doctor**
+
+1. 按上一步列出的 `missing`，在**对应模块的测试文件**里补真实断言（不是加注释糊过去）。若某 F 编号确实无法自动化（例如 F102 文档结构自检），在该 Task 的测试里以文件扫描断言实现它。
+2. `renderDoctor` 增第五参 `extra`，输出四行：halted 状态、purged 链数、超期未清理任务数、孤儿作业数。
+3. 写 `docs/quality-matrix.md`：8 行 × 4 列（方面 / 设计条款 / 实现文件 / 测试文件与用例数），每格填**真实路径**，不得写"待补"。
+
+- [ ] **Step 5: 运行确认通过**
+
+Run: `npm test && npm run typecheck`
+Expected: PASS（全部；spec-coverage 的 missing 为空）
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add tests/selfcheck tests/ui/panel.test.ts src/ui/panel.ts docs/quality-matrix.md
+git commit -m "feat(vigil-todo): 规格↔测试映射自检、doctor 扩展与八方面证据矩阵（规格 §16.6）"
+```

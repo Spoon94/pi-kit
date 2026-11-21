@@ -7,7 +7,8 @@ import type { SpawnRequest } from "../jobs/spawn.js";
 import type { JobStore } from "../jobs/store.js";
 import type { VigilConfig } from "../lib/config.js";
 import { buildResult } from "./envelope.js";
-import { BgKillParamsSchema, BgRunParamsSchema, TodoParamsSchema, prepareTodoArguments } from "./schema.js";
+import { BgKillParamsSchema, BgListParamsSchema, BgRunParamsSchema, TodoParamsSchema, prepareTodoArguments } from "./schema.js";
+import type { TSchema } from "typebox";
 
 export function detectToolConflict(
   allTools: { name: string; sourceInfo?: { source?: string } }[], ownSource: string,
@@ -40,7 +41,7 @@ export interface ToolResultLike {
 }
 export interface ToolDef {
   name: string; label: string; description: string;
-  parameters: unknown;
+  parameters: TSchema;
   prepareArguments?: (args: unknown) => unknown;
   execute(params: Record<string, unknown>): Promise<ToolResultLike>;
 }
@@ -103,6 +104,11 @@ export function createTodoTool(deps: ToolDeps): ToolDef {
       if (mutated) {
         deps.commit(r.state);
         deps.appendEntry("rpiv-todo-state", result.details);
+        if (r.op.kind === "update" && p.status === "parked") {
+          // 规格 §7.2：park 在同一同步块内取消整条重试链
+          const roots = new Set(deps.jobs.all().filter((j) => j.taskId === p.id).map((j) => j.rootId));
+          for (const root of roots) deps.kill(root, "self");
+        }
       }
       return result;
     },
@@ -169,7 +175,7 @@ export function createBgListTool(deps: ToolDeps): ToolDef {
     name: "bg_list",
     label: "Background jobs",
     description: "List background jobs with status and exit codes.",
-    parameters: undefined,
+    parameters: BgListParamsSchema,
     async execute() {
       const jobs = deps.jobs.all();
       const text = jobs

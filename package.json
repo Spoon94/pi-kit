@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "keywords": ["pi-package"],
+  "files": ["extensions", "src", "docs", "README.md"],
   "pi": { "extensions": ["./extensions/vigil-todo.ts"] },
   "scripts": {
     "test": "vitest run",

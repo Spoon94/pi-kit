@@ -33,7 +33,11 @@ export function sweepRespawns(d: SweepDeps): number {
   for (const job of d.jobs.all()) {
     const dueBackoff = job.retryAt != null && job.retryAt <= d.now;
     const root = d.jobs.get(job.rootId);
-    const dueReverify = root?.pendingReverify === true && !root.finalized && job.id === root.id;
+    const hasReverifyJob = d.jobs.all().some((j) => j.rootId === job.rootId && j.staleReverifyOf != null);
+    const dueReverify = root?.pendingReverify === true && !root.finalized && job.id === root.id && !hasReverifyJob;
+    if (root?.pendingReverify === true && hasReverifyJob && !root.finalized && job.id === root.id) {
+      d.jobs.put({ ...root, pendingReverify: false });    // 重验 job 已存在 ⇒ 标记已完成使命
+    }
     if (!dueBackoff && !dueReverify) continue;
     if (!claim(runDir(job.cwd), job.rootId, "respawn", d.sessionId, d.now)) continue;
     const req: SpawnRequest = dueReverify

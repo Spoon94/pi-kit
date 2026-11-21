@@ -43,6 +43,7 @@ export const BgRunParamsSchema = Type.Object({
   command: Type.String(), label: Type.Optional(Type.String()), task_id: Type.Optional(Type.Number()),
 });
 export const BgKillParamsSchema = Type.Object({ job_id: Type.String() });
+export const BgListParamsSchema = Type.Object({});
 
 const isBag = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const tryParse = (s: string): unknown => { try { return JSON.parse(s); } catch { return undefined; } };

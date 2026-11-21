@@ -1,7 +1,7 @@
-# pi-kit · wip：todo + bg 融合设计方案
+# pi-kit · vigil-todo：todo + bg 融合设计方案
 
 > 状态：草案 v0.2（未实现）
-> 范围：`extensions/wip.ts` 一个扩展，取代 `@juicesharp/rpiv-todo` + `pi-bg-run`
+> 范围：`extensions/vigil-todo.ts` 一个扩展，取代 `@juicesharp/rpiv-todo` + `pi-bg-run`
 > 本文只谈设计与取舍，不含实现代码
 > P0 假设已验证完毕 → [`p0-findings.md`](./p0-findings.md)（Q1/Q4 推翻了 v0.1 的两处设计，已回写）
 
@@ -41,7 +41,7 @@ bg_run({task_id:1, command:"npm test -- parser", label:"parser tests"})
 作业结束时模型收到（自动回填已完成）：
 
 ```
-[wip] job done — parser tests [bg_x1] exit 0 · 12s
+[vigil-todo] job done — parser tests [bg_x1] exit 0 · 12s
 task #1 实现 parser — auto-completed ✓ (evidence: bg_x1 exit 0)
 log tail (last 20/412 lines):
    ✓ 34 passed (34)
@@ -56,16 +56,16 @@ board 1/2 done · #2 跑全量回归 (pending, unblocked)
 面板（一个 widget，不再是两个抢位置）：
 
 ```
-● wip 1/2 · ✶ 1 job
+● vigil-todo 1/2 · ✶ 1 job
 ├─ ◐ #1 实现 parser (writing parser) · ✶ 12s bg_x1
 └─ ○ #2 跑全量回归 · ⛓ #1 · verify:npm test
 ```
 
-- 折叠键（默认 `ctrl+shift+t`）→ 一行 `● wip 1/2 · ✶ 1 job`
+- 折叠键（默认 `ctrl+shift+t`）→ 一行 `● vigil-todo 1/2 · ✶ 1 job`
 - 溢出 → `+2 more (1 completed, 1 pending)`，先丢 completed
 - 完成行本轮可见、下一轮自动隐藏，空列表自动卸载
-- `/todos` 纯文本全量、`/bg` 作业面板（保留 `k` 两次确认、Enter 看 tail）、`/wip` 统一入口
-- 选项一行提示：`wip 1/2 · bad: 全量回归?` 不做——状态栏只放数字与作业数，避免噪音
+- `/todos` 纯文本全量、`/bg` 作业面板（保留 `k` 两次确认、Enter 看 tail）、`/vigil-todo` 统一入口
+- 选项一行提示：`vigil-todo 1/2 · bad: 全量回归?` 不做——状态栏只放数字与作业数，避免噪音
 
 ### 1.3 错误信息必须是「下一步该怎么做」
 
@@ -152,7 +152,7 @@ type Job = {
 ## 3. 架构
 
 ```
-extensions/wip.ts            注册面：工具 / 命令 / 快捷键 / 事件
+extensions/vigil-todo.ts            注册面：工具 / 命令 / 快捷键 / 事件
   ├── tool/                  参数 schema、响应信封、渲染
   ├── board/                 任务状态机（纯函数 reducer + 不变量）
   │     reducer.ts  invariants.ts  selectors.ts
@@ -308,7 +308,7 @@ boundary handler: wakeLatch 已置位 → 直接返回 undefined（不再请求�
 ### 5.4 消息格式（既是通知，也是压缩后的上下文）
 
 ```
-[wip] job done — parser tests [bg_x1] exit 0 · 12s
+[vigil-todo] job done — parser tests [bg_x1] exit 0 · 12s
 task #1 实现 parser — auto-completed ✓ (evidence: bg_x1 exit 0 @ 12:31:02)
 log tail (last 20/412 lines):
 <尾部 ≤ 20 行、单行截断到 200 字符>
@@ -337,9 +337,9 @@ board 1/2 done · #2 跑全量回归 (pending, unblocked)
 ### 6.2 人类侧
 
 - 一个面板，一个折叠键，一个溢出摘要——与现在 rpiv-todo 的观感一致，只是多了作业那一列。
-- `/wip`（总览）/`/todos`（纯文本）/`/bg`（作业面板，含 tail 与 kill）三个入口都保留。
-- `/wip doctor`：一条命令列出「无绑定作业的 in_progress」「evidence 过期」「sidecar 与快照不一致」「孤儿作业」，用于排障。
-- 配置分层：`~/.config/pi-kit/config.json`（首选）→ `pi.getSettings().wip` → `pi.getSettings().bgRun`（旧键兼容）→ 默认值。**绝不读 `ctx.settings`**——P0 Q2 证实该字段不存在。
+- `/vigil-todo`（总览）/`/todos`（纯文本）/`/bg`（作业面板，含 tail 与 kill）三个入口都保留。
+- `/vigil-todo doctor`：一条命令列出「无绑定作业的 in_progress」「evidence 过期」「sidecar 与快照不一致」「孤儿作业」，用于排障。
+- 配置分层：`~/.config/pi-kit/config.json`（首选）→ `pi.getSettings().vigilTodo` → `pi.getSettings().bgRun`（旧键兼容）→ 默认值。**绝不读 `ctx.settings`**——P0 Q2 证实该字段不存在。
 
 ### 6.3 默认值（都不需要改）
 
@@ -440,8 +440,8 @@ board 1/2 done · #2 跑全量回归 (pending, unblocked)
 | 工具名 | 保留 `todo` / `bg_run` / `bg_list` / `bg_kill`，旧 transcript、权限条目全部可用 |
 | 快照格式 | 继续写 `rpiv-todo-state`，字段是超集；旧包的 replay 校验忽略未知键，双向可读 |
 | 作业 sidecar | 继续用 `/tmp/bg-run/<hash>/jobs.json`，字段超集；首次启动补 `exitCodeKnown/reconcile/sessionId` |
-| 配置 | 先读 `~/.config/pi-kit/config.json`，回落到 `pi.getSettings().bgRun`（旧键）与 `wip` |
-| 卸载顺序 | 停 pi → **必须移除两个旧包**（不是可选）→ 装 `pi-kit` → `/reload` → 跑验收 → `/wip doctor`。原因：同名工具先注册者胜，追加安装会被静默忽略（P0 Q1） |
+| 配置 | 先读 `~/.config/pi-kit/config.json`，回落到 `pi.getSettings().bgRun`（旧键）与 `vigil-todo` |
+| 卸载顺序 | 停 pi → **必须移除两个旧包**（不是可选）→ 装 `pi-kit` → `/reload` → 跑验收 → `/vigil-todo doctor`。原因：同名工具先注册者胜，追加安装会被静默忽略（P0 Q1） |
 | 回滚 | 重装两个旧包即可；新快照旧包能读 |
 
 ---
@@ -485,7 +485,7 @@ board 1/2 done · #2 跑全量回归 (pending, unblocked)
 | P1 | `board/` + `tool/`（R1-R9、`verify`、`isError`、预检跳过嵌套调用） | F1/F2/F3/F9 通过，可替代 rpiv-todo |
 | P2 | `jobs/`（事件优先监控、`exitCodeKnown`、原子写、pid 校验、定向通知） | F5/F10/F12 通过 |
 | P3 | `bind/` + `wake/`（绑定、回填、四通道、预算、补偿） | F4/F6/F7/F8 通过 |
-| P4 | `ui/`（统一面板、列配置、`/wip doctor`、`/bg` 面板） | 观感对齐 rpiv-todo |
+| P4 | `ui/`（统一面板、列配置、`/vigil-todo doctor`、`/bg` 面板） | 观感对齐 rpiv-todo |
 | P5 | 性能基准 + 迁移 + 文档 | §8.3 全部达标 |
 
 ---

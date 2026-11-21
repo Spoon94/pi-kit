@@ -60,6 +60,7 @@ defer     todo({action:"update", id, defer:{untilJob:"bg_x2", reason:"…"}})
 | `maxTurns` | 50 |
 | `maxConcurrentJobs` | 10 |
 | `completedTtlMs` | 7 天 |
+| `taskRetentionMs` | 0（关闭自动清理） |
 | `tailLines` / `maxTailBytes` | 20 / 8192 |
 | `maxWidgetLines` | 12 |
 | `heartbeatStaleMs` / `hungSuspectMs` | 15s / 10min |

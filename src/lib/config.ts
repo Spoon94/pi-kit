@@ -18,6 +18,27 @@ export const DEFAULTS: VigilConfig = {
 
 type Bag = Record<string, unknown>;
 const isBag = (v: unknown): v is Bag => typeof v === "object" && v !== null && !Array.isArray(v);
+
+export const CONFIG_KEYS: Record<keyof VigilConfig, { type: "int" | "int[]" | "string"; min?: number; reload: boolean; default: unknown }> = {
+  wipLimit: { type: "int", min: 1, reload: false, default: DEFAULTS.wipLimit },
+  retries: { type: "int", min: 0, reload: false, default: DEFAULTS.retries },
+  retryDelaysMs: { type: "int[]", min: 0, reload: false, default: DEFAULTS.retryDelaysMs },
+  staleReverify: { type: "int", min: 0, reload: false, default: DEFAULTS.staleReverify },
+  maxTurns: { type: "int", min: 1, reload: false, default: DEFAULTS.maxTurns },
+  maxConcurrentJobs: { type: "int", min: 1, reload: false, default: DEFAULTS.maxConcurrentJobs },
+  completedTtlMs: { type: "int", min: 1, reload: false, default: DEFAULTS.completedTtlMs },
+  taskRetentionMs: { type: "int", min: 0, reload: false, default: DEFAULTS.taskRetentionMs },
+  tailLines: { type: "int", min: 1, reload: false, default: DEFAULTS.tailLines },
+  maxTailBytes: { type: "int", min: 1, reload: false, default: DEFAULTS.maxTailBytes },
+  maxWidgetLines: { type: "int", min: 3, reload: false, default: DEFAULTS.maxWidgetLines },
+  collapseKey: { type: "string", reload: true, default: DEFAULTS.collapseKey },
+  notifyRetryMs: { type: "int", min: 1, reload: false, default: DEFAULTS.notifyRetryMs },
+  heartbeatStaleMs: { type: "int", min: 1, reload: false, default: DEFAULTS.heartbeatStaleMs },
+  hungSuspectMs: { type: "int", min: 1, reload: false, default: DEFAULTS.hungSuspectMs },
+  wakeMergeMs: { type: "int", min: 0, reload: false, default: DEFAULTS.wakeMergeMs },
+  adoptRecheckMs: { type: "int", min: 1, reload: false, default: DEFAULTS.adoptRecheckMs },
+};
+
 const posInt = (v: unknown, min: number): number | undefined =>
   typeof v === "number" && Number.isInteger(v) && v >= min ? v : undefined;
 

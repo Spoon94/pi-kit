@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULTS, resolveConfig } from "../../src/lib/config.js";
+import { CONFIG_KEYS, DEFAULTS, resolveConfig } from "../../src/lib/config.js";
 
 describe("resolveConfig", () => {
   it("空来源全部走默认值", () => {
@@ -37,4 +37,30 @@ describe("resolveConfig", () => {
   it("collapseKey 允许 off 哨兵", () => {
     expect(resolveConfig({ file: { collapseKey: "off" } }).collapseKey).toBe("off");
   });
+});
+
+it("CONFIG_KEYS 覆盖 VigilConfig 全部键，无遗漏无多余", () => {
+  expect(Object.keys(CONFIG_KEYS).sort()).toEqual(Object.keys(DEFAULTS).sort());
+});
+
+it("每个键的 default 与 DEFAULTS 一致（文档不会漂移）", () => {
+  for (const [k, meta] of Object.entries(CONFIG_KEYS)) {
+    expect(meta.default).toEqual((DEFAULTS as unknown as Record<string, unknown>)[k]);
+  }
+});
+
+it("只有 collapseKey 需要 reload", () => {
+  const needReload = Object.entries(CONFIG_KEYS).filter(([, m]) => m.reload).map(([k]) => k);
+  expect(needReload).toEqual(["collapseKey"]);
+});
+
+it("taskRetentionMs 默认 0（自动删任务默认关闭）", () => {
+  expect(DEFAULTS.taskRetentionMs).toBe(0);
+  expect(resolveConfig({}).taskRetentionMs).toBe(0);
+});
+
+it("逐键非法值只影响该键，其他键仍生效", () => {
+  const c = resolveConfig({ file: { wipLimit: -5, maxTurns: 7 } });
+  expect(c.wipLimit).toBe(DEFAULTS.wipLimit);
+  expect(c.maxTurns).toBe(7);
 });

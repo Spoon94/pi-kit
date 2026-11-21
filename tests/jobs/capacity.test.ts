@@ -9,7 +9,7 @@ import type { Job } from "../../src/jobs/types.js";
 const j = (id: string, o: Partial<Job> = {}): Job => ({
   id, label: id, command: "true", logPath: `/tmp/${id}.log`, cwd: "/tmp", pid: 1,
   status: "failed", exitCode: 1, exitCodeKnown: true, startedAt: 1, endedAt: 2,
-  fpVerdict: "fresh", interferers: [], overlapUnfinished: [], rootId: id, attempt: 1,
+  fpVerdict: "fresh", interferers: [], rootId: id, attempt: 1,
   evidenceApplied: false, notifyState: "pending", ...o,
 });
 

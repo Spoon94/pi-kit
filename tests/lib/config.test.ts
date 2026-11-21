@@ -4,7 +4,7 @@ import { CONFIG_KEYS, DEFAULTS, resolveConfig } from "../../src/lib/config.js";
 describe("resolveConfig", () => {
   it("空来源全部走默认值", () => {
     expect(resolveConfig({})).toEqual(DEFAULTS);
-    expect(DEFAULTS.wipLimit).toBe(3);
+    expect(DEFAULTS.wipLimit).toBe(1);
     expect(DEFAULTS.retries).toBe(3);
     expect(DEFAULTS.retryDelaysMs).toEqual([0, 30_000, 120_000]);
     expect(DEFAULTS.maxTurns).toBe(50);

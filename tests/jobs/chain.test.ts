@@ -10,7 +10,7 @@ const store = () => createJobStore(mkdtempSync(join(tmpdir(), "vigil-chain-")));
 const j = (id: string, o: Partial<Job> = {}): Job => ({
   id, label: id, command: "true", logPath: `/tmp/${id}.log`, cwd: "/tmp", pid: 1,
   status: "failed", exitCode: 1, exitCodeKnown: true, startedAt: 1, endedAt: 2,
-  fpVerdict: "fresh", interferers: [], overlapUnfinished: [], rootId: "R", attempt: 1,
+  fpVerdict: "fresh", interferers: [], rootId: "R", attempt: 1,
   evidenceApplied: false, notifyState: "pending", ...o,
 });
 

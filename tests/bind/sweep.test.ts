@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, expect, it } from "vitest";
-import { catchUpScan, sweepAll, sweepDefers, sweepRespawns, type SweepDeps } from "../../src/bind/sweep.js";
+import { catchUpScan, sweepAll, sweepRespawns, type SweepDeps } from "../../src/bind/sweep.js";
 import { createBoardStore } from "../../src/board/store.js";
 import { emptyBoard } from "../../src/board/types.js";
 import { createJobStore } from "../../src/jobs/store.js";
@@ -15,38 +15,16 @@ let jobs: ReturnType<typeof createJobStore>;
 const j = (id: string, o: Partial<Job> = {}): Job => ({
   id, label: id, command: "true", logPath: `/tmp/${id}.log`, cwd: "/tmp", pid: 1,
   status: "failed", exitCode: 1, exitCodeKnown: true, startedAt: 1, endedAt: 2,
-  fpVerdict: "fresh", interferers: [], overlapUnfinished: [], rootId: id, attempt: 1,
+  fpVerdict: "fresh", interferers: [], rootId: id, attempt: 1,
   taskId: 1, sessionId: "S", evidenceApplied: false, notifyState: "pending", ...o,
 });
 
 beforeEach(() => {
   boards = createBoardStore(); jobs = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_1u96oh3p}}")));
   const b = emptyBoard();
-  b.tasks = [
-    { id: 1, subject: "a", status: "in_progress", inProgressSince: 0 },
-    { id: 2, subject: "b", status: "pending", defer: { untilRoot: "R", reason: "冲突", at: 1 } },
-  ];
-  b.nextId = 3; boards.commit("S", b);
+  b.tasks = [{ id: 1, subject: "a", status: "in_progress", inProgressSince: 0 }];
+  b.nextId = 2; boards.commit("S", b);
   d = { boards, jobs, cfg: DEFAULTS, now: 1000, sessionId: "S", respawn: () => ({ ok: true }), notify: () => {}, isIdle: () => true };
-});
-
-it("链未终结时 defer 不释放（F18）", () => {
-  jobs.put(j("R", { status: "failed", retryAt: 5000 }));
-  expect(sweepDefers(d)).toBe(0);
-  expect(boards.get("S").tasks[1].defer).toBeDefined();
-});
-
-it("整链终结后释放 defer（F18）", () => {
-  jobs.put(j("R", { attempt: 4 }));
-  expect(sweepDefers(d)).toBe(1);
-  expect(boards.get("S").tasks[1].defer).toBeUndefined();
-});
-
-it("untilRoot 无记录 → 释放 + notify（F34）", () => {
-  let note = "";
-  d.notify = (n) => { note = n; };
-  expect(sweepDefers(d)).toBe(1);
-  expect(note).toContain("R");
 });
 
 it("retryAt 到期即 respawn（F45）", () => {
@@ -104,12 +82,17 @@ it("未投影的 finalized 链优先入扫描集（F84）", () => {
   expect(catchUpScan(d)).toEqual(["R"]);
 });
 
-it("sweepAll 汇总三项", () => {
+it("sweepAll 汇总 respawn / catch-up / retention", () => {
   jobs.put(j("R", { attempt: 4, finalized: true, evidenceApplied: true, notifyState: "acked" }));
   const r = sweepAll(d);
-  expect(r.defersReleased).toBe(1);
   expect(r.respawned).toBe(0);
   expect(r.catchUp).toEqual([]);
+  expect(r.retained).toBe(0);
+});
+
+it("purged 链不再补发（R19）", () => {
+  jobs.put(j("R", { finalized: true, evidenceApplied: true, notifyState: "pending", purged: true }));
+  expect(catchUpScan(d)).toEqual([]);
 });
 
 it("respawn 抛错 → 不重试、清退避、任务 parked(spawn failed)（F32）", () => {
@@ -124,13 +107,4 @@ it("respawn 抛错 → 不重试、清退避、任务 parked(spawn failed)（F32
 it("投递失败后由单 timer 在 10min 后补偿送达（F76）", () => {
   jobs.put(j("R", { finalized: true, evidenceApplied: true, notifyState: "sent", notifySentAt: 1000 }));
   expect(catchUpScan({ ...d, now: 1000 + DEFAULTS.notifyRetryMs + 1 })).toEqual(["R"]);
-});
-
-it("两会话同时见 pendingReverify 只驱动一次重验（F90）", () => {
-  jobs.put(j("R", { status: "completed", exitCode: 0, pendingReverify: true, fpVerdict: "stale" }));
-  let calls = 0;
-  d.respawn = () => { calls++; return { ok: true }; };
-  sweepRespawns(d);
-  sweepRespawns({ ...d, sessionId: "S2" });
-  expect(calls).toBe(1);
 });

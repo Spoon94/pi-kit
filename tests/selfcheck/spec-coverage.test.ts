@@ -13,13 +13,22 @@ const walk = (dir: string): string[] => {
   return out;
 };
 
+// §17.2 范围收缩后已废的验收编号（defer / 收养 / 心跳 / 认领 / 两集合）
+// F96/F99 是 §17.2 列表漏列的心跳/收养用例，随模块删除，一并排除。
+const RETIRED = new Set([
+  18, 27, 28, 34, 39, 62, 78,
+  88, 92, 93, 94, 95, 96, 97, 98, 99, 100, 104, 105,
+  90, 101, 103,
+  56, 57, 63, 75, 79,
+]);
+
 it("规格 §13 的每个 F 编号都在测试文本中出现（规格与测试不脱节）", () => {
   const spec = readFileSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"), "utf8");
   const table = spec.slice(spec.indexOf("## 13. 验收用例"), spec.indexOf("## 14."));
   const ids = [...new Set([...table.matchAll(/\bF(\d+)\b/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
   expect(ids.length).toBeGreaterThanOrEqual(105);
   const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
-  const missing = ids.filter((n) => !new RegExp(`\\bF${n}\\b`).test(corpus));
+  const missing = ids.filter((n) => !RETIRED.has(n) && !new RegExp(`\\bF${n}\\b`).test(corpus));
   expect(missing).toEqual([]);
 });
 

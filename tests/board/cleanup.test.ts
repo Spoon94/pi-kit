@@ -8,8 +8,6 @@ import { emptyBoard, type BoardState, type Task } from "../../src/board/types.js
 import type { JobFacts, RuleContext } from "../../src/board/invariants.js";
 import { createJobStore } from "../../src/jobs/store.js";
 import type { Job } from "../../src/jobs/types.js";
-import { adoptableRoots } from "../../src/bind/adopt.js";
-import { createBoardStore } from "../../src/board/store.js";
 import { DEFAULTS } from "../../src/lib/config.js";
 
 const facts = (running: number[] = [], backoff: number[] = []): JobFacts => ({
@@ -56,11 +54,6 @@ it("任何 scope 下绑 running 作业的任务被跳过并列出（R18 部分�
   expect(p.skipped).toEqual([1]);
 });
 
-it("adoptedAway 冻结任务允许被清理（R17 对 clear 放行）", () => {
-  const s = b([t(1, { status: "completed", metadata: { adoptedAway: { session: "B" } } })]);
-  expect(planCleanup(s, "completed", undefined, facts()).remove).toEqual([1]);
-});
-
 it("clear 经 reducer 时默认不再全清（防回归）", () => {
   let s = applyMutation(emptyBoard(), { action: "create", subject: "a" }, ctx()).state;
   s = applyMutation(s, { action: "update", id: 1, status: "in_progress" }, ctx()).state;
@@ -85,7 +78,7 @@ it("清理保留 counters（不得重置 turnsUsed 绕过保险丝）", () => {
 const job = (id: string, o: Partial<Job> = {}): Job => ({
   id, label: id, command: "true", logPath: "/tmp/a.log", cwd: "/tmp", pid: 1,
   status: "completed", exitCode: 0, exitCodeKnown: true, startedAt: 1, endedAt: 2,
-  fpVerdict: "fresh", interferers: [], overlapUnfinished: [], rootId: id, attempt: 1,
+  fpVerdict: "fresh", interferers: [], rootId: id, attempt: 1,
   taskId: 1, sessionId: "S", evidenceApplied: false, finalized: true,
   finalResult: { ok: true, note: "done", trigger: "external", at: 2 }, notifyState: "pending", ...o,
 });
@@ -96,15 +89,6 @@ it("markPurged 标记绑定链的 root（R19）", () => {
   const roots = markPurged(jobs, [1], [t(1, { status: "completed", jobs: ["R"] })]);
   expect(roots).toEqual(["R"]);
   expect(jobs.get("R")?.purged).toBe(true);
-});
-
-it("purged 链不再被收养（修「清了又回来」）", () => {
-  const dir = mkdtempSync(join(tmpdir(), "{{SECRET_c1nsk0qv}}"));
-  const jobs = createJobStore(dir); const boards = createBoardStore();
-  boards.commit("NEW", emptyBoard());
-  jobs.put(job("R", { sessionId: "OLD", purged: true }));
-  expect(adoptableRoots({ boards, jobs, cfg: DEFAULTS, now: 100_000, sessionId: "NEW", dir,
-    readOldBoard: () => emptyBoard(), notify: () => {} })).toEqual([]);
 });
 
 it("retention 只候选 completed/deleted，绝不包含 parked", () => {

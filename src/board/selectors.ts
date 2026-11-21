@@ -8,7 +8,7 @@ export const wipCount = (state: BoardState): number =>
 export function selectNext(state: BoardState, wipLimit: number, capacityFull: boolean): Task | undefined {
   if (capacityFull || wipCount(state) >= wipLimit) return undefined;
   return state.tasks
-    .filter((t) => t.status === "pending" && !t.park && !t.defer
+    .filter((t) => t.status === "pending" && !t.park
       && (t.blockedBy ?? []).every((id) => { const d = state.tasks.find((x) => x.id === id); return d !== undefined && settled(d.status); }))
     .sort((a, b) => a.id - b.id)[0];
 }

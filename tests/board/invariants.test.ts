@@ -22,9 +22,9 @@ describe("转移表", () => {
 });
 
 describe("R1 WIP 上限", () => {
-  it("已满时拒绝第四个 in_progress（F1）", () => {
-    const s = board([t(1, { status: "in_progress" }), t(2, { status: "in_progress" }), t(3, { status: "in_progress" }), t(4)]);
-    expect(checkStructure(s, s.tasks[3], { id: 4, status: "in_progress" }, ctx())).toMatch(/WIP full \(3\/3\)/);
+  it("已满时拒绝第二个 in_progress（F1）", () => {
+    const s = board([t(1, { status: "in_progress" }), t(2)]);
+    expect(checkStructure(s, s.tasks[1], { id: 2, status: "in_progress" }, ctx(1))).toMatch(/WIP full \(1\/1\)/);
   });
   it("parked 不占位（F19）", () => {
     const s = board([t(1, { status: "parked", park: { reason: "r", at: 1, from: "pending" } }), t(2)]);
@@ -43,43 +43,15 @@ describe("R4 依赖", () => {
   });
 });
 
-describe("R9/R13 park 与 defer", () => {
-  it("deferred 不许直接开工（F28）", () => {
-    const s = board([t(1, { defer: { untilRoot: "bg_a", reason: "r", at: 1 } })]);
-    expect(checkStructure(s, s.tasks[0], { id: 1, status: "in_progress" }, ctx())).toMatch(/deferred → bg_a/);
-  });
-  it("parked 施加 defer 被拒并给两步解法（F39）", () => {
-    const s = board([t(1, { status: "parked", park: { reason: "r", at: 1, from: "pending" } })]);
-    expect(checkStructure(s, s.tasks[0], { id: 1, defer: { untilJob: "bg_a", reason: "r" } }, ctx()))
-      .toMatch(/status:"pending"/);
-  });
-  it("deferred 施加 park 被拒并给两步解法（F39）", () => {
-    const s = board([t(1, { defer: { untilRoot: "bg_a", reason: "r", at: 1 } })]);
-    expect(checkStructure(s, s.tasks[0], { id: 1, status: "parked", reason: "r" }, ctx())).toMatch(/defer:null/);
-  });
-});
-
-describe("R14 让位与 defer 前置", () => {
+describe("R14 让位前置", () => {
   it("有 running 作业时让位被拒（F54）", () => {
     const s = board([t(1, { status: "in_progress" })]);
-    expect(checkStructure(s, s.tasks[0], { id: 1, status: "pending" }, ctx(3, { hasRunning: () => true })))
-      .toMatch(/cannot yield or defer/);
-  });
-  it("有 running 作业时施加 defer 同样被拒（F62）", () => {
-    const s = board([t(1, { status: "in_progress" })]);
-    expect(checkStructure(s, s.tasks[0], { id: 1, defer: { untilJob: "bg_b", reason: "r" } }, ctx(3, { hasRunning: () => true })))
-      .toMatch(/cannot yield or defer/);
+    expect(checkStructure(s, s.tasks[0], { id: 1, status: "pending" }, ctx(1, { hasRunning: () => true })))
+      .toMatch(/cannot yield/);
   });
   it("有退避链时让位被拒", () => {
     const s = board([t(1, { status: "in_progress" })]);
-    expect(checkStructure(s, s.tasks[0], { id: 1, status: "pending" }, ctx(3, { hasBackoff: () => true })))
-      .toMatch(/cannot yield or defer/);
-  });
-});
-
-describe("R17 移交冻结", () => {
-  it("adoptedAway 任务拒绝一切变更（F97）", () => {
-    const s = board([t(1, { metadata: { adoptedAway: { session: "sess-B" } } })]);
-    expect(checkStructure(s, s.tasks[0], { id: 1, status: "in_progress" }, ctx())).toMatch(/sess-B/);
+    expect(checkStructure(s, s.tasks[0], { id: 1, status: "pending" }, ctx(1, { hasBackoff: () => true })))
+      .toMatch(/cannot yield/);
   });
 });

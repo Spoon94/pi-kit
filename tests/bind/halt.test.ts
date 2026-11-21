@@ -10,7 +10,6 @@ import { createJobStore } from "../../src/jobs/store.js";
 import type { Job } from "../../src/jobs/types.js";
 import { DEFAULTS } from "../../src/lib/config.js";
 import { tryDeliver } from "../../src/wake/deliver.js";
-import { adoptableRoots } from "../../src/bind/adopt.js";
 import { catchUpScan, sweepRespawns } from "../../src/bind/sweep.js";
 
 let boards: ReturnType<typeof createBoardStore>;
@@ -20,7 +19,7 @@ let killed: string[];
 const j = (id: string, o: Partial<Job> = {}): Job => ({
   id, label: id, command: "sleep 99", logPath: "/tmp/a.log", cwd: "/tmp", pid: 999_999,
   status: "running", exitCode: null, exitCodeKnown: false, startedAt: 1, endedAt: null,
-  fpVerdict: "unknown", interferers: [], overlapUnfinished: [], rootId: id, attempt: 1,
+  fpVerdict: "unknown", interferers: [], rootId: id, attempt: 1,
   taskId: 1, sessionId: "S", evidenceApplied: false, notifyState: "pending", ...o,
 });
 
@@ -94,13 +93,6 @@ it("halted 时 catchUpScan 为空（复活防护）", () => {
   jobs.put(j("A", { status: "completed", exitCode: 0, endedAt: 2, finalized: true, evidenceApplied: true, notifyState: "sent", notifySentAt: 0 }));
   halt(d);
   expect(catchUpScan({ boards, jobs, cfg: DEFAULTS, now: 900_000, sessionId: "S", respawn: () => ({ ok: true }), notify: () => {}, isIdle: () => true })).toEqual([]);
-});
-
-it("halted 时不收养孤儿（复活防护）", () => {
-  const dir = mkdtempSync(join(tmpdir(), "{{SECRET_h2q7w9ae}}"));
-  jobs.put(j("ORPH", { sessionId: "OLD", status: "completed", exitCode: 0, endedAt: 2, finalized: true }));
-  halt(d);
-  expect(adoptableRoots({ boards, jobs, cfg: DEFAULTS, now: 100_000, sessionId: "S", dir, readOldBoard: () => emptyBoard(), notify: () => {} })).toEqual([]);
 });
 
 it("resume 解除 halted 但不重置 turnsUsed（不得绕过保险丝）", () => {

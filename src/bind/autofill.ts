@@ -39,7 +39,7 @@ export function autofillJob(jobId: string, d: AutofillDeps): { action: AutofillA
 
   const fp = verdictAt(job, d.jobs);
   const cls = classifyOverlap(job, d.jobs);
-  d.jobs.put({ ...job, fpVerdict: fp, interferers: cls.interferers, overlapUnfinished: cls.overlapUnfinished });
+  d.jobs.put({ ...job, fpVerdict: fp, interferers: cls.interferers });
 
   const ok = job.exitCodeKnown && job.exitCode === 0 && job.status === "completed";
   const ev: Evidence = {

@@ -21,7 +21,7 @@
 
 | 键 | 类型 | 最小 | 默认 | 生效时机 |
 |---|---|---|---|---|
-| `wipLimit` | int | 1 | 3 | 即时（每次 WIP 判定） |
+| `wipLimit` | int | 1 | 1 | 即时（每次 WIP 判定） |
 | `retries` | int | 0 | 3 | 即时（下次重试判定；总尝试 = 1 + retries） |
 | `retryDelaysMs` | int[] | 0（每项） | `[0, 30000, 120000]` | 即时（下次退避调度） |
 | `staleReverify` | int | 0 | 1 | 即时（下次 stale 判定） |
@@ -34,10 +34,7 @@
 | `maxWidgetLines` | int | 3 | 12 | 即时（下次渲染） |
 | `collapseKey` | string | — | `ctrl+shift+t` / `off` | **需 `/reload`**（快捷键只注册一次） |
 | `notifyRetryMs` | int | 1 | 600000（10 分钟） | 即时（下次补偿扫描） |
-| `heartbeatStaleMs` | int | 1 | 15000（15 秒） | 即时（下次活跃判定） |
-| `hungSuspectMs` | int | 1 | 600000（10 分钟） | 即时（下次挂死判定） |
 | `wakeMergeMs` | int | 0 | 250 | 即时（下次唤醒合并窗口） |
-| `adoptRecheckMs` | int | 1 | 20000（20 秒） | 即时（下次 session_start 复查） |
 
 ## `taskRetentionMs` 为什么默认 0
 
@@ -49,7 +46,7 @@
 
 ```json
 {
-  "wipLimit": 2,
+  "wipLimit": 1,
   "retries": 2,
   "maxTurns": 30,
   "taskRetentionMs": 604800000,

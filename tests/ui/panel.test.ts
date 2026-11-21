@@ -37,11 +37,6 @@ it("parked reason 独占缩进行（F25）", () => {
   expect(rows.some((r) => r.includes("└─ 公开 API 需拍板"))).toBe(true);
 });
 
-it("deferred 用 ⏸ 且显示 untilRoot", () => {
-  const s = b([{ id: 1, subject: "d", status: "pending", defer: { untilRoot: "bg_x", reason: "冲突", at: 1 } }]);
-  expect(renderPanel(s, jobs(), DEFAULTS).some((r) => r.includes("⏸") && r.includes("bg_x"))).toBe(true);
-});
-
 it("超预算优先保 parked，截断给出 +N more parked（F25）", () => {
   const tasks: Task[] = Array.from({ length: 10 }, (_, i) => ({
     id: i + 1, subject: `p${i}`, status: "parked" as const, park: { reason: `r${i}`, at: 1, from: "pending" as const },

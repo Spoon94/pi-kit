@@ -1,9 +1,7 @@
 import type { BoardStore } from "../board/store.js";
 import { applyCleanup, markPurged, planCleanup, retentionCandidates } from "../board/cleanup.js";
-import { chainTerminated } from "../jobs/chain.js";
-import { claim, release } from "../jobs/claims.js";
 import type { SpawnRequest } from "../jobs/spawn.js";
-import { runDir, type JobStore } from "../jobs/store.js";
+import type { JobStore } from "../jobs/store.js";
 import type { VigilConfig } from "../lib/config.js";
 import { projectFinal } from "./finalize.js";
 
@@ -12,21 +10,6 @@ export interface SweepDeps {
   respawn(req: SpawnRequest): { ok: boolean };
   notify(note: string): void;
   isIdle(): boolean;
-}
-
-export function sweepDefers(d: SweepDeps): number {
-  const board = d.boards.get(d.sessionId);
-  let released = 0;
-  const tasks = board.tasks.map((t) => {
-    if (!t.defer) return t;
-    const root = d.jobs.get(t.defer.untilRoot);
-    if (root && !chainTerminated(d.jobs, t.defer.untilRoot)) return t;
-    if (!root) d.notify(`defer 目标 ${t.defer.untilRoot} 已无记录，已释放 #${t.id}（repair）`);
-    released++;
-    const next = { ...t }; delete next.defer; return next;
-  });
-  if (released > 0) d.boards.commit(d.sessionId, { ...board, tasks });
-  return released;
 }
 
 export function sweepRespawns(d: SweepDeps): number {
@@ -41,7 +24,6 @@ export function sweepRespawns(d: SweepDeps): number {
       d.jobs.put({ ...root, pendingReverify: false });    // 重验 job 已存在 ⇒ 标记已完成使命
     }
     if (!dueBackoff && !dueReverify) continue;
-    if (!claim(runDir(job.cwd), job.rootId, "respawn", d.sessionId, d.now)) continue;
     const req: SpawnRequest = dueReverify
       ? { command: job.command, cwd: job.cwd, taskId: job.taskId, sessionId: job.sessionId,
           rootId: job.rootId, retryOf: job.id, attempt: job.attempt, staleReverifyOf: job.id }
@@ -67,7 +49,6 @@ export function sweepRespawns(d: SweepDeps): number {
       d.jobs.put({ ...cur, pendingReverify: false });     // 额度尽/无槽 ⇒ 不悬置
       if (job.sessionId === d.sessionId) parkTask(d, job.taskId, "无空闲槽位重验");
     }
-    release(runDir(job.cwd), job.rootId, "respawn");
   }
   d.jobs.save();
   return n;
@@ -94,9 +75,10 @@ export function catchUpScan(d: SweepDeps): string[] {
 
 export function sweepAll(d: SweepDeps) {
   for (const id of catchUpScan(d)) projectFinal(id, d.jobs, d.boards, d.sessionId, d.now);
-  const result = { defersReleased: sweepDefers(d), respawned: sweepRespawns(d), catchUp: catchUpScan(d) };
-  applyRetention(d);
-  return result;
+  const respawned = sweepRespawns(d);
+  const catchUp = catchUpScan(d);
+  const retained = applyRetention(d);
+  return { respawned, catchUp, retained };
 }
 
 /** 无 job 记录的终结路径：失败后直接把绑定任务 parked。 */
@@ -116,11 +98,11 @@ function parkTask(d: SweepDeps, taskId: number | undefined, reason: string): voi
 }
 
 /** taskRetentionMs > 0 时清 completed/deleted，走与手动 settled 相同路径（§16.7.5）。 */
-function applyRetention(d: SweepDeps): void {
-  if (!d.cfg.taskRetentionMs || d.cfg.taskRetentionMs <= 0) return;
+function applyRetention(d: SweepDeps): number {
+  if (!d.cfg.taskRetentionMs || d.cfg.taskRetentionMs <= 0) return 0;
   const board = d.boards.get(d.sessionId);
   const candidates = retentionCandidates(board, d.cfg.taskRetentionMs, d.now);
-  if (!candidates.length) return;
+  if (!candidates.length) return 0;
   const facts = {
     hasRunning: (taskId: number) => d.jobs.all().some((j) => j.taskId === taskId && j.status === "running"),
     hasBackoff: (taskId: number) => d.jobs.all().some((j) => j.taskId === taskId && j.retryAt != null),
@@ -129,7 +111,8 @@ function applyRetention(d: SweepDeps): void {
   };
   const subset = { ...board, tasks: board.tasks.filter((t) => candidates.includes(t.id)) };
   const plan = planCleanup(subset, "settled", undefined, facts);
-  if (!plan.remove.length) return;
+  if (!plan.remove.length) return 0;
   markPurged(d.jobs, plan.remove, board.tasks);
   d.boards.commit(d.sessionId, applyCleanup(board, plan, d.now));
+  return plan.remove.length;
 }

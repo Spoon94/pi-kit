@@ -35,7 +35,7 @@ export function applyCleanup(state: BoardState, plan: CleanupPlan, _now: number)
   return { ...state, tasks: state.tasks.filter((t) => !drop.has(t.id)) };
 }
 
-/** 清理任务时同步标记 sidecar，避免 adopt/sweep 重新导入（R19）。 */
+/** 清理任务时同步标记 sidecar，避免 resume 后重放或 catch-up 重新补发（R19）。 */
 export function markPurged(jobs: JobStore, taskIds: number[], tasks: Task[]): string[] {
   const drop = new Set(taskIds);
   const roots = new Set<string>();

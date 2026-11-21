@@ -12,14 +12,13 @@ it("WIP 满或容量满时 next 为空（F40）", () => {
   expect(selectNext(s, 3, false)?.id).toBe(2);
 });
 
-it("跳过 parked / deferred / 依赖未清，按 id 升序（F19）", () => {
+it("跳过 parked / 依赖未清，按 id 升序（F19）", () => {
   const s = b([
     t(1, { status: "parked", park: { reason: "r", at: 1, from: "pending" } }),
-    t(2, { defer: { untilRoot: "bg_a", reason: "r", at: 1 } }),
     t(3, { blockedBy: [1] }),
     t(4),
   ]);
-  expect(selectNext(s, 3, false)?.id).toBe(4);
+  expect(selectNext(s, 1, false)?.id).toBe(4);
   expect(wipCount(s)).toBe(0);
 });
 

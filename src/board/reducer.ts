@@ -81,17 +81,13 @@ export function applyMutation(state: BoardState, p: MutationParams, ctx: RuleCon
   if (p.status === "parked" && (typeof p.reason !== "string" || p.reason.trim() === "")) {
     return err(state, `park requires reason → todo({action:"update", id:${cur.id}, status:"parked", reason:"…"})`);
   }
-  if (p.defer) {
-    if (typeof p.defer.reason !== "string" || p.defer.reason.trim() === "") return err(state, "defer requires reason");
-    if (!p.defer.untilJob || !ctx.facts.exists(p.defer.untilJob)) return err(state, `defer untilJob ${p.defer.untilJob} not found`);
-  }
   if (p.status === "completed") {
     const gate = completionGate(cur, ctx.facts, p.accept);
     if (gate) return err(state, gate);
   }
 
   const mutable = p.subject !== undefined || p.description !== undefined || p.activeForm !== undefined
-    || p.owner !== undefined || p.metadata !== undefined || p.status !== undefined || p.defer !== undefined
+    || p.owner !== undefined || p.metadata !== undefined || p.status !== undefined
     || p.verify !== undefined
     || (p.addBlockedBy?.length ?? 0) > 0 || (p.removeBlockedBy?.length ?? 0) > 0;
   if (!mutable) return err(state, `no mutable fields for ${p.action}`);
@@ -127,13 +123,6 @@ export function applyMutation(state: BoardState, p: MutationParams, ctx: RuleCon
     next.statusSince = ctx.now;
     if (p.status === "in_progress") next.inProgressSince = ctx.now;
     changed = true;
-  }
-  if (p.defer) {
-    next.defer = { untilRoot: p.defer.untilJob, reason: p.defer.reason.trim(), at: ctx.now };
-    if (next.status === "in_progress") { next.status = "pending"; next.statusSince = ctx.now; }
-    changed = true;
-  } else if (p.defer === null && cur.defer) {
-    delete next.defer; changed = true;
   }
   if (p.status === "parked") { next.park = { reason: p.reason!.trim(), at: ctx.now, from: cur.status }; changed = true; }
   if (p.status !== undefined && p.status !== "parked" && cur.park) { delete next.park; changed = true; }

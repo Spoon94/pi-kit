@@ -9,7 +9,7 @@ const dir = () => mkdtempSync(join(tmpdir(), "vigil-jobs-"));
 const job = (id: string, o: Partial<Job> = {}): Job => ({
   id, label: id, command: "true", logPath: `/tmp/${id}.log`, cwd: "/tmp", pid: 1,
   status: "completed", exitCode: 0, exitCodeKnown: true, startedAt: 1, endedAt: 2,
-  fpVerdict: "fresh", interferers: [], overlapUnfinished: [], rootId: id, attempt: 1,
+  fpVerdict: "fresh", interferers: [], rootId: id, attempt: 1,
   evidenceApplied: false, notifyState: "pending", ...o,
 });
 

@@ -32,12 +32,7 @@ export function layoutRows(state: BoardState, jobs: JobStore, budget: number) {
     rows.push(`├─ ◐ #${t.id} ${sanitizeTerminalText(t.subject)}${t.activeForm ? ` (${sanitizeTerminalText(t.activeForm)})` : ""}${retry}`);
     used++;
   }
-  for (const t of state.tasks.filter((x) => x.defer)) {
-    if (used >= budget) break;
-    rows.push(`├─ ⏸ #${t.id} ${sanitizeTerminalText(t.subject)}  deferred → ${t.defer!.untilRoot}`);
-    used++;
-  }
-  for (const t of state.tasks.filter((x) => x.status === "pending" && !x.defer)) {
+  for (const t of state.tasks.filter((x) => x.status === "pending")) {
     if (used >= budget) break;
     const dep = t.blockedBy?.length ? `  ⛓ ${t.blockedBy.map((d) => `#${d}`).join(",")}` : "";
     rows.push(`├─ ○ #${t.id} ${sanitizeTerminalText(t.subject)}${dep}`);
@@ -58,8 +53,7 @@ export function renderTodos(state: BoardState, _jobs: JobStore): string {
     const fin = (t.evidence ?? []).filter((e) => e.chainFinal).at(-1);
     const ev = fin ? `  exit ${fin.exitCode ?? "?"} fp:${fin.fp}` : "";
     const park = t.park ? `  parked: ${t.park.reason}` : "";
-    const defer = t.defer ? `  deferred → ${t.defer.untilRoot}` : "";
-    return `[${t.status}] #${t.id} ${t.subject}${ev}${park}${defer}`;
+    return `[${t.status}] #${t.id} ${t.subject}${ev}${park}`;
   }).join("\n") || "No tasks";
 }
 
@@ -70,11 +64,9 @@ export function renderDoctor(state: BoardState, jobs: JobStore, conflict: boolea
   if (conflict) lines.push("✗ todo 工具冲突：旧包未卸载，本扩展未注册事件处理器");
   if (degraded) lines.push(`✗ ${degraded}`);
   if (state.counters.halted) lines.push("⏸ 强制中断中 → /vigil-todo resume 恢复");
-  if (extra?.purgedRoots) lines.push(`✗ ${extra.purgedRoots} 条链已 purge（adopt/catch-up 跳过）`);
+  if (extra?.purgedRoots) lines.push(`✗ ${extra.purgedRoots} 条链已 purge（catch-up 跳过）`);
   if (extra?.retentionOverdue) lines.push(`⚠ ${extra.retentionOverdue} 个 completed/deleted 任务超期未清理`);
   if (extra?.orphanJobs) lines.push(`⚠ ${extra.orphanJobs} 个孤儿作业（sidecar 无绑定任务）`);
-  const orphanDefer = state.tasks.filter((t) => t.defer && !jobs.get(t.defer.untilRoot));
-  if (orphanDefer.length) lines.push(`⚠ ${orphanDefer.length} 个 defer 目标已无记录`);
   const noEvidence = state.tasks.filter((t) => t.status === "in_progress" && (t.jobs?.length ?? 0) === 0);
   if (noEvidence.length) lines.push(`⚠ ${noEvidence.length} 个 in_progress 任务无绑定作业`);
   return lines.join("\n") || "✓ 未发现问题";

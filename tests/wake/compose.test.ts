@@ -11,12 +11,12 @@ import { composeWake } from "../../src/wake/compose.js";
 const j = (o: Partial<Job> = {}): Job => ({
   id: "R", label: "回归", command: "npm test", logPath: "/tmp/none.log", cwd: "/tmp", pid: 1,
   status: "completed", exitCode: 0, exitCodeKnown: true, startedAt: 1, endedAt: 2,
-  fpVerdict: "fresh", interferers: [], overlapUnfinished: [], rootId: "R", attempt: 1,
+  fpVerdict: "fresh", interferers: [], rootId: "R", attempt: 1,
   taskId: 1, sessionId: "S", evidenceApplied: true, finalized: true, notifyState: "pending",
   finalResult: { ok: true, note: "done", trigger: "external", at: 2 }, ...o,
 });
 
-it("成功消息含三个真实调用形态与 next", () => {
+it("成功消息含真实调用形态与 next", () => {
   const jobs = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_9q0d6s1e}}"))); jobs.put(j());
   const b = emptyBoard();
   b.tasks = [{ id: 1, subject: "回归", status: "completed" }, { id: 2, subject: "清理", status: "pending" }];
@@ -25,7 +25,6 @@ it("成功消息含三个真实调用形态与 next", () => {
   expect(text).toContain("next: #2");
   expect(text).toContain('bg_run({task_id:2');
   expect(text).toContain('status:"parked"');
-  expect(text).toContain("defer:{untilJob:");
 });
 
 it("失败消息附日志尾（F72）", () => {

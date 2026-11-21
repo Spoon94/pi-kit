@@ -14,35 +14,32 @@ export function collectFingerprint(cwd: string): string | undefined {
 }
 
 const overlaps = (a: Job, b: Job): boolean =>
-  a.id !== b.id && a.cwd === b.cwd && a.taskId !== b.taskId
+  a.id !== b.id && a.cwd === b.cwd
+  && (a.taskId !== b.taskId || a.sessionId !== b.sessionId)   // 同 task 且同 session 才排除
   && b.startedAt <= (a.endedAt ?? Number.MAX_SAFE_INTEGER)
   && (b.endedAt ?? Number.MAX_SAFE_INTEGER) >= a.startedAt;
 
-/** 两集合必须分开：有写入 vs 无法判定（规格 §5.2）。 */
+/** 单一集合：缺 fpEnd（未结束/结果未知）或有写入都算无法归因。 */
 export function classifyOverlap(job: Job, store: JobStore) {
   const interferers: string[] = [];
-  const overlapUnfinished: string[] = [];
   for (const other of store.all()) {
     if (!overlaps(job, other)) continue;
-    if (other.fpEnd === undefined) overlapUnfinished.push(other.id);
-    else if (other.fpStart !== other.fpEnd) interferers.push(other.id);
+    if (other.fpEnd === undefined || other.fpStart !== other.fpEnd) interferers.push(other.id);
   }
-  return { interferers, overlapUnfinished };
+  return { interferers };
 }
 
-/** 回填时才计算；两集合皆空且指纹变了才 stale。 */
+/** 回填时才计算；无干扰者且指纹变了才 stale。 */
 export function verdictAt(job: Job, store: JobStore): FpVerdict {
   if (job.fpStart === undefined || job.fpEnd === undefined) return "unknown";
   if (job.fpStart === job.fpEnd) return "fresh";
-  const { interferers, overlapUnfinished } = classifyOverlap(job, store);
-  return interferers.length === 0 && overlapUnfinished.length === 0 ? "stale" : "unknown";
+  return classifyOverlap(job, store).interferers.length === 0 ? "stale" : "unknown";
 }
 
 export function fpReason(job: Job): string {
   if (job.fpVerdict === "fresh") return "fp:fresh";
   if (job.fpVerdict === "stale") return "fp:stale（独占期间工作区变过）";
-  if (job.overlapUnfinished.length > 0) return `fp:unknown（${job.overlapUnfinished.join(",")} 无法判定：未结束/结果未知）`;
-  if (job.interferers.length > 0) return `fp:unknown（${job.interferers.join(",")} 期间有写入，无法归因）`;
+  if (job.interferers.length > 0) return `fp:unknown（${job.interferers.join(",")} 期间有写入或未结束，无法归因）`;
   if (job.fpStart !== undefined && job.fpEnd !== undefined && job.fpStart !== job.fpEnd) return "fp:unknown（无法归因）";
   return "fp:n/a（非 git 或采集失败）";
 }

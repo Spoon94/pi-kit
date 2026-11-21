@@ -16,7 +16,7 @@ const task = (o: Partial<Task> = {}): Task => ({ id: 1, subject: "t", status: "i
 const job = (o: Partial<Job> = {}): Job => ({
   id: "A", label: "a", command: "npm test", logPath: "/tmp/a.log", cwd: "/tmp", pid: 1,
   status: "completed", exitCode: 0, exitCodeKnown: true, startedAt: 100, endedAt: 200,
-  fpStart: "X", fpEnd: "X", fpVerdict: "unknown", interferers: [], overlapUnfinished: [],
+  fpStart: "X", fpEnd: "X", fpVerdict: "unknown", interferers: [],
   rootId: "A", attempt: 1, taskId: 1, sessionId: "S", evidenceApplied: false, notifyState: "pending", ...o,
 });
 

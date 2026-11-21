@@ -30,7 +30,6 @@ export interface Task {
   statusSince?: number;
   inProgressSince?: number;
   park?: { reason: string; at: number; from: Status };
-  defer?: { untilRoot: string; reason: string; at: number };
 }
 
 export interface BoardCounters {

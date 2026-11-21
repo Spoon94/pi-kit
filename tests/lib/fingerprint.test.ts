@@ -20,7 +20,7 @@ const gitDir = () => {
 const j = (id: string, o: Partial<Job> = {}): Job => ({
   id, label: id, command: "true", logPath: `/tmp/${id}.log`, cwd: "/tmp", pid: 1,
   status: "completed", exitCode: 0, exitCodeKnown: true, startedAt: 100, endedAt: 200,
-  fpStart: "A", fpEnd: "A", fpVerdict: "unknown", interferers: [], overlapUnfinished: [],
+  fpStart: "A", fpEnd: "A", fpVerdict: "unknown", interferers: [],
   rootId: id, attempt: 1, evidenceApplied: false, notifyState: "pending", ...o,
 });
 
@@ -48,45 +48,52 @@ it("独占期间变了 → stale（F64 前置）", () => {
   expect(verdictAt(a, s)).toBe("stale");
 });
 
-it("同 taskId 的并行作业不算干扰（F56）", () => {
+it("同 task 且同 session 的并行作业不算干扰（F56）", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_7a5hk2xj}}")));
-  const a = j("A", { fpEnd: "B", taskId: 7 }); s.put(a);
-  s.put(j("B", { taskId: 7, startedAt: 150, endedAt: 250, fpStart: "A", fpEnd: "B" }));
+  const a = j("A", { fpEnd: "B", taskId: 7, sessionId: "S" }); s.put(a);
+  s.put(j("B", { taskId: 7, sessionId: "S", startedAt: 150, endedAt: 250, fpStart: "A", fpEnd: "B" }));
   expect(classifyOverlap(a, s).interferers).toEqual([]);
   expect(verdictAt(a, s)).toBe("stale");
 });
 
+it("跨会话同 taskId 的写入作业不被误排除（§17.6）", () => {
+  const s = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_7a5hk2xj}}")));
+  const a = j("A", { taskId: 1, sessionId: "SA", fpEnd: "B" }); s.put(a);
+  s.put(j("B", { taskId: 1, sessionId: "SB", startedAt: 150, endedAt: 250, fpStart: "A", fpEnd: "C" }));
+  expect(classifyOverlap(a, s).interferers).toEqual(["B"]);
+  expect(verdictAt(a, s)).toBe("unknown");
+});
+
 it("并发作业期间 fpStart===fpEnd 不算干扰（F57）", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_7a5hk2xj}}")));
-  const a = j("A", { fpEnd: "B", taskId: 7 }); s.put(a);
-  s.put(j("B", { taskId: 8, startedAt: 150, endedAt: 250, fpStart: "A", fpEnd: "A" }));
+  const a = j("A", { fpEnd: "B", taskId: 7, sessionId: "S" }); s.put(a);
+  s.put(j("B", { taskId: 8, sessionId: "S", startedAt: 150, endedAt: 250, fpStart: "A", fpEnd: "A" }));
   expect(classifyOverlap(a, s).interferers).toEqual([]);
 });
 
 it("有写入的并发作业 → unknown（F58）", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_7a5hk2xj}}")));
-  const a = j("A", { fpEnd: "B", taskId: 7 }); s.put(a);
-  s.put(j("B", { taskId: 8, startedAt: 150, endedAt: 250, fpStart: "A", fpEnd: "C" }));
+  const a = j("A", { fpEnd: "B", taskId: 7, sessionId: "S" }); s.put(a);
+  s.put(j("B", { taskId: 8, sessionId: "S", startedAt: 150, endedAt: 250, fpStart: "A", fpEnd: "C" }));
   expect(classifyOverlap(a, s).interferers).toEqual(["B"]);
   expect(verdictAt(a, s)).toBe("unknown");
   expect(fpReason(a)).toContain("无法归因");
 });
 
-it("并发作业缺 fpEnd → overlapUnfinished ⇒ unknown（F63/F75）", () => {
+it("并发作业缺 fpEnd → interferers ⇒ unknown（F63/F75）", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_7a5hk2xj}}")));
-  const a = j("A", { fpEnd: "B", taskId: 7 }); s.put(a);
-  s.put(j("B", { taskId: 8, startedAt: 150, endedAt: null, status: "running", fpEnd: undefined }));
-  const c = classifyOverlap(a, s);
-  expect(c.overlapUnfinished).toEqual(["B"]);
-  expect(c.interferers).toEqual([]);
+  const a = j("A", { fpEnd: "B", taskId: 7, sessionId: "S" }); s.put(a);
+  s.put(j("B", { taskId: 8, sessionId: "S", startedAt: 150, endedAt: null, status: "running", fpEnd: undefined }));
+  expect(classifyOverlap(a, s).interferers).toEqual(["B"]);
   expect(verdictAt(a, s)).toBe("unknown");
 });
 
-it("两类同时存在仍是 unknown，不误判 stale（F79）", () => {
+it("写入与未结束同时存在仍是 unknown，不误判 stale（F79）", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_7a5hk2xj}}")));
-  const a = j("A", { fpEnd: "B", taskId: 7 }); s.put(a);
-  s.put(j("B", { taskId: 8, startedAt: 150, endedAt: 250, fpStart: "A", fpEnd: "C" }));
-  s.put(j("C", { taskId: 9, startedAt: 150, endedAt: null, status: "running", fpEnd: undefined }));
+  const a = j("A", { fpEnd: "B", taskId: 7, sessionId: "S" }); s.put(a);
+  s.put(j("B", { taskId: 8, sessionId: "S", startedAt: 150, endedAt: 250, fpStart: "A", fpEnd: "C" }));
+  s.put(j("C", { taskId: 9, sessionId: "S", startedAt: 150, endedAt: null, status: "running", fpEnd: undefined }));
+  expect(classifyOverlap(a, s).interferers.sort()).toEqual(["B", "C"]);
   expect(verdictAt(a, s)).toBe("unknown");
 });
 

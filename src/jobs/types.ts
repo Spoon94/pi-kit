@@ -8,7 +8,7 @@ export interface Job {
   exitCode: number | null; signal?: string | null; exitCodeKnown: boolean;
   startedAt: number; endedAt: number | null; startStamp?: string;
   fpStart?: string; fpEnd?: string; fpVerdict: FpVerdict;
-  interferers: string[]; overlapUnfinished: string[];
+  interferers: string[];
   staleReverifyOf?: string;
   taskId?: number; sessionId?: string;
   rootId: string; retryOf?: string; attempt: number;

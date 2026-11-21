@@ -16,7 +16,7 @@ const ev = (o: Partial<Evidence> = {}): Evidence => ({
 const root = (o: Partial<Job> = {}): Job => ({
   id: "R", label: "r", command: "true", logPath: "/tmp/r.log", cwd: "/tmp", pid: 1,
   status: "completed", exitCode: 0, exitCodeKnown: true, startedAt: 1, endedAt: 2,
-  fpVerdict: "fresh", interferers: [], overlapUnfinished: [], rootId: "R", attempt: 1,
+  fpVerdict: "fresh", interferers: [], rootId: "R", attempt: 1,
   taskId: 1, sessionId: "S", evidenceApplied: true, finalized: true, notifyState: "pending", ...o,
 });
 const input = (over: Partial<Parameters<typeof tryDeliver>[0]> = {}) => ({

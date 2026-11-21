@@ -1,22 +1,20 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type {
   AgentBeforeSettleEventResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext,
   ExtensionToolContext, ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { adoptOrphans, freezeMovedAway, type AdoptDeps } from "../src/bind/adopt.js";
 import { autofillJob, type AutofillDeps } from "../src/bind/autofill.js";
 import { finalizeAndProject } from "../src/bind/finalize.js";
 import { halt, isHalted, reapHaltedLeftovers, resume, type HaltDeps } from "../src/bind/halt.js";
 import { catchUpScan, sweepAll, type SweepDeps } from "../src/bind/sweep.js";
-import { decodeSnapshot, replayBranch } from "../src/board/replay.js";
+import { replayBranch } from "../src/board/replay.js";
 import { retentionCandidates } from "../src/board/cleanup.js";
 import { selectNext } from "../src/board/selectors.js";
 import { createBoardStore } from "../src/board/store.js";
 import type { BoardState } from "../src/board/types.js";
 import { chainJobs, chainTerminated } from "../src/jobs/chain.js";
-import { removeHeartbeat, writeHeartbeat } from "../src/jobs/heartbeat.js";
 import { escalate, requestKill } from "../src/jobs/kill.js";
 import { createMonitor, recoverJobs } from "../src/jobs/monitor.js";
 import { spawnJob, type SpawnRequest } from "../src/jobs/spawn.js";
@@ -59,7 +57,6 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   let degradedNote: string | undefined;
   let timer: NodeJS.Timeout | undefined;
   let mergeTimer: NodeJS.Timeout | undefined;
-  let recheckTimer: NodeJS.Timeout | undefined;
   let lastModelAdvanced = false;
   let wired = false;
   let collapsed = false;
@@ -113,53 +110,6 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     overlay.update(boards.get(sid));
     if (collapsed) { ctx.ui.setWidget(WIDGET_KEY, undefined); return; }
     if (overlay.isRegistered()) ctx.ui.setWidget(WIDGET_KEY, renderPanel(boards.get(sid), jobs, getCfg()));
-  };
-
-  const updateHeartbeat = (): void => {
-    if (!sid) return;
-    try { writeHeartbeat(runDir(cwd), sid, process.pid, Date.now()); } catch { /* ignore */ }
-  };
-
-  // ── 读旧会话 board（收养用，规格 §7.1.1-C） ────────────────────────────
-  const readOldBoard = (oldSid: string): BoardState | undefined => {
-    const dir = activeCtx?.sessionManager.getSessionDir();
-    if (!dir) return undefined;
-    let files: string[] = [];
-    try { files = readdirSync(dir).filter((f) => f.endsWith(".jsonl")); } catch { return undefined; }
-    for (const file of files) {
-      let lines: string[] = [];
-      try { lines = readFileSync(join(dir, file), "utf8").split("\n").filter(Boolean); } catch { continue; }
-      const byId = new Map<string, Record<string, unknown>>();
-      let header: Record<string, unknown> | undefined;
-      let lastId: string | undefined;
-      for (const line of lines) {
-        try {
-          const entry = JSON.parse(line) as Record<string, unknown>;
-          if (entry.type === "session" && !header) { header = entry; continue; }
-          if (typeof entry.id === "string") { byId.set(entry.id, entry); lastId = entry.id; }
-        } catch { /* skip bad line */ }
-      }
-      if (header?.id !== oldSid) continue;
-      const path: Record<string, unknown>[] = [];
-      const seen = new Set<string>();
-      let cur = lastId;
-      while (cur && !seen.has(cur)) {
-        seen.add(cur);
-        const entry = byId.get(cur);
-        if (!entry) break;
-        path.push(entry);
-        cur = typeof entry.parentId === "string" ? entry.parentId : undefined;
-      }
-      path.reverse();
-      let snapshot: BoardState | undefined;
-      for (const entry of path) {
-        if (entry.type === "custom" && entry.customType === BOARD_CUSTOM_TYPE) {
-          snapshot = decodeSnapshot(entry.data) ?? snapshot;
-        }
-      }
-      return snapshot;
-    }
-    return undefined;
   };
 
   // ── 作业 ───────────────────────────────────────────────────────────────
@@ -241,7 +191,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     scheduleDeliver();
   };
 
-  // ── sweep / 收养 ──────────────────────────────────────────────────────
+  // ── sweep ─────────────────────────────────────────────────────────────
   const deliverCatchUp = (roots: string[]): void => {
     if (!roots.length || !activeCtx || !activeCtx.isIdle()) return;
     const board = boards.get(sid);
@@ -274,27 +224,9 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     const r = sweepAll(d);
     finalizeTerminated();
     const catchUp = catchUpScan(d);
-    if (r.defersReleased || r.respawned || catchUp.length) persistBoard(boards.get(sid));
+    if (r.respawned || r.retained || catchUp.length) persistBoard(boards.get(sid));
     deliverCatchUp(catchUp);
     refreshTimer();
-  };
-
-  const adoptMoved = (manual: boolean): void => {
-    if (!sid) return;
-    if (isHalted(boards.get(sid))) return;                       // R20：停机后不收养
-    const cfg = getCfg();
-    const d: AdoptDeps = {
-      boards, jobs, cfg, now: Date.now(), sessionId: sid, dir: runDir(cwd),
-      readOldBoard, notify: (n) => notify(n), manual,
-    };
-    const r = adoptOrphans(d);
-    const frozen = freezeMovedAway(d);
-    if (r.adopted.length) {
-      persistBoard(boards.get(sid));
-      notify(`vigil-todo: 已接管 ${r.adopted.length} 条孤儿链、${r.imported} 个任务（repair）`, "info");
-    } else if (frozen) {
-      persistBoard(boards.get(sid));
-    }
   };
 
   const refreshTimer = (): void => {
@@ -310,14 +242,12 @@ export default function vigilTodo(pi: ExtensionAPI): void {
 
   const tick = (): void => {
     if (!activeCtx || !sid) return;
-    updateHeartbeat();
     if (isHalted(boards.get(sid))) {
       refreshOverlay();
       refreshTimer();
       return;
     }
     runSweep();
-    adoptMoved(false);
     jobs.gc(getCfg().completedTtlMs, Date.now());
     jobs.save();
     refreshOverlay();
@@ -345,19 +275,8 @@ export default function vigilTodo(pi: ExtensionAPI): void {
       reapHaltedLeftovers(haltDeps());                           // §16.8.5：崩溃后补杀残留
     }
     runSweep();
-    adoptMoved(false);
-    updateHeartbeat();
     refreshOverlay();
     refreshTimer();
-    if (!recheckTimer) {
-      recheckTimer = setTimeout(() => {
-        recheckTimer = undefined;
-        adoptMoved(false);
-        runSweep();
-        refreshOverlay();
-      }, getCfg().adoptRecheckMs);
-      recheckTimer.unref?.();
-    }
   };
 
   // ── 投递 ──────────────────────────────────────────────────────────────
@@ -463,7 +382,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     }
 
     pi.registerCommand("vigil-todo", {
-      description: "vigil-todo 面板 / adopt / doctor",
+      description: "vigil-todo 面板 / halt / resume / doctor",
       handler: commandHandler((arg, ctx) => {
         if (arg === "halt") {
           halt(haltDeps());
@@ -479,13 +398,6 @@ export default function vigilTodo(pi: ExtensionAPI): void {
             refreshTimer();
             refreshOverlay();
           }
-          return;
-        }
-        if (arg === "adopt") {
-          adoptMoved(true);
-          persistBoard(boards.get(sid));
-          refreshOverlay();
-          output(ctx, "vigil-todo: 已执行接管（人工通道）");
           return;
         }
         if (arg === "doctor") {
@@ -596,7 +508,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
       if (event.toolName === "todo") {
         const args = (event.args ?? {}) as Record<string, unknown>;
         if (args.action === "verify"
-          || (args.action === "update" && (args.status !== undefined || args.defer !== undefined))) {
+          || (args.action === "update" && args.status !== undefined)) {
           lastModelAdvanced = true;
         }
       }
@@ -620,10 +532,8 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     pi.on("session_shutdown", (_event, ctx) => {
       if (timer) { clearInterval(timer); timer = undefined; }
       if (mergeTimer) { clearTimeout(mergeTimer); mergeTimer = undefined; }
-      if (recheckTimer) { clearTimeout(recheckTimer); recheckTimer = undefined; }
       if (!sid) return;
       boards.evict(sid);
-      removeHeartbeat(runDir(cwd), sid);
       monitor.clearAll();
       overlay.dispose();
       if (activeCtx === ctx) activeCtx = undefined;
@@ -639,7 +549,6 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     }
     initSession(ctx);
     wire();
-    updateHeartbeat();
     refreshOverlay();
   });
 }

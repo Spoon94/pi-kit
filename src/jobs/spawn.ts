@@ -44,7 +44,7 @@ export function spawnJob(req: SpawnRequest, dir: string, now: number): SpawnResu
       logPath, cwd: req.cwd, pid: child.pid, status: "running",
       exitCode: null, exitCodeKnown: false, startedAt: now, endedAt: null,
       startStamp: readStartStamp(child.pid),
-      fpVerdict: "unknown", interferers: [], overlapUnfinished: [],
+      fpVerdict: "unknown", interferers: [],
       rootId: req.rootId ?? id, retryOf: req.retryOf, attempt: req.attempt ?? 1,
       staleReverifyOf: req.staleReverifyOf,
       taskId: req.taskId, sessionId: req.sessionId,

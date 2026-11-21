@@ -5,7 +5,6 @@ const StatusEnum = Type.Union([
   Type.Literal("completed"), Type.Literal("deleted"),
 ]);
 const VerifySpec = Type.Object({ kind: Type.Literal("command"), command: Type.String() });
-const DeferSpec = Type.Object({ untilJob: Type.String(), reason: Type.String() });
 const CreateItem = Type.Object({
   subject: Type.String(), description: Type.Optional(Type.String()), activeForm: Type.Optional(Type.String()),
   blockedBy: Type.Optional(Type.Array(Type.Number())), owner: Type.Optional(Type.String()),
@@ -31,7 +30,6 @@ export const TodoParamsSchema = Type.Object({
   scope: Type.Optional(Type.Union(["completed", "deleted", "settled", "all"].map((s) => Type.Literal(s)))),
   force: Type.Optional(Type.Boolean()),
   verify: Type.Optional(VerifySpec),
-  defer: Type.Optional(Type.Union([DeferSpec, Type.Null()])),
   // 只读字段：声明在 schema 里供展示，但 reducer 会拒（R16）
   jobs: Type.Optional(Type.Array(Type.String())),
   evidence: Type.Optional(Type.Array(Type.Unknown())),

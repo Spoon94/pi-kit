@@ -3,17 +3,17 @@ export interface VigilConfig {
   maxTurns: number; maxConcurrentJobs: number; completedTtlMs: number;
   taskRetentionMs: number;
   tailLines: number; maxTailBytes: number; maxWidgetLines: number; collapseKey: string;
-  notifyRetryMs: number; heartbeatStaleMs: number; hungSuspectMs: number;
-  wakeMergeMs: number; adoptRecheckMs: number;
+  notifyRetryMs: number;
+  wakeMergeMs: number;
 }
 
 export const DEFAULTS: VigilConfig = {
-  wipLimit: 3, retries: 3, retryDelaysMs: [0, 30_000, 120_000], staleReverify: 1,
+  wipLimit: 1, retries: 3, retryDelaysMs: [0, 30_000, 120_000], staleReverify: 1,
   maxTurns: 50, maxConcurrentJobs: 10, completedTtlMs: 7 * 24 * 3600_000,
   taskRetentionMs: 0,
   tailLines: 20, maxTailBytes: 8192, maxWidgetLines: 12, collapseKey: "ctrl+shift+t",
-  notifyRetryMs: 600_000, heartbeatStaleMs: 15_000, hungSuspectMs: 600_000,
-  wakeMergeMs: 250, adoptRecheckMs: 20_000,
+  notifyRetryMs: 600_000,
+  wakeMergeMs: 250,
 };
 
 type Bag = Record<string, unknown>;
@@ -33,10 +33,7 @@ export const CONFIG_KEYS: Record<keyof VigilConfig, { type: "int" | "int[]" | "s
   maxWidgetLines: { type: "int", min: 3, reload: false, default: DEFAULTS.maxWidgetLines },
   collapseKey: { type: "string", reload: true, default: DEFAULTS.collapseKey },
   notifyRetryMs: { type: "int", min: 1, reload: false, default: DEFAULTS.notifyRetryMs },
-  heartbeatStaleMs: { type: "int", min: 1, reload: false, default: DEFAULTS.heartbeatStaleMs },
-  hungSuspectMs: { type: "int", min: 1, reload: false, default: DEFAULTS.hungSuspectMs },
   wakeMergeMs: { type: "int", min: 0, reload: false, default: DEFAULTS.wakeMergeMs },
-  adoptRecheckMs: { type: "int", min: 1, reload: false, default: DEFAULTS.adoptRecheckMs },
 };
 
 const posInt = (v: unknown, min: number): number | undefined =>
@@ -53,7 +50,7 @@ export function resolveConfig(s: { file?: unknown; settings?: unknown; legacy?: 
   const mins: Partial<Record<keyof VigilConfig, number>> = {
     wipLimit: 1, retries: 0, staleReverify: 0, maxTurns: 1, maxConcurrentJobs: 1,
     completedTtlMs: 1, taskRetentionMs: 0, tailLines: 1, maxTailBytes: 1, maxWidgetLines: 3,
-    notifyRetryMs: 1, heartbeatStaleMs: 1, hungSuspectMs: 1, wakeMergeMs: 0, adoptRecheckMs: 1,
+    notifyRetryMs: 1, wakeMergeMs: 0,
   };
   for (const [k, min] of Object.entries(mins)) {
     const v = posInt(pick(k as keyof VigilConfig), min as number);

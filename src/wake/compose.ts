@@ -31,7 +31,6 @@ export function composeWake(roots: string[], board: BoardState, jobs: JobStore, 
     lines.push(`next: #${next.id} ${sanitizeTerminalText(next.subject)} (pending, unblocked)`);
     lines.push(`→ 开干: bg_run({task_id:${next.id}, command:"…"})`);
     lines.push(`  需人拍板: todo({action:"update", id:${next.id}, status:"parked", reason:"…"})`);
-    lines.push(`  冲突需串行: todo({action:"update", id:${next.id}, defer:{untilJob:"bg_…", reason:"…"}})`);
   } else if (active >= cfg.wipLimit) {
     lines.push(`WIP 满 (${active}/${cfg.wipLimit})，先 park 一个或等一个完成`);
   } else {

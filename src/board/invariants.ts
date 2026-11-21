@@ -21,37 +21,20 @@ export interface JobFacts {
 export interface RuleContext { wipLimit: number; facts: JobFacts; now: number }
 export interface UpdateParams {
   id: number; status?: Status; reason?: string;
-  defer?: { untilJob: string; reason: string } | null;
 }
 
 const settled = (s: Status) => s === "completed" || s === "deleted";
 
 /** 结构性规则；证据类规则在 evidence.ts。返回错误文案或 undefined。 */
 export function checkStructure(state: BoardState, task: Task, p: UpdateParams, ctx: RuleContext): string | undefined {
-  const away = task.metadata?.adoptedAway as { session?: string } | undefined;
-  if (away) return `#${task.id} 已移交到会话 ${away.session ?? "?"}，请在该会话操作`;
-
   if (p.status !== undefined && !isTransitionValid(task.status, p.status)) {
     return `illegal transition ${task.status} → ${p.status}`;
   }
 
-  // R13 互斥（先判，避免后续规则给出误导文案）
-  if (p.defer && task.status === "parked") {
-    return `#${task.id} is parked; 先 todo({action:"update", id:${task.id}, status:"pending"}) 再 defer`;
-  }
-  if (p.status === "parked" && task.defer) {
-    return `#${task.id} is deferred; 先 todo({action:"update", id:${task.id}, defer:null}) 再 park`;
-  }
-
-  // R14 让位 / defer 前置
+  // R14 让位前置：作业在跑时不得释放 WIP 名额
   const yielding = task.status === "in_progress" && p.status === "pending";
-  if ((yielding || p.defer) && (ctx.facts.hasRunning(task.id) || ctx.facts.hasBackoff(task.id))) {
-    return `#${task.id} has a running job; cannot yield or defer → bg_kill({job_id:"…"}) 或等它结束`;
-  }
-
-  // R9 deferred 不许直接开工
-  if (p.status === "in_progress" && task.defer) {
-    return `#${task.id} is deferred → ${task.defer.untilRoot} → todo({action:"update", id:${task.id}, defer:null})`;
+  if (yielding && (ctx.facts.hasRunning(task.id) || ctx.facts.hasBackoff(task.id))) {
+    return `#${task.id} has a running job; cannot yield → bg_kill({job_id:"…"}) 或等它结束`;
   }
 
   // R1 WIP
@@ -88,7 +71,6 @@ export interface MutationParams {
   blockedBy?: number[]; addBlockedBy?: number[]; removeBlockedBy?: number[];
   metadata?: Record<string, unknown>; tasks?: CreateItem[]; includeDeleted?: boolean;
   verify?: { kind: "command"; command: string };
-  defer?: { untilJob: string; reason: string } | null;
   scope?: "completed" | "deleted" | "settled" | "all"; force?: boolean;
   [k: string]: unknown;
 }

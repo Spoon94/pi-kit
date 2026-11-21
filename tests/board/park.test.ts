@@ -25,21 +25,6 @@ describe("R7 park", () => {
   });
 });
 
-describe("R8 defer", () => {
-  it("缺 reason 或 untilJob 不存在均拒（F27）", () => {
-    expect(applyMutation(withTask(), { action: "update", id: 1, defer: { untilJob: "bg_a", reason: "" } }, ctx()).op.kind).toBe("error");
-    const c = ctx({ facts: { hasRunning: () => false, hasBackoff: () => false, startedAt: () => undefined, exists: () => false } });
-    expect(applyMutation(withTask(), { action: "update", id: 1, defer: { untilJob: "bg_x", reason: "r" } }, c).op.kind).toBe("error");
-  });
-  it("写入 defer.untilRoot 并置 pending；defer:null 清除", () => {
-    let s = applyMutation(withTask(), { action: "update", id: 1, defer: { untilJob: "bg_a", reason: "冲突" } }, ctx()).state;
-    expect(s.tasks[0].defer).toEqual({ untilRoot: "bg_a", reason: "冲突", at: 1000 });
-    expect(s.tasks[0].status).toBe("pending");
-    s = applyMutation(s, { action: "update", id: 1, defer: null }, ctx()).state;
-    expect(s.tasks[0].defer).toBeUndefined();
-  });
-});
-
 describe("R15 verify 改动", () => {
   it("改命令写 manual 证据并禁用自动完成（F53）", () => {
     let s = applyMutation(emptyBoard(), { action: "create", subject: "a", verify: { kind: "command", command: "npm test" } }, ctx()).state;

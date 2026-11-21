@@ -18,7 +18,7 @@ pi 1.5.2 的行为（已从 `dist/` 源码取证，见 [p0-findings.md](p0-findi
 ## 1. 兼容方向：单向
 
 - 本扩展**读得懂旧包的 4 状态快照**（`customType: "rpiv-todo-state"`），并原样呈现。
-- 本扩展写**超集**：同样是 `rpiv-todo-state`，新增 `parked`、`evidence`、`lastFailure`、`inProgressSince`、`park`、`defer` 等字段。
+- 本扩展写**超集**：同样是 `rpiv-todo-state`，新增 `parked`、`evidence`、`lastFailure`、`inProgressSince`、`park` 等字段。
 - **旧包读不了新快照**：它对快照做整体 `every(isTask)` 校验，遇到不认识的 `parked` 会跳过整份快照。因此**回滚不可行**（见 §4）。
 
 ## 2. `inProgressSince` 迁移 fallback
@@ -50,7 +50,7 @@ inProgressSince = task.inProgressSince ?? task.statusSince ?? 0
 
 1. 旧包跳过含 `parked` 的整份快照 ⇒ 任务列表直接消失。
 2. 新包的 `inProgressSince` / `evidence` / `lastFailure` 旧包不认识，重新按旧包写回会丢证据与失败阻断。
-3. sidecar 的链级状态（`finalized` / `pendingReverify`）与旧包的 `jobs.json` 布局不兼容，混用会让 defer 释放与收养判断失真。
+3. sidecar 的链级状态（`finalized` / `pendingReverify`）与旧包的 `jobs.json` 布局不兼容，混用会让链级判断失真。
 
 如果确实要回退：先 `/todos` 导出任务文本、备份 `~/.pi/agent/sessions/` 与 `/tmp/bg-run/`，再接受「已完成的自动判定丢失、parked 任务需手工重建」的代价。
 
@@ -62,5 +62,6 @@ inProgressSince = task.inProgressSince ?? task.statusSince ?? 0
 /bg                    # 旧作业记录可见（sidecar 损坏会留档并从空开始）
 ```
 
-- 旧包在夜里跑完的作业：若旧会话不再打开，新会话会在心跳判定旧会话不活跃后**收养**这些已终结的孤儿链，把绑定任务导入并投影证据（repair 日志 + notify）。
-- running 链不会收养，避免两个会话驱动同一进程；等它终结后由单 timer 归入。
+- 继续用同一个会话（resume）：任务快照与 sidecar 都在，模型与看板直接恢复。
+- pi 关着期间完成的作业：resume 后两步 finalize 保证链只终结一次，`notifyState` catch-up 补发恰一次。
+- resume 时昨晚遗留的 running 作业：pid + startStamp 仍匹配就继续监控；已消失的标 `exitCodeKnown:false` 并 parked，退出码绝不伪造。

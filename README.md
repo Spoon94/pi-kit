@@ -31,7 +31,6 @@
 完成      todo({action:"update", id, status:"completed"})
 接受 stale todo({action:"update", id, status:"completed", accept:"stale"})
 park      todo({action:"update", id, status:"parked", reason:"…"})
-defer     todo({action:"update", id, defer:{untilJob:"bg_x2", reason:"…"}})
 重验      todo({action:"verify", id})
 ```
 
@@ -40,8 +39,9 @@ defer     todo({action:"update", id, defer:{untilJob:"bg_x2", reason:"…"}})
 | 命令 | 作用 |
 |---|---|
 | `/vigil-todo` | 全量任务列表 |
-| `/vigil-todo adopt` | 一键接管上一会话遗留任务与孤儿链（人工通道，绕过活跃 gate） |
-| `/vigil-todo doctor` | 冲突 / sidecar 降级 / 悬空 defer / 无作业 in_progress |
+| `/vigil-todo halt` | 强制中断：停止自主推进、杀本会话作业、受影响任务 parked |
+| `/vigil-todo resume` | 解除中断（不重置 turnsUsed） |
+| `/vigil-todo doctor` | 冲突 / sidecar 降级 / halted / purged / 超期 / 无作业 in_progress |
 | `/todos` | 逐条任务（exit code + fp 下钻） |
 | `/bg` | 作业列表；`/bg k <id>` 中止链 |
 
@@ -53,7 +53,7 @@ defer     todo({action:"update", id, defer:{untilJob:"bg_x2", reason:"…"}})
 
 | 键 | 默认 |
 |---|---|
-| `wipLimit` | 3 |
+| `wipLimit` | 1（模型串行专注一个 todo） |
 | `retries` | 3（总尝试 4） |
 | `retryDelaysMs` | `[0, 30000, 120000]` |
 | `staleReverify` | 1 |
@@ -63,8 +63,7 @@ defer     todo({action:"update", id, defer:{untilJob:"bg_x2", reason:"…"}})
 | `taskRetentionMs` | 0（关闭自动清理） |
 | `tailLines` / `maxTailBytes` | 20 / 8192 |
 | `maxWidgetLines` | 12 |
-| `heartbeatStaleMs` / `hungSuspectMs` | 15s / 10min |
-| `wakeMergeMs` / `adoptRecheckMs` | 250 / 20000 |
+| `wakeMergeMs` | 250 |
 | `notifyRetryMs` | 10min |
 
 ## 开发

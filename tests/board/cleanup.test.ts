@@ -109,6 +109,18 @@ it("markPurged 同时取消退避与待重验（BLOCKER）", () => {
   expect(jobs.get("R")?.pendingReverify).toBeFalsy();
 });
 
+it("markPurged 清全链每个 job 的退避/待重验（MAJOR #2）", () => {
+  const jobs = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_c1nsk0qv}}")));
+  jobs.put(job("R", { retryAt: 500, pendingReverify: true }));
+  jobs.put(job("R2", { rootId: "R", retryOf: "R", retryAt: 600, pendingReverify: true }));
+  markPurged(jobs, [1], [t(1, { status: "completed", jobs: ["R"] })]);
+  for (const id of ["R", "R2"]) {
+    expect(jobs.get(id)?.purged).toBe(true);
+    expect(jobs.get(id)?.retryAt).toBeUndefined();
+    expect(jobs.get(id)?.pendingReverify).toBeFalsy();
+  }
+});
+
 it("retention 只候选 completed/deleted，绝不包含 parked", () => {
   const s = b([t(1, { status: "completed", statusSince: 10 }), t(2, { status: "deleted", statusSince: 10 }),
                t(3, { status: "parked", statusSince: 10, park: { reason: "r", at: 10, from: "pending" } }),

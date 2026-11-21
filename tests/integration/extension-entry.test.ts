@@ -36,6 +36,7 @@ const completedWithEvidence = (refs: string[], extra?: (b: BoardState) => void):
 function makeHarness(cwd: string, branch: unknown[], idle = true) {
   const handlers = new Map<string, Handler[]>();
   const commands = new Map<string, (args: string, ctx: any) => unknown>();
+  const toolDefs = new Map<string, any>();
   const sent: any[] = [];
   let isIdle = idle;
   const ctx = {
@@ -56,7 +57,7 @@ function makeHarness(cwd: string, branch: unknown[], idle = true) {
       handlers.set(name, list);
       return () => {};
     },
-    registerTool: () => {},
+    registerTool: (def: any) => { toolDefs.set(def.name, def); },
     registerCommand: (name: string, opts: any) => { commands.set(name, opts.handler); },
     registerShortcut: () => {},
     getAllTools: () => [{ name: "todo", sourceInfo: { source: "pi-kit" } }],
@@ -74,9 +75,25 @@ function makeHarness(cwd: string, branch: unknown[], idle = true) {
     if (!handler) throw new Error(`command ${name} not registered`);
     await handler(args, ctx);
   };
+  let callSeq = 0;
+  const runTool = async (name: string, params: Record<string, unknown>): Promise<any> => {
+    const def = toolDefs.get(name);
+    if (!def) throw new Error(`tool ${name} not registered`);
+    return def.execute(`call-${callSeq++}`, params, undefined, undefined, ctx);
+  };
   const setIdle = (v: boolean) => { isIdle = v; };
-  return { api, emit, runCommand, sent, setIdle, ctx };
+  return { api, emit, runCommand, runTool, sent, setIdle, ctx };
 }
+
+const waitForFinalized = async (cwd: string, count: number): Promise<void> => {
+  for (let i = 0; i < 5000; i++) {
+    const store = createJobStore(runDir(cwd));
+    store.load();
+    if (store.all().filter((j) => j.id === j.rootId && j.finalized).length >= count) return;
+    await new Promise((r) => setImmediate(r));
+  }
+  throw new Error(`timed out waiting for ${count} finalized roots`);
+};
 
 const setupJobs = (cwd: string, jobs: Job[]) => {
   const store = createJobStore(runDir(cwd));
@@ -95,8 +112,8 @@ let oldConfigHome: string | undefined;
 
 beforeEach(() => {
   oldConfigHome = process.env.XDG_CONFIG_HOME;
-  process.env.XDG_CONFIG_HOME = writeConfig();
-  vi.useFakeTimers();
+  process.env.XDG_CONFIG_HOME = writeConfig(250);
+  vi.useFakeTimers({ toFake: ["setTimeout", "setInterval", "clearTimeout", "clearInterval", "Date"] });
 });
 
 afterEach(() => {
@@ -105,7 +122,7 @@ afterEach(() => {
   else process.env.XDG_CONFIG_HOME = oldConfigHome;
 });
 
-it("F6/F8：空闲完成在 session_start 立即补发一次，正常通道与重启都不重复（BLOCKER #2）", async () => {
+it("F8：catch-up 在 session_start 立即补发一次，正常通道与重启都不重复（BLOCKER #2）", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   setupJobs(cwd, [job()]);
   const b = completedWithEvidence(["R"], (s) => {
@@ -119,6 +136,8 @@ it("F6/F8：空闲完成在 session_start 立即补发一次，正常通道与�
 
   expect(h.sent).toHaveLength(1);
   expect(h.sent[0].message.content).toContain("next: #2");
+  const snaps = branch.filter((e: any) => e?.type === "custom" && e.customType === "rpiv-todo-state") as any[];
+  expect(snaps.at(-1)?.data.counters.turnsUsed).toBe(1);   // catch-up 也计入保险丝（MAJOR #3）
 
   // catch-up 不推进 watermark；正常通道必须靠 per-root 去重挡住同一证据
   await h.emit("agent_start", { type: "agent_start" });
@@ -133,7 +152,7 @@ it("F6/F8：空闲完成在 session_start 立即补发一次，正常通道与�
   expect(h2.sent).toHaveLength(0);
 });
 
-it("F38：10 条链同时终结合并为一次投递", async () => {
+it("catch-up 对 10 条已终结链也只发一条（per-root 去重）", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const refs = Array.from({ length: 10 }, (_, i) => `R${i + 1}`);
   setupJobs(cwd, refs.map((id, i) => job({ id, rootId: id, taskId: i + 1, finalResult: { ok: true, note: "done", trigger: "external", at: 2, jobId: id } })));
@@ -229,4 +248,52 @@ it("resume 命令显式 sweep 并受预算约束地唤醒 next（BLOCKER #10）"
   await h.runCommand("vigil-todo", "resume");
   expect(h.sent).toHaveLength(1);
   expect(h.sent[0].message.content).toContain("next: #1");
+});
+
+it("F6：真实作业 exit → onJobExit → 250ms 合并窗口单次投递（MINOR #5）", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  setupJobs(cwd, []);
+  const b = emptyBoard();
+  b.tasks = [
+    { id: 1, subject: "跑", status: "in_progress", inProgressSince: 0 },
+    { id: 2, subject: "next", status: "pending" },
+  ];
+  b.nextId = 3;
+  const h = makeHarness(cwd, [snapshot(b)], true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  expect(h.sent).toHaveLength(0);
+
+  const r = await h.runTool("bg_run", { command: "printf 'ok\\n'", task_id: 1 });
+  expect(r.isError).toBeFalsy();
+  await waitForFinalized(cwd, 1);
+
+  await vi.advanceTimersByTimeAsync(249);
+  expect(h.sent).toHaveLength(0);              // 合并窗口未到
+  await vi.advanceTimersByTimeAsync(1);
+  expect(h.sent).toHaveLength(1);              // ≤1s，且只一次
+  expect(h.sent[0].message.content).toContain("next: #2");
+});
+
+it("F38：10 个真实作业在 250ms 窗口内合并为一条投递（MINOR #5）", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  setupJobs(cwd, []);
+  const b = emptyBoard();
+  b.tasks = Array.from({ length: 10 }, (_, i) => ({
+    id: i + 1, subject: `t${i + 1}`, status: "in_progress" as const, inProgressSince: 0,
+  }));
+  b.nextId = 11;
+  const h = makeHarness(cwd, [snapshot(b)], true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  expect(h.sent).toHaveLength(0);
+
+  for (let i = 1; i <= 10; i++) {
+    const r = await h.runTool("bg_run", { command: "printf 'ok\\n'", task_id: i });
+    expect(r.isError).toBeFalsy();
+  }
+  await waitForFinalized(cwd, 10);
+  await vi.advanceTimersByTimeAsync(250);
+  expect(h.sent).toHaveLength(1);
+  expect(h.sent[0].message.details.jobs).toHaveLength(10);
 });

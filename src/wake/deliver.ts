@@ -14,11 +14,14 @@ export type DeliverResult =
 
 let wakeSeq = 0;
 
-/** timer 存在条件：有 running/退避，或仍有未 ack 的通知（否则补偿永不执行）。 */
-export function needsTimer(board: BoardState, jobs: JobStore): boolean {
+/** timer 存在条件：优先内部推进；只有通知时按实际可投递性过滤，避免永不可投递的 root 造成永久 timer。 */
+export function needsTimer(board: BoardState, jobs: JobStore, cfg: VigilConfig): boolean {
   if (board.counters.halted) return false;
   if (jobs.all().some((j) => j.status === "running" || j.retryAt != null)) return true;
-  return jobs.all().some((j) => j.id === j.rootId && j.finalized && j.notifyState !== "acked");
+  if (board.counters.turnsUsed >= cfg.maxTurns) return false;
+  return jobs.all().some((j) =>
+    j.id === j.rootId && j.finalized && j.notifyState !== "acked"
+    && !j.purged && j.finalResult?.trigger !== "self");
 }
 
 /** resume 后的一次性恢复唤醒：受 maxTurns 约束，只推进 next。 */

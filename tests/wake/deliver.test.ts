@@ -129,13 +129,26 @@ it("purged root 的证据不再投递", () => {
 
 it("timer 条件纳入未 ack 通知（F76）", () => {
   const b = emptyBoard();
-  expect(needsTimer(b, jobs)).toBe(true);            // beforeEach root finalized + pending
+  expect(needsTimer(b, jobs, DEFAULTS)).toBe(true);   // beforeEach root finalized + pending
   jobs.put(root({ notifyState: "acked" }));
-  expect(needsTimer(b, jobs)).toBe(false);
+  expect(needsTimer(b, jobs, DEFAULTS)).toBe(false);
   jobs.put(root({ status: "running", endedAt: null }));
-  expect(needsTimer(b, jobs)).toBe(true);
+  expect(needsTimer(b, jobs, DEFAULTS)).toBe(true);
   b.counters.halted = true;
-  expect(needsTimer(b, jobs)).toBe(false);
+  expect(needsTimer(b, jobs, DEFAULTS)).toBe(false);
+});
+
+it("self / purged / maxTurns 后不再养 timer（MAJOR #1）", () => {
+  const b = emptyBoard();
+  jobs.put(root({ finalResult: { ok: false, note: "killed", trigger: "self", at: 2 } }));
+  expect(needsTimer(b, jobs, DEFAULTS)).toBe(false);
+  jobs.put(root({ purged: true }));
+  expect(needsTimer(b, jobs, DEFAULTS)).toBe(false);
+  jobs.put(root());
+  b.counters.turnsUsed = DEFAULTS.maxTurns;
+  expect(needsTimer(b, jobs, DEFAULTS)).toBe(false);
+  jobs.put(root({ status: "running", endedAt: null }));
+  expect(needsTimer(b, jobs, DEFAULTS)).toBe(true);  // 内部重试仍需 timer
 });
 
 it("resume 恢复唤醒受预算约束且推进 next（BLOCKER）", () => {

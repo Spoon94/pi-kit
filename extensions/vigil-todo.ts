@@ -14,7 +14,7 @@ import { retentionCandidates } from "../src/board/cleanup.js";
 import { selectNext } from "../src/board/selectors.js";
 import { createBoardStore } from "../src/board/store.js";
 import type { BoardState } from "../src/board/types.js";
-import { chainJobs, chainTerminated } from "../src/jobs/chain.js";
+import { chainJobs, chainTerminated, terminalJob } from "../src/jobs/chain.js";
 import { escalate, requestKill } from "../src/jobs/kill.js";
 import { createMonitor, recoverJobs } from "../src/jobs/monitor.js";
 import { spawnJob, type SpawnRequest } from "../src/jobs/spawn.js";
@@ -177,7 +177,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
       if (root.id !== root.rootId || root.sessionId !== sid || root.finalized) continue;
       if (!chainTerminated(jobs, root.id)) continue;
       const list = chainJobs(jobs, root.id);
-      const last = [...list].sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))[0] ?? root;
+      const last = terminalJob(jobs, root.id) ?? root;
       const ok = last.exitCodeKnown && last.status === "completed" && last.exitCode === 0;
       const note = ok ? "completed"
         : last.status === "killed" ? "killed"
@@ -197,7 +197,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     autofillJob(job.id, deps);
     finalizeTerminated();
     persistBoard(boards.get(sid));
-    runSweep();
+    runSweep(false);                       // 退出路径交给 250ms 合并窗口，catch-up 不抢跑
     refreshOverlay();
     refreshTimer();
     scheduleDeliver();
@@ -223,6 +223,8 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     const cfg = getCfg();
     const next = selectNext(board, cfg.wipLimit, !admitNewSpawnNow());
     const wakeId = `wc${Date.now().toString(36)}${wakeSeq++}`;
+    const counters = { ...board.counters, turnsUsed: board.counters.turnsUsed + 1, renudgeBudget: 1 };
+    persistCounters(board, counters);                       // 补偿与正常 DELIVER 同样计入保险丝
     markSent(jobs, roots, wakeId, Date.now());
     sendWake(composeWake(roots, board, jobs, cfg, next), wakeId, roots);
     return true;
@@ -235,7 +237,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     return running + reserved < cfg.maxConcurrentJobs;
   };
 
-  const runSweep = (): boolean => {
+  const runSweep = (deliver = true): boolean => {
     if (!sid) return false;
     if (isHalted(boards.get(sid))) { refreshTimer(); return false; }   // R20：停机后不推进
     const cfg = getCfg();
@@ -247,13 +249,13 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     finalizeTerminated();
     const catchUp = catchUpScan(d);
     if (r.respawned || r.retained || catchUp.length) persistBoard(boards.get(sid));
-    const sent = deliverCatchUp(catchUp);
+    const sent = deliver ? deliverCatchUp(catchUp) : false;
     refreshTimer();
     return sent;
   };
 
   const refreshTimer = (): void => {
-    const need = !!activeCtx && needsTimer(boards.get(sid), jobs);
+    const need = !!activeCtx && needsTimer(boards.get(sid), jobs, getCfg());
     if (need && !timer) {
       timer = setInterval(tick, 1000);
       timer.unref?.();

@@ -1,7 +1,7 @@
 import type { JobStore } from "./store.js";
 
 export const reservedSlots = (store: JobStore): number =>
-  store.all().filter((j) => j.retryAt != null).length;
+  store.all().filter((j) => j.retryAt != null && !j.purged && !store.get(j.rootId)?.purged).length;
 
 const runningCount = (store: JobStore): number =>
   store.all().filter((j) => j.status === "running").length;

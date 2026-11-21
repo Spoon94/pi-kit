@@ -56,12 +56,12 @@ export function markPurged(jobs: JobStore, taskIds: number[], tasks: Task[]): st
     }
   }
   for (const id of roots) {
-    const root = jobs.get(id);
-    if (!root) continue;
-    const next = { ...root, purged: true };
-    delete next.retryAt;
-    delete next.pendingReverify;
-    jobs.put(next);
+    for (const j of jobs.all().filter((x) => x.rootId === id)) {
+      const next = { ...j, purged: true };
+      delete next.retryAt;
+      delete next.pendingReverify;
+      jobs.put(next);
+    }
   }
   if (roots.size) jobs.save();
   return [...roots];

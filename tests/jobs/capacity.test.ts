@@ -31,3 +31,11 @@ it("新 spawn 受 running + reserved 限制（F47）", () => {
   expect(admitNewSpawn(s, 10)).toBe(false);
   expect(admitNewSpawn(s, 11)).toBe(true);
 });
+
+it("purged 链的退避不占 reservedSlot（MAJOR #2）", () => {
+  const s = createJobStore(mkdtempSync(join(tmpdir(), "vigil-cap-")));
+  s.put(j("R", { retryAt: 100, purged: true }));
+  s.put(j("R2", { rootId: "R", retryAt: 100 }));
+  expect(reservedSlots(s)).toBe(0);
+  expect(admitNewSpawn(s, 10)).toBe(true);
+});

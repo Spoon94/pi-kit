@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { canRetry, canReverify, chainJobs, chainTerminated, isReverifyBranch, retryDelayMs } from "../../src/jobs/chain.js";
+import { canRetry, canReverify, chainJobs, chainTerminated, isReverifyBranch, retryDelayMs, terminalJob } from "../../src/jobs/chain.js";
 import { createJobStore } from "../../src/jobs/store.js";
 import type { Job } from "../../src/jobs/types.js";
 
@@ -63,4 +63,11 @@ it("chainTerminated 是派生判定：running / retryAt / pendingReverify 任一
 
 it("root 记录不存在时视为已终结（F34 孤儿）", () => {
   expect(chainTerminated(store(), "missing")).toBe(true);
+});
+
+it("terminalJob 按写入顺序取最后一条，不依赖 endedAt（MAJOR #4）", () => {
+  const s = store();
+  s.put(j("R", { endedAt: 2 }));
+  s.put(j("R2", { rootId: "R", retryOf: "R", endedAt: 2 }));
+  expect(terminalJob(s, "R")?.id).toBe("R2");
 });

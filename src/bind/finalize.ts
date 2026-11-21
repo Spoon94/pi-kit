@@ -1,6 +1,6 @@
 import { appendEvidence } from "../board/evidence.js";
 import type { BoardStore } from "../board/store.js";
-import { chainJobs, chainTerminated, isReverifyBranch } from "../jobs/chain.js";
+import { chainTerminated, isReverifyBranch, terminalJob } from "../jobs/chain.js";
 import type { JobStore } from "../jobs/store.js";
 
 /** 第一步：链级终结，权威在 sidecar，任何会话都可做，幂等。 */
@@ -8,7 +8,7 @@ export function finalizeChain(rootId: string, jobs: JobStore, now: number, note:
   if (!chainTerminated(jobs, rootId)) return false;
   const root = jobs.get(rootId);
   if (!root || root.finalized) return false;
-  const terminal = [...chainJobs(jobs, rootId)].sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))[0] ?? root;
+  const terminal = terminalJob(jobs, rootId) ?? root;
   const finalNote = ok && isReverifyBranch(terminal, jobs) ? `reverified · ${note}` : note;
   jobs.put({
     ...root,

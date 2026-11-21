@@ -112,3 +112,12 @@ it("重验成功生成 reverified 标记并投影 fresh（BLOCKER）", () => {
   expect(ev?.fp).toBe("fresh");
   expect(ev?.note).toContain("reverified");
 });
+
+it("同毫秒终结时按链写入顺序取末次 job（MAJOR #4）", () => {
+  jobs.put(j("R", { status: "failed", exitCode: 1, endedAt: 2 }));
+  jobs.put(j("R2", { id: "R2", rootId: "R", retryOf: "R", status: "completed", exitCode: 0, endedAt: 2, fpVerdict: "fresh" }));
+  finalizeChain("R", jobs, 20, "done", true);
+  expect(jobs.get("R")?.finalResult?.jobId).toBe("R2");
+  projectFinal("R", jobs, boards, "S", 30);
+  expect(boards.get("S").tasks[0].evidence?.[0].exitCode).toBe(0);
+});

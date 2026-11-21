@@ -4,6 +4,12 @@ import type { Job } from "./types.js";
 export const chainJobs = (store: JobStore, rootId: string): Job[] =>
   store.all().filter((j) => j.rootId === rootId);
 
+/** 链的末次 job：按写入顺序（store 迭代顺序）取最后一条，不依赖毫秒时间戳。 */
+export const terminalJob = (store: JobStore, rootId: string): Job | undefined => {
+  const list = chainJobs(store, rootId);
+  return list[list.length - 1] ?? store.get(rootId);
+};
+
 /** 沿 retryOf 上溯，任一祖先（含自身）带 staleReverifyOf 即属重验分支。 */
 export function isReverifyBranch(job: Job, store: JobStore): boolean {
   let cur: Job | undefined = job;

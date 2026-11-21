@@ -65,12 +65,16 @@ export function resolveConfig(s: { file?: unknown; settings?: unknown; legacy?: 
   return out;
 }
 
-/** mtime 缓存：同一 mtime 不重复解析（规格 §10.1「每渲染读配置」缺陷）。 */
-export function createConfigLoader(read: () => { mtimeMs: number; sources: { file?: unknown; settings?: unknown; legacy?: unknown } }) {
-  let cached: { mtimeMs: number; config: VigilConfig } | undefined;
+/** stat 与读取分离：stat 每渲染都跑，文件读取/解析只在 mtime 或 settings 变化时发生。 */
+export function createConfigLoader(input: {
+  stat(): { mtimeMs: number; settingsKey: string };
+  read(): { file?: unknown; settings?: unknown; legacy?: unknown };
+}) {
+  let cached: { key: string; config: VigilConfig } | undefined;
   return (): VigilConfig => {
-    const { mtimeMs, sources } = read();
-    if (!cached || cached.mtimeMs !== mtimeMs) cached = { mtimeMs, config: resolveConfig(sources) };
+    const { mtimeMs, settingsKey } = input.stat();
+    const key = `${mtimeMs}|${settingsKey}`;
+    if (!cached || cached.key !== key) cached = { key, config: resolveConfig(input.read()) };
     return cached.config;
   };
 }

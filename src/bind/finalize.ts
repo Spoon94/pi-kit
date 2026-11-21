@@ -1,6 +1,6 @@
 import { appendEvidence } from "../board/evidence.js";
 import type { BoardStore } from "../board/store.js";
-import { chainTerminated } from "../jobs/chain.js";
+import { chainJobs, chainTerminated, isReverifyBranch } from "../jobs/chain.js";
 import type { JobStore } from "../jobs/store.js";
 
 /** 第一步：链级终结，权威在 sidecar，任何会话都可做，幂等。 */
@@ -8,10 +8,12 @@ export function finalizeChain(rootId: string, jobs: JobStore, now: number, note:
   if (!chainTerminated(jobs, rootId)) return false;
   const root = jobs.get(rootId);
   if (!root || root.finalized) return false;
+  const terminal = [...chainJobs(jobs, rootId)].sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))[0] ?? root;
+  const finalNote = ok && isReverifyBranch(terminal, jobs) ? `reverified · ${note}` : note;
   jobs.put({
     ...root,
     finalized: true,
-    finalResult: { ok, note, trigger: root.kill?.requestedBy ?? "external", at: now },
+    finalResult: { ok, note: finalNote, trigger: root.kill?.requestedBy ?? "external", at: now, jobId: terminal.id },
   });
   jobs.save();
   return true;
@@ -25,12 +27,13 @@ export function projectFinal(rootId: string, jobs: JobStore, boards: BoardStore,
   const board = boards.get(sessionId);
   const idx = board.tasks.findIndex((t) => t.id === root.taskId);
   if (idx < 0) return false;
+  const terminal = root.finalResult.jobId ? jobs.get(root.finalResult.jobId) ?? root : root;
   const task = { ...board.tasks[idx] };
   appendEvidence(task, {
     ok: root.finalResult.ok, kind: "job", origin: "async", chainFinal: true,
     trigger: root.finalResult.trigger, at: now, known: true,
-    fp: root.fpVerdict, ref: rootId, note: root.finalResult.note,
-    exitCode: root.exitCode,
+    fp: terminal.fpVerdict, ref: rootId, note: root.finalResult.note,
+    exitCode: terminal.exitCode,
   });
   const tasks = [...board.tasks]; tasks[idx] = task;
   boards.commit(sessionId, { ...board, tasks });

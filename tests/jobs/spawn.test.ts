@@ -38,3 +38,17 @@ it("空命令直接失败，不产生 job", () => {
   const d = dir();
   expect(spawnJob({ command: "   ", cwd: d }, d, 1).ok).toBe(false);
 });
+
+it("fpStart 由调用方在 spawn 前采集并原样记录（BLOCKER）", () => {
+  const d = dir();
+  const r = spawnJob({ command: "true", cwd: d, fpStart: "PRE-SPAWN" }, d, 1);
+  if (!r.ok) throw new Error(r.error);
+  expect(r.job.fpStart).toBe("PRE-SPAWN");
+});
+
+it("无效 cwd 只返回错误，不产生未处理 error 事件（BLOCKER）", async () => {
+  const d = dir();
+  const r = spawnJob({ command: "true", cwd: "/nonexistent-vigil-cwd" }, d, 1);
+  expect(r.ok).toBe(false);
+  await new Promise((res) => setTimeout(res, 50));
+});

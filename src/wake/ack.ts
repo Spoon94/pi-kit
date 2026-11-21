@@ -49,6 +49,10 @@ export function createAckTracker() {
       pendingBoundary = undefined;
       return ackByWakeId(jobs, wakeId);
     },
+    /** 无续跑的 settle：boundary entries 被丢弃，清掉等待，避免下次无关 agent_start 误 ack。 */
+    onSettled(): void {
+      pendingBoundary = undefined;
+    },
     onMessage(jobs: JobStore, customType: string, wakeId: unknown): number {
       if (customType !== WAKE_CUSTOM_TYPE || typeof wakeId !== "string") return 0;
       return ackByWakeId(jobs, wakeId);

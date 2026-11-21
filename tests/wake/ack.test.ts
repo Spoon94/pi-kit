@@ -58,6 +58,16 @@ it("boundary entries 被丢弃 ⇒ 无 agent_start ⇒ 留 sent（F71）", () =>
   expect(s.get("R")?.notifyState).toBe("sent");
 });
 
+it("settle 清除等待，后续无关 agent_start 不误 ack（BLOCKER）", () => {
+  const s = store(); s.put(j("R"));
+  markSent(s, ["R"], "wB", 100);
+  const t = createAckTracker();
+  t.expectBoundary("wB", ["R"]);
+  t.onSettled();
+  expect(t.onAgentStart(s, "S")).toBe(0);
+  expect(s.get("R")?.notifyState).toBe("sent");
+});
+
 it("acked 幂等，重复 ack 不重复计数", () => {
   const s = store(); s.put(j("R")); markSent(s, ["R"], "w1", 100);
   expect(ackByWakeId(s, "w1")).toBe(1);

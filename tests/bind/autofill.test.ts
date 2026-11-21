@@ -126,4 +126,37 @@ describe("人工优先（R2-5）", () => {
     expect(autofillJob("A", { ...deps, sessionId: "S" }).action).toBe("recorded");
     expect(boards.get("S").tasks[0].evidence ?? []).toHaveLength(0);
   });
+  it("任务已 completed 时失败作业不降级为 parked（BLOCKER）", () => {
+    const b = boards.get("S"); b.tasks[0].status = "completed"; boards.commit("S", b);
+    jobs.put(job({ status: "failed", exitCode: 1 }));
+    const r = autofillJob("A", deps);
+    expect(r.action).toBe("recorded");
+    expect(boards.get("S").tasks[0].status).toBe("completed");
+    expect(boards.get("S").tasks[0].lastFailure).toBeUndefined();
+    expect(jobs.get("A")?.retryAt).toBeUndefined();
+  });
+  it("任务已 parked 时失败作业不重试、不覆盖 reason（BLOCKER）", () => {
+    const b = boards.get("S");
+    b.tasks[0].status = "parked";
+    b.tasks[0].park = { reason: "人工", at: 250, from: "in_progress" };
+    boards.commit("S", b);
+    jobs.put(job({ status: "failed", exitCode: 1 }));
+    const r = autofillJob("A", deps);
+    expect(r.action).toBe("recorded");
+    expect(boards.get("S").tasks[0].park?.reason).toBe("人工");
+    expect(boards.get("S").tasks[0].lastFailure).toBeUndefined();
+    expect(jobs.get("A")?.retryAt).toBeUndefined();
+  });
+  it("任务已 parked 时 stale 作业不触发重验（BLOCKER）", () => {
+    const b = boards.get("S");
+    b.tasks[0].status = "parked";
+    b.tasks[0].park = { reason: "人工", at: 250, from: "in_progress" };
+    boards.commit("S", b);
+    let calls = 0;
+    deps.respawn = () => { calls++; return { ok: true }; };
+    jobs.put(job({ fpEnd: "Y" }));
+    expect(autofillJob("A", deps).action).toBe("recorded");
+    expect(calls).toBe(0);
+    expect(boards.get("S").tasks[0].park?.reason).toBe("人工");
+  });
 });

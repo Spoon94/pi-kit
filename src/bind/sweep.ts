@@ -16,8 +16,9 @@ export function sweepRespawns(d: SweepDeps): number {
   if (d.boards.get(d.sessionId).counters.halted) return 0;      // R20：停机后不 respawn
   let n = 0;
   for (const job of d.jobs.all()) {
-    const dueBackoff = job.retryAt != null && job.retryAt <= d.now;
     const root = d.jobs.get(job.rootId);
+    if (job.purged || root?.purged) continue;                 // R19：清掉的链不再 respawn
+    const dueBackoff = job.retryAt != null && job.retryAt <= d.now;
     const hasReverifyJob = d.jobs.all().some((j) => j.rootId === job.rootId && j.staleReverifyOf != null);
     const dueReverify = root?.pendingReverify === true && !root.finalized && job.id === root.id && !hasReverifyJob;
     if (root?.pendingReverify === true && hasReverifyJob && !root.finalized && job.id === root.id) {
@@ -62,6 +63,7 @@ export function catchUpScan(d: SweepDeps): string[] {
     if (root.id !== root.rootId) continue;                 // 只看 root
     if (root.sessionId !== d.sessionId) continue;
     if (root.purged) continue;                             // R19：清掉的链不再补发
+    if (root.finalResult?.trigger === "self") continue;    // R6-5：自己 park/kill 的链不叫醒自己
     if (!root.finalized) continue;
     if (!root.evidenceApplied) { out.push(root.id); continue; }
     if (root.notifyState === "acked") continue;

@@ -75,6 +75,15 @@ it("清理保留 counters（不得重置 turnsUsed 绕过保险丝）", () => {
   expect(r.state.counters.turnsUsed).toBe(42);
 });
 
+it("清理已完成依赖后移除 blockedBy 引用，下游可推进（BLOCKER）", () => {
+  const s = b([t(1, { status: "completed" }), t(2, { blockedBy: [1] })]);
+  const cleared = applyMutation(s, { action: "clear" }, ctx());
+  expect(cleared.state.tasks.map((x) => x.id)).toEqual([2]);
+  expect(cleared.state.tasks[0].blockedBy).toBeUndefined();
+  const advanced = applyMutation(cleared.state, { action: "update", id: 2, status: "in_progress" }, ctx());
+  expect(advanced.op.kind).toBe("update");
+});
+
 const job = (id: string, o: Partial<Job> = {}): Job => ({
   id, label: id, command: "true", logPath: "/tmp/a.log", cwd: "/tmp", pid: 1,
   status: "completed", exitCode: 0, exitCodeKnown: true, startedAt: 1, endedAt: 2,
@@ -89,6 +98,15 @@ it("markPurged 标记绑定链的 root（R19）", () => {
   const roots = markPurged(jobs, [1], [t(1, { status: "completed", jobs: ["R"] })]);
   expect(roots).toEqual(["R"]);
   expect(jobs.get("R")?.purged).toBe(true);
+});
+
+it("markPurged 同时取消退避与待重验（BLOCKER）", () => {
+  const jobs = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_c1nsk0qv}}")));
+  jobs.put(job("R", { retryAt: 500, pendingReverify: true }));
+  markPurged(jobs, [1], [t(1, { status: "completed", jobs: ["R"] })]);
+  expect(jobs.get("R")?.purged).toBe(true);
+  expect(jobs.get("R")?.retryAt).toBeUndefined();
+  expect(jobs.get("R")?.pendingReverify).toBeFalsy();
 });
 
 it("retention 只候选 completed/deleted，绝不包含 parked", () => {

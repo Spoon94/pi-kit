@@ -89,3 +89,26 @@ it("迟投影 at=now 不被 watermark 遮蔽（F91）", () => {
   projectFinal("R", jobs, boards, "S", 200);
   expect(boards.get("S").tasks[0].evidence?.[0].at).toBe(200);
 });
+
+it("投影读末次 job 的退出码/指纹（重试成功不显示 exit 1）（BLOCKER）", () => {
+  jobs.put(j("R", { status: "failed", exitCode: 1, endedAt: 2 }));
+  jobs.put(j("R2", { id: "R2", rootId: "R", retryOf: "R", status: "completed", exitCode: 0, endedAt: 10, fpVerdict: "fresh" }));
+  finalizeChain("R", jobs, 20, "done", true);
+  expect(jobs.get("R")?.finalResult?.jobId).toBe("R2");
+  projectFinal("R", jobs, boards, "S", 30);
+  const ev = boards.get("S").tasks[0].evidence?.[0];
+  expect(ev?.exitCode).toBe(0);
+  expect(ev?.fp).toBe("fresh");
+});
+
+it("重验成功生成 reverified 标记并投影 fresh（BLOCKER）", () => {
+  jobs.put(j("R", { status: "completed", exitCode: 0, endedAt: 2, fpVerdict: "stale" }));
+  jobs.put(j("R2", { id: "R2", rootId: "R", retryOf: "R", staleReverifyOf: "R",
+    status: "completed", exitCode: 0, endedAt: 10, fpVerdict: "fresh" }));
+  finalizeChain("R", jobs, 20, "done", true);
+  expect(jobs.get("R")?.finalResult?.note).toContain("reverified");
+  projectFinal("R", jobs, boards, "S", 30);
+  const ev = boards.get("S").tasks[0].evidence?.[0];
+  expect(ev?.fp).toBe("fresh");
+  expect(ev?.note).toContain("reverified");
+});

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { emptyBoard } from "../../src/board/types.js";
 import { createJobStore } from "../../src/jobs/store.js";
-import { createBgRunTool, detectToolConflict, preflight, type ToolDeps } from "../../src/tool/register.js";
+import { createBgRunTool, createTodoTool, detectToolConflict, preflight, type ToolDeps } from "../../src/tool/register.js";
 import { DEFAULTS } from "../../src/lib/config.js";
 import type { RuleContext } from "../../src/board/invariants.js";
 
@@ -86,4 +86,44 @@ it("bg_run 指向 pending 且 WIP 满被拒，不绑不推进（F41）", async (
   expect(spawned).toBe(0);
   expect(b.tasks[1].jobs).toBeUndefined();
   expect(b.tasks[1].status).toBe("pending");
+});
+
+it("verify 期间人工 park 不被旧快照覆盖（BLOCKER）", async () => {
+  let board = emptyBoard();
+  board.tasks = [{ id: 1, subject: "v", status: "in_progress", verify: { kind: "command", command: "true" } }];
+  board.nextId = 2;
+  let resolveVerify!: (r: { ok: boolean; exitCode: number | null }) => void;
+  const deps = toolDeps(board, {
+    board: () => board,
+    commit: (s) => { board = s; },
+    runVerify: () => new Promise((res) => { resolveVerify = res; }),
+  });
+  const pending = createTodoTool(deps).execute({ action: "verify", id: 1 });
+  board = { ...board, tasks: [{ ...board.tasks[0], status: "parked", park: { reason: "人工", at: 5, from: "in_progress" } }] };
+  resolveVerify({ ok: true, exitCode: 0 });
+  const r = await pending;
+  expect(r.isError).toBeUndefined();
+  expect(board.tasks[0].status).toBe("parked");
+  expect(board.tasks[0].park?.reason).toBe("人工");
+  expect(board.tasks[0].evidence).toHaveLength(1);
+});
+
+it("verify 期间任务被删除不得复活（BLOCKER）", async () => {
+  let board = emptyBoard();
+  board.tasks = [{ id: 1, subject: "v", status: "in_progress", verify: { kind: "command", command: "true" } }];
+  board.nextId = 2;
+  let resolveVerify!: (r: { ok: boolean; exitCode: number | null }) => void;
+  let commits = 0;
+  const deps = toolDeps(board, {
+    board: () => board,
+    commit: (s) => { commits++; board = s; },
+    runVerify: () => new Promise((res) => { resolveVerify = res; }),
+  });
+  const pending = createTodoTool(deps).execute({ action: "verify", id: 1 });
+  board = { ...board, tasks: [] };
+  resolveVerify({ ok: true, exitCode: 0 });
+  const r = await pending;
+  expect(r.isError).toBe(true);
+  expect(board.tasks).toHaveLength(0);
+  expect(commits).toBe(0);
 });

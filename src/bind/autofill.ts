@@ -62,6 +62,9 @@ export function autofillJob(jobId: string, d: AutofillDeps): { action: AutofillA
     next.park = { reason, at: d.now, from: task.status };
   };
 
+  // 人工优先：回填时任务已不在 in_progress ⇒ 只记证据，绝不改状态/重试/park
+  if (humanFirst) return commit(() => {}, "recorded");
+
   if (job.status === "failed" && job.exitCodeKnown && job.exitCode !== 0) {
     recordFailure(task, { exitCode: job.exitCode, ref: job.id, at: d.now, note: ev.note });
     if (canRetry(job, d.jobs, d.cfg.retries)) {
@@ -75,7 +78,6 @@ export function autofillJob(jobId: string, d: AutofillDeps): { action: AutofillA
 
   if (job.status === "killed" || !job.exitCodeKnown) {
     const reason = job.status === "killed" ? "killed" : "退出码未知，需重验";
-    if (humanFirst) return commit(() => {}, "recorded");
     return commit((t) => park(t, reason), "parked", reason);
   }
 
@@ -94,15 +96,12 @@ export function autofillJob(jobId: string, d: AutofillDeps): { action: AutofillA
         return commit(() => {}, "reverify");
       }
       const reason = "无空闲槽位重验";
-      if (humanFirst) return commit(() => {}, "recorded");
       return commit((t) => park(t, reason), "parked", reason);
     }
     const reason = "工作区持续变动，证据无法确认";
-    if (humanFirst) return commit(() => {}, "recorded");
     return commit((t) => park(t, reason), "parked", reason);
   }
 
-  if (humanFirst) return commit(() => {}, "recorded");
   if (task.verifyChanged) return commit(() => {}, "recorded");
   const withEv: Task = { ...task };
   appendEvidence(withEv, ev);

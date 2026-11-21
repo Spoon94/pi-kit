@@ -30,18 +30,22 @@ import { createOverlayController } from "../src/ui/overlay.js";
 import { WIDGET_KEY, renderDoctor, renderPanel, renderTodos } from "../src/ui/panel.js";
 import { clearRenudgeOnSettled, createAckTracker, markSent, resetOnUserInput } from "../src/wake/ack.js";
 import { WAKE_CUSTOM_TYPE, composeWake } from "../src/wake/compose.js";
-import { tryDeliver } from "../src/wake/deliver.js";
+import { needsTimer, recoveryWake, settleSend, tryDeliver } from "../src/wake/deliver.js";
 
 const OWN_SOURCE = "pi-kit";
 const BOARD_CUSTOM_TYPE = "rpiv-todo-state";
 
-function readConfigFile(): { mtimeMs: number; file?: unknown } {
-  const path = join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "pi-kit", "config.json");
-  try {
-    return { mtimeMs: statSync(path).mtimeMs, file: JSON.parse(readFileSync(path, "utf8")) };
-  } catch {
-    return { mtimeMs: 0 };
-  }
+function configPath(): string {
+  return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "pi-kit", "config.json");
+}
+
+function settingsSources(pi: ExtensionAPI): { settings?: unknown; legacy?: unknown } {
+  const s = pi.getSettings() as unknown as Record<string, unknown>;
+  return { settings: s.vigilTodo, legacy: s.bgRun };
+}
+
+function settingsKey(pi: ExtensionAPI): string {
+  try { return JSON.stringify(settingsSources(pi)) ?? "null"; } catch { return "unserializable"; }
 }
 
 export default function vigilTodo(pi: ExtensionAPI): void {
@@ -63,10 +67,17 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   let conflict = detectToolConflict(pi.getAllTools(), OWN_SOURCE);
   let wakeSeq = 0;
 
-  const getCfg = createConfigLoader(() => {
-    const { mtimeMs, file } = readConfigFile();
-    const settings = pi.getSettings() as unknown as Record<string, unknown>;
-    return { mtimeMs, sources: { file, settings: settings.vigilTodo, legacy: settings.bgRun } };
+  const getCfg = createConfigLoader({
+    stat: () => {
+      let mtimeMs = 0;
+      try { mtimeMs = statSync(configPath()).mtimeMs; } catch { /* 缺失视为 0 */ }
+      return { mtimeMs, settingsKey: settingsKey(pi) };
+    },
+    read: () => {
+      let file: unknown;
+      try { file = JSON.parse(readFileSync(configPath(), "utf8")); } catch { /* 缺失/损坏 */ }
+      return { file, ...settingsSources(pi) };
+    },
   });
 
   const overlay = createOverlayController({
@@ -114,9 +125,10 @@ export default function vigilTodo(pi: ExtensionAPI): void {
 
   // ── 作业 ───────────────────────────────────────────────────────────────
   const spawnChain = (req: SpawnRequest): { ok: boolean; error?: string; jobId?: string } => {
-    const r = spawnJob(req, runDir(req.cwd), Date.now());
+    // 起点指纹必须在 spawn 之前采集：进程可能立刻改工作区
+    const fpStart = collectFingerprint(req.cwd);
+    const r = spawnJob({ ...req, fpStart }, runDir(req.cwd), Date.now());
     if (!r.ok) return { ok: false, error: r.error };
-    r.job.fpStart = collectFingerprint(req.cwd);
     jobs.put(r.job);
     jobs.save();
     monitor.watch(r.job, onJobExit, r.child);
@@ -192,18 +204,28 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   };
 
   // ── sweep ─────────────────────────────────────────────────────────────
-  const deliverCatchUp = (roots: string[]): void => {
-    if (!roots.length || !activeCtx || !activeCtx.isIdle()) return;
+  const sendWake = (text: string, wakeId: string, roots: string[]): void => {
+    try {
+      const maybe = pi.sendMessage(
+        { customType: WAKE_CUSTOM_TYPE, content: text, display: false, details: { wakeId, jobs: roots } },
+        { deliverAs: "steer", triggerTurn: true },
+      );
+      settleSend(maybe, () => notify("vigil-todo: 唤醒发送失败，等待 catch-up 补偿", "warning"));
+    } catch (e) {
+      notify(`vigil-todo: 唤醒发送失败（${String(e)}），等待 catch-up 补偿`, "warning");
+    }
+  };
+
+  const deliverCatchUp = (roots: string[]): boolean => {
+    if (!roots.length || !activeCtx || !activeCtx.isIdle()) return false;
     const board = boards.get(sid);
-    if (board.counters.turnsUsed >= getCfg().maxTurns) return;
+    if (board.counters.turnsUsed >= getCfg().maxTurns) return false;
     const cfg = getCfg();
     const next = selectNext(board, cfg.wipLimit, !admitNewSpawnNow());
     const wakeId = `wc${Date.now().toString(36)}${wakeSeq++}`;
     markSent(jobs, roots, wakeId, Date.now());
-    pi.sendMessage(
-      { customType: WAKE_CUSTOM_TYPE, content: composeWake(roots, board, jobs, cfg, next), display: false, details: { wakeId, jobs: roots } },
-      { deliverAs: "steer", triggerTurn: true },
-    );
+    sendWake(composeWake(roots, board, jobs, cfg, next), wakeId, roots);
+    return true;
   };
 
   const admitNewSpawnNow = (): boolean => {
@@ -213,9 +235,9 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     return running + reserved < cfg.maxConcurrentJobs;
   };
 
-  const runSweep = (): void => {
-    if (!sid) return;
-    if (isHalted(boards.get(sid))) { refreshTimer(); return; }   // R20：停机后不推进
+  const runSweep = (): boolean => {
+    if (!sid) return false;
+    if (isHalted(boards.get(sid))) { refreshTimer(); return false; }   // R20：停机后不推进
     const cfg = getCfg();
     const d: SweepDeps = {
       boards, jobs, cfg, now: Date.now(), sessionId: sid, respawn: spawnChain,
@@ -225,12 +247,13 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     finalizeTerminated();
     const catchUp = catchUpScan(d);
     if (r.respawned || r.retained || catchUp.length) persistBoard(boards.get(sid));
-    deliverCatchUp(catchUp);
+    const sent = deliverCatchUp(catchUp);
     refreshTimer();
+    return sent;
   };
 
   const refreshTimer = (): void => {
-    const need = !!activeCtx && jobs.all().some((j) => j.status === "running" || j.retryAt != null);
+    const need = !!activeCtx && needsTimer(boards.get(sid), jobs);
     if (need && !timer) {
       timer = setInterval(tick, 1000);
       timer.unref?.();
@@ -291,10 +314,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     if (d.kind !== "deliver") return;
     persistCounters(board, d.counters);
     markSent(jobs, d.roots, d.wakeId, Date.now());
-    pi.sendMessage(
-      { customType: WAKE_CUSTOM_TYPE, content: d.text, display: false, details: { wakeId: d.wakeId, jobs: d.roots } },
-      { deliverAs: "steer", triggerTurn: true },
-    );
+    sendWake(d.text, d.wakeId, d.roots);
   };
 
   const scheduleDeliver = (): void => {
@@ -393,11 +413,22 @@ export default function vigilTodo(pi: ExtensionAPI): void {
         }
         if (arg === "resume") {
           const ok = resume(haltDeps());
-          if (ok) {
-            persistBoard(boards.get(sid));
-            refreshTimer();
-            refreshOverlay();
+          if (!ok) return;
+          persistBoard(boards.get(sid));
+          const sent = runSweep();
+          if (!sent) {
+            const board = boards.get(sid);
+            const rec = recoveryWake({
+              board, jobs, cfg: getCfg(), now: Date.now(), trigger: "async",
+              modelAdvanced: true, capacityFull: !admitNewSpawnNow(),
+            });
+            if (rec.kind === "deliver") {
+              persistCounters(board, rec.counters);
+              sendWake(rec.text, rec.wakeId, rec.roots);
+            }
           }
+          refreshTimer();
+          refreshOverlay();
           return;
         }
         if (arg === "doctor") {
@@ -487,6 +518,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
 
     pi.on("agent_settled", (_event, ctx) => {
       initSession(ctx);
+      ackTracker.onSettled();                                     // entries 被丢弃时清掉等待，防误 ack
       const board = boards.get(sid);
       const counters = clearRenudgeOnSettled(board.counters);
       if (counters.renudgeBudget !== board.counters.renudgeBudget) persistCounters(board, counters);

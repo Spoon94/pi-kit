@@ -6,6 +6,7 @@ import type { Job } from "./types.js";
 export interface SpawnRequest {
   command: string; label?: string; cwd: string; taskId?: number; sessionId?: string;
   rootId?: string; retryOf?: string; attempt?: number; staleReverifyOf?: string;
+  fpStart?: string;
 }
 
 export type SpawnResult =
@@ -38,12 +39,15 @@ export function spawnJob(req: SpawnRequest, dir: string, now: number): SpawnResu
     const child = spawn("sh", ["-c", req.command], {
       cwd: req.cwd, detached: true, stdio: ["ignore", fd, fd], env: { ...process.env, PWD: req.cwd },
     });
+    // 立即接管异步 error：无效 cwd 等失败路径不得变成未处理事件
+    child.once("error", () => { /* monitor 或调用方负责语义；这里只防崩溃 */ });
     if (child.pid === undefined) return { ok: false, error: "spawn returned no pid" };
     const job: Job = {
       id, label: req.label?.trim() || req.command.trim().slice(0, 50), command: req.command,
       logPath, cwd: req.cwd, pid: child.pid, status: "running",
       exitCode: null, exitCodeKnown: false, startedAt: now, endedAt: null,
       startStamp: readStartStamp(child.pid),
+      fpStart: req.fpStart,
       fpVerdict: "unknown", interferers: [],
       rootId: req.rootId ?? id, retryOf: req.retryOf, attempt: req.attempt ?? 1,
       staleReverifyOf: req.staleReverifyOf,

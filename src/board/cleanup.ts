@@ -32,7 +32,16 @@ export function planCleanup(state: BoardState, scope: ClearScope | undefined, fo
 
 export function applyCleanup(state: BoardState, plan: CleanupPlan, _now: number): BoardState {
   const drop = new Set(plan.remove);
-  return { ...state, tasks: state.tasks.filter((t) => !drop.has(t.id)) };
+  const tasks = state.tasks
+    .filter((t) => !drop.has(t.id))
+    .map((t) => {
+      if (!t.blockedBy?.length || !t.blockedBy.some((id) => drop.has(id))) return t;
+      const kept = t.blockedBy.filter((id) => !drop.has(id));
+      const next = { ...t };
+      if (kept.length) next.blockedBy = kept; else delete next.blockedBy;
+      return next;
+    });
+  return { ...state, tasks };
 }
 
 /** 清理任务时同步标记 sidecar，避免 resume 后重放或 catch-up 重新补发（R19）。 */
@@ -48,7 +57,11 @@ export function markPurged(jobs: JobStore, taskIds: number[], tasks: Task[]): st
   }
   for (const id of roots) {
     const root = jobs.get(id);
-    if (root) jobs.put({ ...root, purged: true });
+    if (!root) continue;
+    const next = { ...root, purged: true };
+    delete next.retryAt;
+    delete next.pendingReverify;
+    jobs.put(next);
   }
   if (roots.size) jobs.save();
   return [...roots];

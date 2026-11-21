@@ -79,16 +79,22 @@ export function createTodoTool(deps: ToolDeps): ToolDef {
     async execute(raw) {
       const p = asParams(prepareTodoArguments(raw));
       if (p.action === "verify") {
+        const before = deps.board();
+        const target = before.tasks.find((t) => t.id === p.id);
+        if (!target) return errResult(`#${p.id} not found`);
+        if (!target.verify) return errResult(`#${target.id} has no verify command → todo({action:"update", id:${target.id}, verify:{kind:"command", command:"…"}})`);
+        const r = await deps.runVerify(target.verify.command);
+        // await 后必须重读：期间可能有人工 park、并发证据或删除，旧快照不得覆盖
         const state = deps.board();
         const task = state.tasks.find((t) => t.id === p.id);
-        if (!task) return errResult(`#${p.id} not found`);
-        if (!task.verify) return errResult(`#${task.id} has no verify command → todo({action:"update", id:${task.id}, verify:{kind:"command", command:"…"}})`);
-        const r = await deps.runVerify(task.verify.command);
+        if (!task || task.status === "deleted") {
+          return errResult(`#${p.id} 在 verify 期间被删除；证据丢弃，不复活任务`);
+        }
         const next: Task = { ...task };
         appendEvidence(next, {
           ok: r.ok, kind: "command", origin: "tool", chainFinal: false, at: deps.now(),
           exitCode: r.exitCode, known: r.exitCode !== null, fp: "unknown",
-          note: `verify: ${task.verify.command}`,
+          note: `verify: ${target.verify.command}`,
         });
         const tasks = [...state.tasks]; tasks[state.tasks.indexOf(task)] = next;
         const board = { ...state, tasks };

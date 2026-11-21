@@ -14,7 +14,7 @@ export interface Job {
   rootId: string; retryOf?: string; attempt: number;
   retryAt?: number;
   finalized?: boolean;
-  finalResult?: { ok: boolean; note: string; trigger: "self" | "external"; at: number };
+  finalResult?: { ok: boolean; note: string; trigger: "self" | "external"; at: number; jobId?: string };
   pendingReverify?: boolean;
   purged?: boolean;
   kill?: { requestedBy: "self" | "external"; at: number };

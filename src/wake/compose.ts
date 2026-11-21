@@ -10,18 +10,19 @@ export const WAKE_CUSTOM_TYPE = "vigil-todo-wake";
 export function composeWake(roots: string[], board: BoardState, jobs: JobStore, cfg: VigilConfig, next: Task | undefined): string {
   const lines: string[] = [];
   for (const id of roots) {
-    const j = jobs.get(id);
-    if (!j) continue;
+    const root = jobs.get(id);
+    if (!root) continue;
+    const j = root.finalResult?.jobId ? jobs.get(root.finalResult.jobId) ?? root : root;
     const task = board.tasks.find((t) => t.id === j.taskId);
     const label = sanitizeTerminalText(j.label);
-    const tag = j.finalResult?.ok ? "✓" : "✗";
-    lines.push(`[vigil-todo] #${j.taskId ?? "?"} ${label} ${tag} exit ${j.exitCode ?? "?"} (${j.id}) ${fpReason(j)}`);
-    if (j.finalResult && !j.finalResult.ok) lines.push(`  ${sanitizeTerminalText(j.finalResult.note)}`);
+    const tag = root.finalResult?.ok ? "✓" : "✗";
+    lines.push(`[vigil-todo] #${j.taskId ?? "?"} ${label} ${tag} exit ${j.exitCode ?? "?"} (${root.id}) ${fpReason(j)}`);
+    if (root.finalResult && !root.finalResult.ok) lines.push(`  ${sanitizeTerminalText(root.finalResult.note)}`);
     if (j.fpVerdict === "stale" && task?.status === "parked") {
       lines.push(`  → todo({action:"update", id:${j.taskId}, status:"completed", accept:"stale"})`);
       lines.push(`    todo({action:"verify", id:${j.taskId}})`);
     }
-    if (!j.finalResult?.ok) {
+    if (!root.finalResult?.ok) {
       const tail = tailLines(j.logPath, cfg.tailLines, cfg.maxTailBytes);
       if (tail.length) { lines.push(`  log tail (last ${tail.length}):`); for (const l of tail) lines.push(`    ${sanitizeTerminalText(l).slice(0, 200)}`); }
     }

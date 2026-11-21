@@ -6,7 +6,8 @@ import { emptyBoard, type BoardState, type Evidence } from "../../src/board/type
 import { createJobStore } from "../../src/jobs/store.js";
 import type { Job } from "../../src/jobs/types.js";
 import { DEFAULTS } from "../../src/lib/config.js";
-import { tryDeliver } from "../../src/wake/deliver.js";
+import { markSent } from "../../src/wake/ack.js";
+import { needsTimer, recoveryWake, settleSend, tryDeliver } from "../../src/wake/deliver.js";
 
 let jobs: ReturnType<typeof createJobStore>;
 let board: BoardState;
@@ -107,4 +108,53 @@ it("多条 chainFinal 合并为一条（F38）", () => {
   const r = tryDeliver(input());
   if (r.kind !== "deliver") throw new Error("expected deliver");
   expect(r.roots.sort()).toEqual(["R", "R2"]);
+});
+
+it("root 已 sent 后正常通道不重复投递（BLOCKER）", () => {
+  markSent(jobs, ["R"], "w1", 100);
+  expect(tryDeliver(input()).kind).toBe("none");
+});
+
+it("root 已 acked 后正常通道不重复投递", () => {
+  markSent(jobs, ["R"], "w1", 100);
+  const s = jobs;
+  s.put({ ...s.get("R")!, notifyState: "acked" });
+  expect(tryDeliver(input()).kind).toBe("none");
+});
+
+it("purged root 的证据不再投递", () => {
+  jobs.put(root({ purged: true }));
+  expect(tryDeliver(input()).kind).toBe("none");
+});
+
+it("timer 条件纳入未 ack 通知（F76）", () => {
+  const b = emptyBoard();
+  expect(needsTimer(b, jobs)).toBe(true);            // beforeEach root finalized + pending
+  jobs.put(root({ notifyState: "acked" }));
+  expect(needsTimer(b, jobs)).toBe(false);
+  jobs.put(root({ status: "running", endedAt: null }));
+  expect(needsTimer(b, jobs)).toBe(true);
+  b.counters.halted = true;
+  expect(needsTimer(b, jobs)).toBe(false);
+});
+
+it("resume 恢复唤醒受预算约束且推进 next（BLOCKER）", () => {
+  const r = recoveryWake(input());
+  expect(r.kind).toBe("deliver");
+  if (r.kind !== "deliver") return;
+  expect(r.counters.turnsUsed).toBe(1);
+  expect(r.counters.wakeWatermark).toBe(0);
+  expect(r.text).toContain("next: #2");
+  board.counters.turnsUsed = DEFAULTS.maxTurns;
+  expect(recoveryWake(input()).kind).toBe("none");
+  board.counters.turnsUsed = 0;
+  board.counters.halted = true;
+  expect(recoveryWake(input()).kind).toBe("none");
+});
+
+it("settleSend 吞掉异步 rejection（BLOCKER）", async () => {
+  let err: unknown;
+  settleSend(Promise.reject(new Error("boom")), (e) => { err = e; });
+  await new Promise((res) => setTimeout(res, 0));
+  expect((err as Error).message).toBe("boom");
 });

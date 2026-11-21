@@ -57,3 +57,15 @@ it("消息长度受控（≤1200 token 近似：字符上限）", () => {
   const b = emptyBoard(); b.tasks = [{ id: 1, subject: "回归", status: "parked" }];
   expect(composeWake(["R"], b, jobs, DEFAULTS, undefined).length).toBeLessThan(4800);
 });
+
+it("消息读末次 job 而非 root（重试成功不显示 exit 1）（BLOCKER）", () => {
+  const jobs = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_9q0d6s1e}}")));
+  jobs.put(j({ id: "R", exitCode: 1, fpVerdict: "stale",
+    finalResult: { ok: true, note: "done", trigger: "external", at: 2, jobId: "R2" } }));
+  jobs.put(j({ id: "R2", rootId: "R", exitCode: 0, fpVerdict: "fresh", label: "第二次" }));
+  const b = emptyBoard(); b.tasks = [{ id: 1, subject: "回归", status: "completed" }];
+  const text = composeWake(["R"], b, jobs, DEFAULTS, undefined);
+  expect(text).toContain("exit 0");
+  expect(text).toContain("fp:fresh");
+  expect(text).not.toContain("exit 1");
+});

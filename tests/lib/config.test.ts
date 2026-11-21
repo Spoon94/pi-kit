@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CONFIG_KEYS, DEFAULTS, resolveConfig } from "../../src/lib/config.js";
+import { CONFIG_KEYS, DEFAULTS, createConfigLoader, resolveConfig } from "../../src/lib/config.js";
 
 describe("resolveConfig", () => {
   it("空来源全部走默认值", () => {
@@ -63,4 +63,20 @@ it("逐键非法值只影响该键，其他键仍生效", () => {
   const c = resolveConfig({ file: { wipLimit: -5, maxTurns: 7 } });
   expect(c.wipLimit).toBe(DEFAULTS.wipLimit);
   expect(c.maxTurns).toBe(7);
+});
+
+it("loader 分离 stat 与读取：未变不读文件，settings/mtime 变化才重读（BLOCKER）", () => {
+  let reads = 0; let mtime = 1; let key = "a";
+  const load = createConfigLoader({
+    stat: () => ({ mtimeMs: mtime, settingsKey: key }),
+    read: () => { reads++; return { file: { maxTurns: reads + 1 } }; },
+  });
+  const first = load();
+  expect(reads).toBe(1);
+  expect(load()).toBe(first);
+  expect(reads).toBe(1);
+  key = "b";
+  expect(load().maxTurns).toBe(3);
+  mtime = 2;
+  expect(load().maxTurns).toBe(4);
 });

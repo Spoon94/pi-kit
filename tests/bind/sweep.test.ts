@@ -95,6 +95,20 @@ it("purged 链不再补发（R19）", () => {
   expect(catchUpScan(d)).toEqual([]);
 });
 
+it("trigger:self 的终结不补发（F81）", () => {
+  jobs.put(j("R", { finalized: true, evidenceApplied: true, notifyState: "pending",
+    finalResult: { ok: false, note: "killed", trigger: "self", at: 2 } }));
+  expect(catchUpScan(d)).toEqual([]);
+});
+
+it("purged 链不被 respawn（BLOCKER）", () => {
+  jobs.put(j("R", { retryAt: 100, purged: true }));
+  let calls = 0;
+  d.respawn = () => { calls++; return { ok: true }; };
+  expect(sweepRespawns(d)).toBe(0);
+  expect(calls).toBe(0);
+});
+
 it("respawn 抛错 → 不重试、清退避、任务 parked(spawn failed)（F32）", () => {
   jobs.put(j("R", { retryAt: 500 }));
   d.respawn = () => ({ ok: false });

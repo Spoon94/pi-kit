@@ -75,3 +75,22 @@ export function checkStructure(state: BoardState, task: Task, p: UpdateParams, c
   }
   return undefined;
 }
+
+export interface CreateItem {
+  subject: string; description?: string; activeForm?: string;
+  blockedBy?: number[]; owner?: string; metadata?: Record<string, unknown>;
+  verify?: { kind: "command"; command: string };
+}
+export interface MutationParams {
+  action: "create" | "update" | "list" | "get" | "delete" | "clear" | "verify";
+  id?: number; subject?: string; description?: string; activeForm?: string; owner?: string;
+  status?: Status; reason?: string; accept?: "stale";
+  blockedBy?: number[]; addBlockedBy?: number[]; removeBlockedBy?: number[];
+  metadata?: Record<string, unknown>; tasks?: CreateItem[]; includeDeleted?: boolean;
+  verify?: { kind: "command"; command: string };
+  defer?: { untilJob: string; reason: string } | null;
+  [k: string]: unknown;
+}
+export const READONLY_FIELDS = [
+  "jobs", "evidence", "lastFailure", "inProgressSince", "statusSince", "verifyChanged",
+] as const;

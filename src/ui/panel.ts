@@ -63,10 +63,16 @@ export function renderTodos(state: BoardState, _jobs: JobStore): string {
   }).join("\n") || "No tasks";
 }
 
-export function renderDoctor(state: BoardState, jobs: JobStore, conflict: boolean, degraded?: string): string {
+export interface DoctorExtra { purgedRoots: number; retentionOverdue: number; orphanJobs: number }
+
+export function renderDoctor(state: BoardState, jobs: JobStore, conflict: boolean, degraded?: string, extra?: DoctorExtra): string {
   const lines: string[] = [];
   if (conflict) lines.push("✗ todo 工具冲突：旧包未卸载，本扩展未注册事件处理器");
   if (degraded) lines.push(`✗ ${degraded}`);
+  if (state.counters.halted) lines.push("⏸ 强制中断中 → /vigil-todo resume 恢复");
+  if (extra?.purgedRoots) lines.push(`✗ ${extra.purgedRoots} 条链已 purge（adopt/catch-up 跳过）`);
+  if (extra?.retentionOverdue) lines.push(`⚠ ${extra.retentionOverdue} 个 completed/deleted 任务超期未清理`);
+  if (extra?.orphanJobs) lines.push(`⚠ ${extra.orphanJobs} 个孤儿作业（sidecar 无绑定任务）`);
   const orphanDefer = state.tasks.filter((t) => t.defer && !jobs.get(t.defer.untilRoot));
   if (orphanDefer.length) lines.push(`⚠ ${orphanDefer.length} 个 defer 目标已无记录`);
   const noEvidence = state.tasks.filter((t) => t.status === "in_progress" && (t.jobs?.length ?? 0) === 0);

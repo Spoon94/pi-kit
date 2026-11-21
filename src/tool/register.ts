@@ -163,6 +163,11 @@ export function createBgRunTool(deps: ToolDeps): ToolDef {
         cwd: deps.cwd(), taskId: task.id, sessionId: deps.sessionId(),
       });
       if (!spawned.ok || !spawned.jobId) return errResult(spawned.error ?? "spawn failed");
+      const boundElsewhere = state.tasks.find((t) => t.id !== task.id && (t.jobs ?? []).includes(spawned.jobId!));
+      if (boundElsewhere) {
+        deps.kill(spawned.jobId, "self");
+        return errResult(`${spawned.jobId} is already bound to #${boundElsewhere.id}; 一个 job 只能绑一个任务`);
+      }
       try {
         const next: Task = { ...task, jobs: [...(task.jobs ?? []), spawned.jobId] };
         if (task.status === "pending") {

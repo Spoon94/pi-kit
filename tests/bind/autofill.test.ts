@@ -97,6 +97,13 @@ describe("失败与终结", () => {
     expect(autofillJob("A", deps).action).toBe("parked");
     expect(boards.get("S").tasks[0].lastFailure).toBeUndefined();
   });
+  it("kill running 不重试并 parked(killed)（F17）", () => {
+    jobs.put(job({ status: "killed", exitCode: null, exitCodeKnown: false, kill: { requestedBy: "external", at: 250 } }));
+    const r = autofillJob("A", deps);
+    expect(r.action).toBe("parked");
+    expect(jobs.get("A")?.retryAt).toBeUndefined();
+    expect(boards.get("S").tasks[0].park?.reason).toBe("killed");
+  });
   it("恢复态 known:false → parked，不 completed（F5）", () => {
     jobs.put(job({ status: "failed", exitCode: null, exitCodeKnown: false }));
     expect(autofillJob("A", deps).action).toBe("parked");

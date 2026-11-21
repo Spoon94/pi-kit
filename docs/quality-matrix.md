@@ -1,0 +1,26 @@
+# 八方面质量矩阵（规格 §16）
+
+每个方面必须在三层留下痕迹：设计有条款、实现有代码、测试有断言。表中路径均为仓库内真实文件；用例数为该文件在当前测试集中的 `it`/`it.each` 展开数（由 `npm test` 核对）。
+
+| 方面 | 设计条款 | 实现文件 | 测试文件（用例数） |
+|---|---|---|---|
+| 性能 | §10.2、§16.1 | `src/lib/config.ts`（mtime 缓存）、`src/lib/tail.ts`（字节尾读）、`src/jobs/monitor.ts`（事件优先 + 单 timer 条件） | `tests/perf/budget.test.ts`（3） |
+| 容灾 | §5.3、§7.1、§7.1.1、§16.2 | `src/bind/finalize.ts`（两步 finalize）、`src/jobs/claims.ts`（O_EXCL + rename 收回）、`src/jobs/heartbeat.ts`、`src/bind/sweep.ts`（补驱动/补偿/retention） | `tests/bind/finalize.test.ts`（8）、`tests/jobs/claims.test.ts`（5）、`tests/jobs/heartbeat.test.ts`（5）、`tests/bind/sweep.test.ts`（16） |
+| 可自定义设置 | §16.3 | `src/lib/config.ts`（`DEFAULTS` + `CONFIG_KEYS` + 逐键校验）、`docs/configuration.md` | `tests/lib/config.test.ts`（9） |
+| 易用性 | §6.4、§8、§16.4 | `src/ui/panel.ts`（面板/`/todos`/doctor）、`src/wake/compose.ts`（真实调用形态）、`extensions/vigil-todo.ts`（命令与拒绝文案） | `tests/ui/panel.test.ts`（9）、`tests/wake/compose.test.ts`（4）、`tests/tool/register.test.ts`（7） |
+| 可扩展性 | §14、§16.5 | `src/board/types.ts`、`src/board/invariants.ts`（`JobFacts`/`RuleContext`）、`src/bind/{autofill,sweep,finalize,adopt,halt}.ts`、`src/wake/deliver.ts`、`src/tool/register.ts`（`ToolDeps`） | `tests/arch/boundaries.test.ts`（3） |
+| 自验证能力 | §13、§16.6 | `src/ui/panel.ts`（`renderDoctor`）、`extensions/vigil-todo.ts`（doctor 汇总 purged/超期/孤儿） | `tests/selfcheck/spec-coverage.test.ts`（3）、`tests/ui/panel.test.ts`（9） |
+| 清理 todo | §16.7 | `src/board/cleanup.ts`（选择性 clear / `purged` / retention）、`src/tool/register.ts`（clear 接线）、`src/bind/adopt.ts`（过滤 purged）、`src/bind/sweep.ts`（catch-up 过滤 + retention） | `tests/board/cleanup.test.ts`（14） |
+| 强制中断 | §16.8 | `src/bind/halt.ts`（halt/resume/reap）、`src/wake/deliver.ts`（首行闸门）、`src/bind/sweep.ts`（两处短路）、`src/bind/adopt.ts`（短路）、`extensions/vigil-todo.ts`（命令 + before_settle + timer/init 短路） | `tests/bind/halt.test.ts`（12） |
+
+## 边界守卫（§16.5）
+
+`tests/arch/boundaries.test.ts` 扫描源码并断言：
+
+1. `src/board/**` 不 import `@earendil-works/*` 或 `extensions/`；
+2. `src/jobs/**` 不 import `bind/`、`wake/`、`ui/`、`tool/`；
+3. `src/ui/**` 不调用 `commit` / `put` / `save` / `appendEntry`。
+
+## 规格↔测试映射（§16.6）
+
+`tests/selfcheck/spec-coverage.test.ts` 解析规格 §13 的全部 F 编号（≥105），断言每个编号都出现在 `tests/**` 的文本中；缺失即失败。F102（文档结构自检）本身以顶层章节去重断言实现。

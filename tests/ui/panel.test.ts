@@ -68,3 +68,14 @@ it("doctor 报冲突与降级（F13/F12）", () => {
   expect(text).toContain("冲突");
   expect(text).toContain("sidecar 损坏");
 });
+
+it("doctor 报 halted / purged / 超期 / 孤儿作业", () => {
+  const b = emptyBoard();
+  b.counters.halted = true;
+  b.tasks = [{ id: 1, subject: "old", status: "completed", statusSince: 1 }];
+  const text = renderDoctor(b, jobs(), false, undefined, { purgedRoots: 2, retentionOverdue: 1, orphanJobs: 3 });
+  expect(text).toContain("强制中断");
+  expect(text).toContain("2");
+  expect(text).toContain("超期");
+  expect(text).toContain("孤儿作业");
+});

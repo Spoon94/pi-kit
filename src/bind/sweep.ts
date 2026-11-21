@@ -55,9 +55,17 @@ export function sweepRespawns(d: SweepDeps): number {
       if (dueReverify) next.pendingReverify = false;
       d.jobs.put(next);
       n++;
+    } else if (dueBackoff) {
+      // spawn_error：不重试、清退避、绑定任务 parked（F32）
+      const cur = d.jobs.get(job.id)!;
+      const next = { ...cur };
+      delete next.retryAt;
+      d.jobs.put(next);
+      if (job.sessionId === d.sessionId) parkTask(d, job.taskId, "spawn failed");
     } else if (dueReverify) {
       const cur = d.jobs.get(job.id)!;
       d.jobs.put({ ...cur, pendingReverify: false });     // 额度尽/无槽 ⇒ 不悬置
+      if (job.sessionId === d.sessionId) parkTask(d, job.taskId, "无空闲槽位重验");
     }
     release(runDir(job.cwd), job.rootId, "respawn");
   }
@@ -89,6 +97,22 @@ export function sweepAll(d: SweepDeps) {
   const result = { defersReleased: sweepDefers(d), respawned: sweepRespawns(d), catchUp: catchUpScan(d) };
   applyRetention(d);
   return result;
+}
+
+/** 无 job 记录的终结路径：失败后直接把绑定任务 parked。 */
+function parkTask(d: SweepDeps, taskId: number | undefined, reason: string): void {
+  if (taskId === undefined) return;
+  const board = d.boards.get(d.sessionId);
+  const idx = board.tasks.findIndex((t) => t.id === taskId);
+  if (idx < 0) return;
+  const task = board.tasks[idx];
+  if (task.status !== "in_progress") return;
+  const tasks = [...board.tasks];
+  tasks[idx] = {
+    ...task, status: "parked", statusSince: d.now,
+    park: { reason, at: d.now, from: "in_progress" },
+  };
+  d.boards.commit(d.sessionId, { ...board, tasks });
 }
 
 /** taskRetentionMs > 0 时清 completed/deleted，走与手动 settled 相同路径（§16.7.5）。 */

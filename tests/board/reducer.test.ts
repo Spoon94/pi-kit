@@ -76,3 +76,18 @@ describe("delete 出口", () => {
     expect(applyMutation(s, { action: "delete", id: 1 }, ctx()).op.kind).toBe("error");
   });
 });
+
+it("同批两个 →in_progress，limit 1 时只一个成功（F2）", () => {
+  const s = emptyBoard();
+  s.tasks = [
+    { id: 1, subject: "a", status: "pending" },
+    { id: 2, subject: "b", status: "pending" },
+  ];
+  s.nextId = 3;
+  const one = { ...ctx(), wipLimit: 1 };
+  const a = applyMutation(s, { action: "update", id: 1, status: "in_progress" }, one);
+  expect(a.op.kind).toBe("update");
+  const b = applyMutation(a.state, { action: "update", id: 2, status: "in_progress" }, one);
+  expect(b.op.kind).toBe("error");
+  expect(b.state.tasks.filter((t) => t.status === "in_progress")).toHaveLength(1);
+});

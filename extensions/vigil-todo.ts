@@ -11,6 +11,7 @@ import { finalizeAndProject } from "../src/bind/finalize.js";
 import { halt, isHalted, reapHaltedLeftovers, resume, type HaltDeps } from "../src/bind/halt.js";
 import { catchUpScan, sweepAll, type SweepDeps } from "../src/bind/sweep.js";
 import { decodeSnapshot, replayBranch } from "../src/board/replay.js";
+import { retentionCandidates } from "../src/board/cleanup.js";
 import { selectNext } from "../src/board/selectors.js";
 import { createBoardStore } from "../src/board/store.js";
 import type { BoardState } from "../src/board/types.js";
@@ -488,7 +489,13 @@ export default function vigilTodo(pi: ExtensionAPI): void {
           return;
         }
         if (arg === "doctor") {
-          output(ctx, renderDoctor(boards.get(sid), jobs, conflict, degradedNote));
+          const board = boards.get(sid);
+          const now = Date.now();
+          const purgedRoots = jobs.all().filter((j) => j.id === j.rootId && j.purged).length;
+          const retentionOverdue = retentionCandidates(board, getCfg().taskRetentionMs, now).length;
+          const orphanJobs = jobs.all()
+            .filter((j) => j.taskId === undefined || !board.tasks.some((t) => t.id === j.taskId)).length;
+          output(ctx, renderDoctor(board, jobs, conflict, degradedNote, { purgedRoots, retentionOverdue, orphanJobs }));
           return;
         }
         output(ctx, renderTodos(boards.get(sid), jobs));

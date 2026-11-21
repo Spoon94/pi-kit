@@ -119,3 +119,17 @@ it("旧会话重开时冻结已移交任务（F95/F97）", () => {
   expect(freezeMovedAway({ ...d, sessionId: "OLD" })).toBe(1);
   expect(boards.get("OLD").tasks[0].metadata?.adoptedAway).toEqual({ session: "NEW" });
 });
+
+it("crash 后 15s 内启动：复查时心跳过期即可收养（F99）", () => {
+  jobs.put(j("R"));
+  writeHeartbeat(dir, "OLD", 999_999, 0);
+  expect(adoptableRoots({ ...d, now: 10_000 })).toEqual([]);
+  expect(adoptableRoots({ ...d, now: 20_000 })).toEqual(["R"]);
+});
+
+it("自身无作业的会话按 +adoptRecheckMs 复查即可收养（F105）", () => {
+  jobs.put(j("R"));
+  writeHeartbeat(dir, "OLD", 999_999, 0);
+  expect(adoptableRoots({ ...d, now: 10_000 })).toEqual([]);
+  expect(adoptableRoots({ ...d, now: 10_000 + DEFAULTS.adoptRecheckMs })).toEqual(["R"]);
+});

@@ -111,3 +111,26 @@ it("sweepAll 汇总三项", () => {
   expect(r.respawned).toBe(0);
   expect(r.catchUp).toEqual([]);
 });
+
+it("respawn 抛错 → 不重试、清退避、任务 parked(spawn failed)（F32）", () => {
+  jobs.put(j("R", { retryAt: 500 }));
+  d.respawn = () => ({ ok: false });
+  expect(sweepRespawns(d)).toBe(0);
+  expect(jobs.get("R")?.retryAt).toBeUndefined();
+  expect(boards.get("S").tasks[0].status).toBe("parked");
+  expect(boards.get("S").tasks[0].park?.reason).toContain("spawn failed");
+});
+
+it("投递失败后由单 timer 在 10min 后补偿送达（F76）", () => {
+  jobs.put(j("R", { finalized: true, evidenceApplied: true, notifyState: "sent", notifySentAt: 1000 }));
+  expect(catchUpScan({ ...d, now: 1000 + DEFAULTS.notifyRetryMs + 1 })).toEqual(["R"]);
+});
+
+it("两会话同时见 pendingReverify 只驱动一次重验（F90）", () => {
+  jobs.put(j("R", { status: "completed", exitCode: 0, pendingReverify: true, fpVerdict: "stale" }));
+  let calls = 0;
+  d.respawn = () => { calls++; return { ok: true }; };
+  sweepRespawns(d);
+  sweepRespawns({ ...d, sessionId: "S2" });
+  expect(calls).toBe(1);
+});

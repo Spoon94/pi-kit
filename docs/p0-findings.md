@@ -43,7 +43,7 @@ getAllRegisteredTools() {
 
 1. 迁移步骤从"建议移除旧包"升级为**必须移除**，且要在文档里写成硬前置条件。
 2. `session_start` 自检升级为**硬告警**：`pi.getAllTools()` 找 `todo` 的 `sourceInfo`，不是自己就 `notify(..., "error")` 并**放弃注册自己的事件处理器**（避免半生效）。
-3. `/wip doctor` 把这一项列为第一条检查。
+3. `/vigil-todo doctor` 把这一项列为第一条检查。
 
 ---
 
@@ -70,7 +70,7 @@ P/dist/core/extensions/runner.js:621-695
 
 ### 设计改动
 
-配置读取链固定为：`~/.config/pi-kit/config.json` → `pi.getSettings().wip` → `pi.getSettings().bgRun`（旧键兼容）→ 默认值。**不碰 `ctx.settings`**。
+配置读取链固定为：`~/.config/pi-kit/config.json` → `pi.getSettings().vigilTodo` → `pi.getSettings().bgRun`（旧键兼容）→ 默认值。**不碰 `ctx.settings`**。
 
 ---
 
@@ -166,7 +166,7 @@ if (!assistantMessage) {
 
 - `todo verify` 在 `todo.execute()` 里跑 → ✅ 有 assistant 消息，可用。
 - 想在 `onExit`（作业完成回调）里**自动跑验证命令** → ❌ 没有 assistant 消息，也没有 tool ctx。**此路不通**。
-- 想在 `/wip` 命令里跑验证 → ❌ 同理（command ctx 没有 `executeTool`）。
+- 想在 `/vigil-todo` 命令里跑验证 → ❌ 同理（command ctx 没有 `executeTool`）。
 
 ### 设计改动
 

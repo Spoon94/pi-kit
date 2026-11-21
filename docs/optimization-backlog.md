@@ -1,7 +1,7 @@
-# wip 后续优化清单
+# vigil-todo 后续优化清单
 
 > 状态：**待优化**。本文件只记录后续工作，不表示这些能力已经实现或验证。
-> 关联规格：[`superpowers/specs/2026-11-21-wip-design.md`](./superpowers/specs/2026-11-21-wip-design.md)
+> 关联规格：[`superpowers/specs/2026-11-21-vigil-todo-design.md`](./superpowers/specs/2026-11-21-vigil-todo-design.md)
 > 原则：先完成规格中的 P1–P5，再按本清单持续优化；每项优化都需要相应测试或实测证据。
 
 ## 1. 性能
@@ -30,7 +30,7 @@
 - [ ] 明确 `wipLimit`、`retries`、退避时间、`staleReverify`、`maxTurns`、作业并发数等核心选项。
 - [ ] 明确面板行数、折叠键、日志尾行数、通知补偿时间等展示与唤醒选项。
 - [ ] 制定热更新矩阵：哪些配置立即生效，哪些需要 `/reload` 或重启。
-- [ ] 保留 `~/.config/pi-kit/config.json` → `pi.getSettings().wip` → 旧 `bgRun` → 默认值的兼容链。
+- [ ] 保留 `~/.config/pi-kit/config.json` → `pi.getSettings().vigilTodo` → 旧 `bgRun` → 默认值的兼容链。
 
 ## 4. 易用性
 
@@ -40,7 +40,7 @@
 - [ ] 验证唯一 next、park/defer/verify 的模型调用路径清晰且不容易误用。
 - [ ] 验证每条拒绝都给出可执行的下一步，不只报告错误。
 - [ ] 验证早上面板能直接呈现完成证据、parked 原因与遗留任务。
-- [ ] 完善 `/wip`、`/todos`、`/bg`、`/wip adopt`、`/wip doctor` 的一致性与排障体验。
+- [ ] 完善 `/vigil-todo`、`/todos`、`/bg`、`/vigil-todo adopt`、`/vigil-todo doctor` 的一致性与排障体验。
 
 ## 5. 可扩展性
 
@@ -59,7 +59,7 @@
 - [ ] 建立性能基准与故障注入测试，覆盖本清单第 1、2 项。
 - [ ] 在真实 pi 环境验证工具强制、真实面板、唤醒、压缩恢复和多会话行为。
 - [ ] 为 P1–P5 设置可执行出口检查，未通过不得标记完成。
-- [ ] 完善 `/wip doctor`，让运行期能够自检冲突、孤儿链、证据缺失和恢复异常。
+- [ ] 完善 `/vigil-todo doctor`，让运行期能够自检冲突、孤儿链、证据缺失和恢复异常。
 
 ---
 

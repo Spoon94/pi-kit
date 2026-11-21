@@ -1,11 +1,12 @@
-# wip 设计规格 v12（check 已 APPROVE）
+# vigil-todo 设计规格 v12（check 已 APPROVE）
 
+> 命名：**vigil-todo · 深夜守护者**
 > 日期：2026-11-21
 > 状态：✅ **check 评审通过（第十二轮）**，允许按 §15 进入实现阶段
 > 最终结论原文："判定：通过。允许进入实现阶段，按 §15 顺序从 P1 开始。"
 > 累计十二轮、72 条修订（15+12+6+6+5+5+4+5+4+3+3+3）
 > 待办：**用户尚未批准本 spec**（脑暴流程的用户评审门禁）；用户批准后才可写实现计划
-> 取代：`@juicesharp/rpiv-todo` + `pi-bg-run`；载体 `pi-kit` 的 `extensions/wip.ts`
+> 取代：`@juicesharp/rpiv-todo` + `pi-bg-run`；载体 `pi-kit` 的 `extensions/vigil-todo.ts`
 > 前置取证：[`../../p0-findings.md`](../../p0-findings.md)
 > 前身：[`../../design.md`](../../design.md) v0.2（功能清单已废，性能/故障模型仍有效）
 
@@ -116,7 +117,7 @@ check 本轮四处验算通过：链级界**恰好 5 个 job**（两种最坏走
 | # | sev | 问题 | 修订位置 |
 |---|---|---|---|
 | R8-1 | MAJOR | v8 残留**两个 chainFinal 生产者**（per-job 判定表 + projectFinal）⇒ 有终结 job 的链产两条，跨 250ms 窗口即双投递 | §7.1 **per-job 证据一律 chainFinal:false**；chainFinal 只由 projectFinal 合成；undelivered 只认投影产物 |
-| R8-2 | MAJOR | owner 会话**永不复用**（早上开新会话）⇒ 夜里 finalized 的链永远投不进任何 board，任务悬在死分支 ⇒ **北极星在这条早晨路径上整体落空** | §7.1.1 **孤儿链收养**：只收 finalized && !evidenceApplied && owner 不活跃的链，连带其绑定任务导入本 board，移交归属 + repair + notify；running 链不收；其余遗留列在 /wip 并提供 `/wip adopt` |
+| R8-2 | MAJOR | owner 会话**永不复用**（早上开新会话）⇒ 夜里 finalized 的链永远投不进任何 board，任务悬在死分支 ⇒ **北极星在这条早晨路径上整体落空** | §7.1.1 **孤儿链收养**：只收 finalized && !evidenceApplied && owner 不活跃的链，连带其绑定任务导入本 board，移交归属 + repair + notify；running 链不收；其余遗留列在 /vigil-todo 并提供 `/vigil-todo adopt` |
 | R8-3 | MAJOR | catch-up 判据仍是 per-job，而投递已是链粒度 ⇒ 中间失败 job 的 notifyState 恒 pending ⇒ 每次启动/timer 乱补 | §5.3 扫描集改 **root 粒度**并写明；`notifyState/wakeId/notifySentAt` 只在 root 记录有效 |
 | R8-4 | MINOR | pendingReverify 补 respawn **跨会话双驱动** ⇒ 两条重验 job、命令跑两遍 | §4.5 `respawnClaim` 原子认领（写后重读，输者跳过） |
 | R8-5 | MINOR | 迟投影被 watermark 遮蔽（finalResult.at < watermark）⇒ 永不投递 | §7.1 投影证据 `at = now()`（R3 新近度走 per-job 证据，不受影响） |
@@ -139,7 +140,7 @@ check 核实：收养**不违反铁律**（绑定边迁移 + 显式追加，不�
 | # | sev | 问题 | 修订位置 |
 |---|---|---|---|
 | R10-1 | BLOCKER | **文档结构损坏**：L692-915 是 §6.1-§7.1.1 的整段重复副本，其中第二个 §7.1.1 是 v8 旧文 ⇒ 实现者读到旧版即绕过 R9 全部修复 | 已删 224 行重复块；§7.1.1 尾部重复的补偿段并回 §5.3（**根因：我用 python 切块编辑引入，非设计问题**） |
-| R10-2 | MAJOR | pi 挂死未退出 ⇒ timer 同死但 pid 活 ⇒ 判活跃永不收养，且 `/wip adopt` 同被 gate 挡死 | §7.1.1-F **人工 adopt 绕过 gate** + heartbeat 停更 >10min 标"疑似挂死"；保留 pid 分支（合盖睡一夜靠它） |
+| R10-2 | MAJOR | pi 挂死未退出 ⇒ timer 同死但 pid 活 ⇒ 判活跃永不收养，且 `/vigil-todo adopt` 同被 gate 挡死 | §7.1.1-F **人工 adopt 绕过 gate** + heartbeat 停更 >10min 标"疑似挂死"；保留 pid 分支（合盖睡一夜靠它） |
 | R10-3 | MAJOR | 悬空依赖一律"视为未满足"与 R4 组合出死锁（最常见路径：依赖在旧 board 已 completed 未导入） | §7.1.1-D **对照旧快照解析**：completed\|deleted → 删除（视为已满足）；非终态保留悬空 |
 | R10-4 | MAJOR | crash 后 15s 内重启 ⇒ heartbeat 仍新鲜 ⇒ 判活跃跳过，而收养只在 session_start 跑一次 ⇒ 整会话错过 | §7.1.1-A **收养扫描并入单 timer** |
 | R10-5 | MINOR | write-reread 不是原子的（双方都见自己 ⇒ 双赢家）；respawnClaim 同病 | claim 改 **独立文件 `O_EXCL` 原子创建**（`<runDir>/claims/<rootId>.{adopt,respawn}.json`），创建失败即输者 |
@@ -181,7 +182,7 @@ check 原话："三条都是一行级修法，无机制性返工；修完即可 
 ## 2. 职责边界
 
 ```
-wip     → 任务该不该往下走（重试用尽 / 依赖未清 / 轮数耗尽 / 模型 park）
+vigil-todo     → 任务该不该往下走（重试用尽 / 依赖未清 / 轮数耗尽 / 模型 park）
 权限层  → 这条命令能不能跑（已有 tool_call 钩子 + 项目 trust）
 ```
 
@@ -446,7 +447,7 @@ fp stale → 自动 respawn 取证命令（新 job id，同 rootId，标 staleRe
 
 | 投递通道 | ack 信号 |
 |---|---|
-| `sendMessage`（idle 或 busy steer） | `message_start` / `message_end` 中 `customType==="wip-wake"` 且 `details.wakeId` 匹配 ⇒ 批量置 `wake.jobs[]` 为 acked。<br>依据：busy 路径消费 steer 只发这两个事件（`agent-loop.js:121-123`），**不发 `agent_start`** |
+| `sendMessage`（idle 或 busy steer） | `message_start` / `message_end` 中 `customType==="vigil-todo-wake"` 且 `details.wakeId` 匹配 ⇒ 批量置 `wake.jobs[]` 为 acked。<br>依据：busy 路径消费 steer 只发这两个事件（`agent-loop.js:121-123`），**不发 `agent_start`** |
 | `agent_before_settle`（boundary） | **紧随其后那次 `agent_start`** 置 acked（R3-3 / R4-4）。entries 合法才会有 agent_start；被丢弃则留 `sent` 由 catch-up 补发。<br>依据：boundary entry 经 `_refreshFinalizedContext` 入 messages 后 `continue()`，而 `runAgentLoopContinue:71-79` 只发 `agent_start`/`turn_start`，**无 `message_start`** ⇒ 等不到信号 |
 
 一条合并消息可含多个 job ⇒ `wake.jobs: string[]` 批量置位。
@@ -698,7 +699,7 @@ rename 在 POSIX 上是原子的 ⇒ 只有一个会话能把它移走。
 
 ##### D. 导入即重编号（R9-1）
 
-两个 board 各自从 1 编号，`/wip adopt` 在会话中段执行、或 `session_start` 发生在 resume 会话（board 非空）时**必然撞号**。
+两个 board 各自从 1 编号，`/vigil-todo adopt` 在会话中段执行、或 `session_start` 发生在 resume 会话（board 非空）时**必然撞号**。
 
 ```
 多条链绑同一任务 → 先按任务去重，再导入
@@ -727,11 +728,11 @@ for task in toImport:
 
 - **只收 `finalized`（终态、不会再变）的链**；running 链不收，避免两会话驱动同一进程
 - **只导入这些链绑定的任务**，不是旧 board 全量 —— 避免把无关旧任务塞进新话题
-- 其余旧任务在 `/wip` 与 `/bg` 显式列为"上一会话遗留 M 个未完成任务"，提供 **`/wip adopt`** 一键全量接管（同样走 A-E）
+- 其余旧任务在 `/vigil-todo` 与 `/bg` 显式列为"上一会话遗留 M 个未完成任务"，提供 **`/vigil-todo adopt`** 一键全量接管（同样走 A-E）
 
-**挂死会话的出口（R10-2）**：pi 挂死但未退出时 **timer 同死** ⇒ heartbeat 停更，但 `kill(pid,0)` 仍存活 ⇒ 判活跃 ⇒ 永不收养；若 `/wip adopt` 也走同一 gate，**人工通道同样被挡死**。故：
-- `pid` 存活但 heartbeat 停更 **> 10min** ⇒ 标为**"疑似挂死"**，在 `/wip` 里显式提示可接管
-- **`/wip adopt`（人工命令）绕过活跃 gate**，并强提示"原会话疑似挂死，确认接管？"（人工确权）。**但人工接管同样只收终态链**（R11-2）——"同样走 A-E"不含 running 排除（那是 F 自己的规则），若人工把 running 链一并接管，而"疑似挂死"实为**合盖睡眠**，醒来后两会话同时驱动同一进程（kill/respawn 双头）。running 链待其终结后由 timer 自动归入。
+**挂死会话的出口（R10-2）**：pi 挂死但未退出时 **timer 同死** ⇒ heartbeat 停更，但 `kill(pid,0)` 仍存活 ⇒ 判活跃 ⇒ 永不收养；若 `/vigil-todo adopt` 也走同一 gate，**人工通道同样被挡死**。故：
+- `pid` 存活但 heartbeat 停更 **> 10min** ⇒ 标为**"疑似挂死"**，在 `/vigil-todo` 里显式提示可接管
+- **`/vigil-todo adopt`（人工命令）绕过活跃 gate**，并强提示"原会话疑似挂死，确认接管？"（人工确权）。**但人工接管同样只收终态链**（R11-2）——"同样走 A-E"不含 running 排除（那是 F 自己的规则），若人工把 running 链一并接管，而"疑似挂死"实为**合盖睡眠**，醒来后两会话同时驱动同一进程（kill/respawn 双头）。running 链待其终结后由 timer 自动归入。
 - `pid` 探测分支**必须保留**：合盖睡一夜、timer 停摆但进程其实正常，全靠它不误收
 - 与铁律的关系（check 已核实）：收养是**绑定边迁移 + 显式追加**，job 侧只改归属字段（铁律明允许 repair + 日志），task 侧是向新 board **追加**、不覆盖旧 board 任何状态；前提是 B 的原子认领补上，否则"两侧各自为准"会被竞态打破
 
@@ -852,7 +853,7 @@ scheduler:         tryDeliver("async") → sendMessage
 ### 7.5 唤醒消息（真实调用形态）
 
 ```
-[wip] #2 全量回归 ✓ exit 0 · 3m12s (bg_x2)  fp:fresh
+[vigil-todo] #2 全量回归 ✓ exit 0 · 3m12s (bg_x2)  fp:fresh
 next: #5 清理旧分支 (pending, unblocked)
 → 开干: bg_run({task_id:5, command:"…"})
   需人拍板: todo({action:"update", id:5, status:"parked", reason:"…"})
@@ -862,7 +863,7 @@ next: #5 清理旧分支 (pending, unblocked)
 stale（自动重验已用尽才会看到这条）：
 
 ```
-[wip] #2 exit 0，但工作区持续变动，重验后仍无法确认证据 (fp a3f9→b71c→e40d)
+[vigil-todo] #2 exit 0，但工作区持续变动，重验后仍无法确认证据 (fp a3f9→b71c→e40d)
       → 已 parked。你定：
         todo({action:"update", id:2, status:"completed", accept:"stale"})
         todo({action:"verify", id:2})
@@ -915,7 +916,7 @@ unknown：按 reason 分别措辞 —— `fp:unknown（bg_x9 期间有写入，�
 ### 8.1 早上那一刻
 
 ```
-● wip 8/12 · ⚠ 2 parked              ← 首行恒可见
+● vigil-todo 8/12 · ⚠ 2 parked              ← 首行恒可见
 ├─ ✓ 8 done · all exit 0 · ⚠ 3 条 fp:?
 ├─ ⚠ #2 全量回归  parked
 │    └─ 4 次均失败 · parser 边界条件
@@ -932,7 +933,7 @@ parked reason 独占缩进行；deferred `⏸` + untilRoot；in_progress 带 act
 ### 8.2 行预算
 
 默认 12 内容行。优先级：`首行(含 ⚠N parked) > parked(含 reason) > in_progress > deferred > pending > completed汇总`。
-parked 超预算 → 截断 + `+N more parked`；**首行 `⚠ N parked` 恒可见**，**`/wip` 本身能翻全量**。
+parked 超预算 → 截断 + `+N more parked`；**首行 `⚠ N parked` 恒可见**，**`/vigil-todo` 本身能翻全量**。
 
 ### 8.3 保留的 rpiv-todo 体验
 
@@ -941,7 +942,7 @@ parked 超预算 → 截断 + `+N more parked`；**首行 `⚠ N parked` 恒可�
 
 ### 8.4 命令
 
-`/wip`（可翻全量 + 列"上一会话遗留"）、`/wip adopt`（一键接管遗留任务与孤儿链）、`/todos`（全量文本带 exit code + fp 下钻）、`/bg`（`k` 两次确认、Enter tail）、`/wip doctor`。
+`/vigil-todo`（可翻全量 + 列"上一会话遗留"）、`/vigil-todo adopt`（一键接管遗留任务与孤儿链）、`/todos`（全量文本带 exit code + fp 下钻）、`/bg`（`k` 两次确认、Enter tail）、`/vigil-todo doctor`。
 
 ---
 
@@ -991,7 +992,7 @@ replay 失败 → 空列表 + notify；sidecar 读失败 → 改名留档 + 从�
 | **迁移 fallback（R2-7）** | replay 时 `inProgressSince = t.inProgressSince ?? t.statusSince ?? 0`；**`0` ⇒ R3 跳过新近度判定** ⇒ 迁移任务可被自动完成，不会只能 park |
 | 迁移前置 | **必须卸载两个旧包**（P0 Q1：同名工具先注册者胜且静默；事件广播 ⇒ 半生效） |
 | 启动自检 | `getAllTools()` 查 `todo` 的 `sourceInfo`，非自己 → notify **error** 且**不注册事件处理器** |
-| 配置 | `~/.config/pi-kit/config.json` → `pi.getSettings().wip` → `.bgRun` → 默认 |
+| 配置 | `~/.config/pi-kit/config.json` → `pi.getSettings().vigilTodo` → `.bgRun` → 默认 |
 
 ---
 
@@ -1003,7 +1004,7 @@ replay 失败 → 空列表 + notify；sidecar 读失败 → 改名留档 + 从�
 | Q-B | 指纹三态 + §5.2 两处收窄，**fpVerdict 延迟到回填时算**；非 git → unknown 标 `fp:n/a`；裁决点 = 是否叫醒人；stale 走**自动重验**而非 `expectChanges` 豁免（§5.2.1 反提案） |
 | Q-C | 重试期占 WIP 位，但面板 `↻ retry n/m` + park 能取消链 |
 | Q-D | 立即解除仅限根已终结或根记录不存在；后者 repair + notify |
-| Q-E | 接受截断，前提首行 `⚠N parked` 恒可见且 `/wip` 能翻全量 |
+| Q-E | 接受截断，前提首行 `⚠N parked` 恒可见且 `/vigil-todo` 能翻全量 |
 | Q-F | `maxConcurrentJobs` 维持 10（已采纳并发收窄） |
 
 ---
@@ -1117,14 +1118,14 @@ replay 失败 → 空列表 + notify；sidecar 读失败 → 改名留档 + 从�
 | **F96** | 心跳文件所在会话已退出 | pid 探测失败且 heartbeat 超 15s ⇒ 判不活跃 ⇒ 可被收养；pid 复用由 startStamp 排除 |
 | **F97** | 冻结的 adoptedAway 任务被模型变更 | R10 拒绝并提示去哪个会话；不会修改死副本 |
 
-| **F98** | pi 挂死未退出（pid 活、heartbeat 停更 >10min） | 标"疑似挂死"列于 /wip；**`/wip adopt` 人工绕过 gate** + 强提示，**有出口**（R10-2） |
+| **F98** | pi 挂死未退出（pid 活、heartbeat 停更 >10min） | 标"疑似挂死"列于 /vigil-todo；**`/vigil-todo adopt` 人工绕过 gate** + 强提示，**有出口**（R10-2） |
 | **F99** | crash 后 15s 内重启 | 收养扫描并入单 timer ⇒ 15s 后心跳过期即补收养，**不整会话错过**（R10-4） |
 | **F100** | 被导入任务的依赖在旧 board 已 completed 但未导入 | 对照旧快照解析 ⇒ 从 blockedBy 删除（视为已满足）+ metadata 记录；**不与 R4 组合出死锁**（R10-3） |
 | **F101** | 两会话同时 O_EXCL 创建同一 claim | 恰一个成功，另一个抛错跳过 ⇒ **无双赢家**（R10-5） |
 | **F102** | 文档结构自检 | 无重复章节、无 v8 旧文残留（R10-1 编辑事故） |
 
 | **F103** | 两会话同时判同一 claim 过期 | `rename(claim → .stale.<me>)` 原子竞争 ⇒ 只有一个获重建权，**无过期路径双赢家**（R11-1） |
-| **F104** | 人工 `/wip adopt` 绕过 gate 时存在 running 链 | **仍只收终态链**；running 待终结后由 timer 归入，无双头驱动（R11-2） |
+| **F104** | 人工 `/vigil-todo adopt` 绕过 gate 时存在 running 链 | **仍只收终态链**；running 待终结后由 timer 归入，无双头驱动（R11-2） |
 | **F105** | 自身无作业的 B 会话在 A 崩溃后 15s 内启动 | `session_start` gate 失败挂**一次性 +20s 复查**（不依赖 timer）⇒ 不永不复查（R11-3） |
 
 ---
@@ -1132,7 +1133,7 @@ replay 失败 → 空列表 + notify；sidecar 读失败 → 改名留档 + 从�
 ## 14. 模块划分
 
 ```
-extensions/wip.ts        注册面
+extensions/vigil-todo.ts        注册面
   ├── tool/              schema / 信封 / 渲染
   ├── board/             纯状态机 + counters（reducer/invariants/selectors）← 不 import pi
   ├── jobs/              spawn / monitor / store / kill / retry-chain / capacity

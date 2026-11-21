@@ -1,6 +1,7 @@
 export interface VigilConfig {
   wipLimit: number; retries: number; retryDelaysMs: number[]; staleReverify: number;
   maxTurns: number; maxConcurrentJobs: number; completedTtlMs: number;
+  taskRetentionMs: number;
   tailLines: number; maxTailBytes: number; maxWidgetLines: number; collapseKey: string;
   notifyRetryMs: number; heartbeatStaleMs: number; hungSuspectMs: number;
   wakeMergeMs: number; adoptRecheckMs: number;
@@ -9,6 +10,7 @@ export interface VigilConfig {
 export const DEFAULTS: VigilConfig = {
   wipLimit: 3, retries: 3, retryDelaysMs: [0, 30_000, 120_000], staleReverify: 1,
   maxTurns: 50, maxConcurrentJobs: 10, completedTtlMs: 7 * 24 * 3600_000,
+  taskRetentionMs: 0,
   tailLines: 20, maxTailBytes: 8192, maxWidgetLines: 12, collapseKey: "ctrl+shift+t",
   notifyRetryMs: 600_000, heartbeatStaleMs: 15_000, hungSuspectMs: 600_000,
   wakeMergeMs: 250, adoptRecheckMs: 20_000,
@@ -29,7 +31,7 @@ export function resolveConfig(s: { file?: unknown; settings?: unknown; legacy?: 
   const out = { ...DEFAULTS };
   const mins: Partial<Record<keyof VigilConfig, number>> = {
     wipLimit: 1, retries: 0, staleReverify: 0, maxTurns: 1, maxConcurrentJobs: 1,
-    completedTtlMs: 1, tailLines: 1, maxTailBytes: 1, maxWidgetLines: 3,
+    completedTtlMs: 1, taskRetentionMs: 0, tailLines: 1, maxTailBytes: 1, maxWidgetLines: 3,
     notifyRetryMs: 1, heartbeatStaleMs: 1, hungSuspectMs: 1, wakeMergeMs: 0, adoptRecheckMs: 1,
   };
   for (const [k, min] of Object.entries(mins)) {

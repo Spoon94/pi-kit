@@ -1,4 +1,5 @@
 import type { BoardStore } from "../board/store.js";
+import { applyCleanup, markPurged, planCleanup, retentionCandidates } from "../board/cleanup.js";
 import { chainTerminated } from "../jobs/chain.js";
 import { claim, release } from "../jobs/claims.js";
 import type { SpawnRequest } from "../jobs/spawn.js";
@@ -69,6 +70,7 @@ export function catchUpScan(d: SweepDeps): string[] {
   for (const root of d.jobs.all()) {
     if (root.id !== root.rootId) continue;                 // 只看 root
     if (root.sessionId !== d.sessionId) continue;
+    if (root.purged) continue;                             // R19：清掉的链不再补发
     if (!root.finalized) continue;
     if (!root.evidenceApplied) { out.push(root.id); continue; }
     if (root.notifyState === "acked") continue;
@@ -82,5 +84,26 @@ export function catchUpScan(d: SweepDeps): string[] {
 
 export function sweepAll(d: SweepDeps) {
   for (const id of catchUpScan(d)) projectFinal(id, d.jobs, d.boards, d.sessionId, d.now);
-  return { defersReleased: sweepDefers(d), respawned: sweepRespawns(d), catchUp: catchUpScan(d) };
+  const result = { defersReleased: sweepDefers(d), respawned: sweepRespawns(d), catchUp: catchUpScan(d) };
+  applyRetention(d);
+  return result;
+}
+
+/** taskRetentionMs > 0 时清 completed/deleted，走与手动 settled 相同路径（§16.7.5）。 */
+function applyRetention(d: SweepDeps): void {
+  if (!d.cfg.taskRetentionMs || d.cfg.taskRetentionMs <= 0) return;
+  const board = d.boards.get(d.sessionId);
+  const candidates = retentionCandidates(board, d.cfg.taskRetentionMs, d.now);
+  if (!candidates.length) return;
+  const facts = {
+    hasRunning: (taskId: number) => d.jobs.all().some((j) => j.taskId === taskId && j.status === "running"),
+    hasBackoff: (taskId: number) => d.jobs.all().some((j) => j.taskId === taskId && j.retryAt != null),
+    startedAt: () => undefined,
+    exists: () => true,
+  };
+  const subset = { ...board, tasks: board.tasks.filter((t) => candidates.includes(t.id)) };
+  const plan = planCleanup(subset, "settled", undefined, facts);
+  if (!plan.remove.length) return;
+  markPurged(d.jobs, plan.remove, board.tasks);
+  d.boards.commit(d.sessionId, applyCleanup(board, plan, d.now));
 }

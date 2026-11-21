@@ -1,6 +1,7 @@
 import { READONLY_FIELDS, checkStructure, type MutationParams, type RuleContext } from "./invariants.js";
 import { appendEvidence, completionGate } from "./evidence.js";
-import { emptyBoard, type BoardState, type Status, type Task } from "./types.js";
+import { applyCleanup, planCleanup } from "./cleanup.js";
+import type { BoardState, Status, Task } from "./types.js";
 
 export type Op =
   | { kind: "create"; ids: number[] }
@@ -46,7 +47,11 @@ export function applyMutation(state: BoardState, p: MutationParams, ctx: RuleCon
     return { state: { ...state, tasks: [...state.tasks, ...created], nextId: state.nextId + created.length }, op: { kind: "create", ids: created.map((t) => t.id) } };
   }
 
-  if (p.action === "clear") return { state: { ...emptyBoard(), counters: state.counters }, op: { kind: "clear", count: state.tasks.length } };
+  if (p.action === "clear") {
+    const plan = planCleanup(state, p.scope, p.force, ctx.facts);
+    if (plan.error) return err(state, plan.error);
+    return { state: applyCleanup(state, plan, ctx.now), op: { kind: "clear", count: plan.remove.length } };
+  }
   if (p.action === "list") return { state, op: { kind: "list" } };
 
   if (p.id === undefined) return err(state, `id required for ${p.action}`);

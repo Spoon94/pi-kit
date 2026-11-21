@@ -20,6 +20,7 @@ export function adoptableRoots(d: AdoptDeps): string[] {
   for (const root of d.jobs.all()) {
     if (root.id !== root.rootId) continue;
     if (!root.finalized || root.evidenceApplied) continue;
+    if (root.purged) continue;                                  // R19：已清理的链不再收养
     if (root.sessionId === d.sessionId) continue;
     if (root.status === "running") continue;                    // F92/F104：running 永不收
     if (!d.manual) {

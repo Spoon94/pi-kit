@@ -16,6 +16,7 @@ export interface Job {
   finalized?: boolean;
   finalResult?: { ok: boolean; note: string; trigger: "self" | "external"; at: number };
   pendingReverify?: boolean;
+  purged?: boolean;
   kill?: { requestedBy: "self" | "external"; at: number };
   evidenceApplied: boolean;
   notifyState: "pending" | "sent" | "acked";

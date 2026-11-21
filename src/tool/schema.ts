@@ -28,6 +28,8 @@ export const TodoParamsSchema = Type.Object({
   metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
   tasks: Type.Optional(Type.Array(CreateItem)),
   includeDeleted: Type.Optional(Type.Boolean()),
+  scope: Type.Optional(Type.Union(["completed", "deleted", "settled", "all"].map((s) => Type.Literal(s)))),
+  force: Type.Optional(Type.Boolean()),
   verify: Type.Optional(VerifySpec),
   defer: Type.Optional(Type.Union([DeferSpec, Type.Null()])),
   // 只读字段：声明在 schema 里供展示，但 reducer 会拒（R16）

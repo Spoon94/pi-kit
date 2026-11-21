@@ -89,6 +89,7 @@ export interface MutationParams {
   metadata?: Record<string, unknown>; tasks?: CreateItem[]; includeDeleted?: boolean;
   verify?: { kind: "command"; command: string };
   defer?: { untilJob: string; reason: string } | null;
+  scope?: "completed" | "deleted" | "settled" | "all"; force?: boolean;
   [k: string]: unknown;
 }
 export const READONLY_FIELDS = [

@@ -1,4 +1,5 @@
 import { appendEvidence } from "../board/evidence.js";
+import { applyCleanup, markPurged, planCleanup } from "../board/cleanup.js";
 import { checkStructure, type MutationParams, type RuleContext } from "../board/invariants.js";
 import { applyMutation } from "../board/reducer.js";
 import type { BoardState, Task } from "../board/types.js";
@@ -97,6 +98,20 @@ export function createTodoTool(deps: ToolDeps): ToolDef {
         return result;
       }
       const state = deps.board();
+      if (p.action === "clear") {
+        const plan = planCleanup(state, p.scope, p.force, deps.ruleCtx().facts);
+        if (plan.error) return buildResult(asRecord(p), state, { kind: "error", message: plan.error });
+        const next = applyCleanup(state, plan, deps.now());
+        const roots = markPurged(deps.jobs, plan.remove, state.tasks);
+        const result = buildResult(asRecord(p), next, { kind: "clear", count: plan.remove.length });
+        const notes: string[] = [];
+        if (plan.skipped.length) notes.push(`skipped (running jobs): ${plan.skipped.map((i) => `#${i}`).join(" ")}`);
+        if (roots.length) notes.push(`purged ${roots.length} chains`);
+        if (notes.length) result.content[0].text += ` · ${notes.join(" · ")}`;
+        deps.commit(next);
+        deps.appendEntry("rpiv-todo-state", result.details);
+        return result;
+      }
       const r = applyMutation(state, p, deps.ruleCtx());
       const result = buildResult(asRecord(p), r.state, r.op);
       const mutated = r.op.kind === "create" || r.op.kind === "delete" || r.op.kind === "clear"

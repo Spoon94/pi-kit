@@ -94,4 +94,5 @@ export interface MutationParams {
 }
 export const READONLY_FIELDS = [
   "jobs", "evidence", "lastFailure", "inProgressSince", "statusSince", "verifyChanged",
+  "halted", "haltedAt",
 ] as const;

@@ -16,6 +16,7 @@ export interface AdoptDeps {
 const settled = (s: Task["status"]) => s === "completed" || s === "deleted";
 
 export function adoptableRoots(d: AdoptDeps): string[] {
+  if (d.boards.get(d.sessionId).counters.halted) return [];     // R20：停机后不收养
   const out: string[] = [];
   for (const root of d.jobs.all()) {
     if (root.id !== root.rootId) continue;

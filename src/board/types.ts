@@ -33,7 +33,10 @@ export interface Task {
   defer?: { untilRoot: string; reason: string; at: number };
 }
 
-export interface BoardCounters { turnsUsed: number; wakeWatermark: number; renudgeBudget: number }
+export interface BoardCounters {
+  turnsUsed: number; wakeWatermark: number; renudgeBudget: number;
+  halted?: boolean; haltedAt?: number;
+}
 export interface BoardState { tasks: Task[]; nextId: number; counters: BoardCounters }
 
 export const EVIDENCE_RING = 8;

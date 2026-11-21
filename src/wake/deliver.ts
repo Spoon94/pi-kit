@@ -15,6 +15,7 @@ export type DeliverResult =
 let wakeSeq = 0;
 
 export function tryDeliver(i: DeliverInput): DeliverResult {
+  if (i.board.counters.halted) return { kind: "none" };           // R20：人的刹车早于一切
   const c = i.board.counters;
   if (c.turnsUsed >= i.cfg.maxTurns) return { kind: "none" };      // ★ 第一行硬闸门
 

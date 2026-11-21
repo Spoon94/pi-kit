@@ -8,6 +8,7 @@ import type {
 import { adoptOrphans, freezeMovedAway, type AdoptDeps } from "../src/bind/adopt.js";
 import { autofillJob, type AutofillDeps } from "../src/bind/autofill.js";
 import { finalizeAndProject } from "../src/bind/finalize.js";
+import { halt, isHalted, reapHaltedLeftovers, resume, type HaltDeps } from "../src/bind/halt.js";
 import { catchUpScan, sweepAll, type SweepDeps } from "../src/bind/sweep.js";
 import { decodeSnapshot, replayBranch } from "../src/board/replay.js";
 import { selectNext } from "../src/board/selectors.js";
@@ -88,6 +89,11 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   });
 
   const ruleCtx = () => ({ wipLimit: getCfg().wipLimit, facts: jobFacts(), now: Date.now() });
+
+  const haltDeps = (): HaltDeps => ({
+    boards, jobs, now: Date.now(), sessionId: sid, kill: killJob,
+    notify: (n) => { if (activeCtx) output(activeCtx, n); },
+  });
 
   const persistBoard = (board: BoardState): void => {
     boards.commit(sid, board);
@@ -258,6 +264,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
 
   const runSweep = (): void => {
     if (!sid) return;
+    if (isHalted(boards.get(sid))) { refreshTimer(); return; }   // R20：停机后不推进
     const cfg = getCfg();
     const d: SweepDeps = {
       boards, jobs, cfg, now: Date.now(), sessionId: sid, respawn: spawnChain,
@@ -273,6 +280,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
 
   const adoptMoved = (manual: boolean): void => {
     if (!sid) return;
+    if (isHalted(boards.get(sid))) return;                       // R20：停机后不收养
     const cfg = getCfg();
     const d: AdoptDeps = {
       boards, jobs, cfg, now: Date.now(), sessionId: sid, dir: runDir(cwd),
@@ -302,6 +310,11 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   const tick = (): void => {
     if (!activeCtx || !sid) return;
     updateHeartbeat();
+    if (isHalted(boards.get(sid))) {
+      refreshOverlay();
+      refreshTimer();
+      return;
+    }
     runSweep();
     adoptMoved(false);
     jobs.gc(getCfg().completedTtlMs, Date.now());
@@ -327,6 +340,9 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     }
     boards.replace(sid, replayBranch(ctx.sessionManager.getBranch()));
     boards.setForeground(sid);
+    if (isHalted(boards.get(sid))) {
+      reapHaltedLeftovers(haltDeps());                           // §16.8.5：崩溃后补杀残留
+    }
     runSweep();
     adoptMoved(false);
     updateHeartbeat();
@@ -372,6 +388,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
 
   const boundaryDeliver = (): AgentBeforeSettleEventResult | undefined => {
     if (!activeCtx || !sid) return undefined;
+    if (isHalted(boards.get(sid))) return undefined;             // R20：不续跑
     const cfg = getCfg();
     const board = boards.get(sid);
     const d = tryDeliver({
@@ -447,6 +464,22 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     pi.registerCommand("vigil-todo", {
       description: "vigil-todo 面板 / adopt / doctor",
       handler: commandHandler((arg, ctx) => {
+        if (arg === "halt") {
+          halt(haltDeps());
+          persistBoard(boards.get(sid));
+          refreshTimer();
+          refreshOverlay();
+          return;
+        }
+        if (arg === "resume") {
+          const ok = resume(haltDeps());
+          if (ok) {
+            persistBoard(boards.get(sid));
+            refreshTimer();
+            refreshOverlay();
+          }
+          return;
+        }
         if (arg === "adopt") {
           adoptMoved(true);
           persistBoard(boards.get(sid));

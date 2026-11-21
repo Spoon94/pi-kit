@@ -30,6 +30,7 @@ export function sweepDefers(d: SweepDeps): number {
 }
 
 export function sweepRespawns(d: SweepDeps): number {
+  if (d.boards.get(d.sessionId).counters.halted) return 0;      // R20：停机后不 respawn
   let n = 0;
   for (const job of d.jobs.all()) {
     const dueBackoff = job.retryAt != null && job.retryAt <= d.now;
@@ -66,6 +67,7 @@ export function sweepRespawns(d: SweepDeps): number {
 
 /** root 粒度扫描集（规格 §5.3）。 */
 export function catchUpScan(d: SweepDeps): string[] {
+  if (d.boards.get(d.sessionId).counters.halted) return [];      // R20：停机后不补发
   const out: string[] = [];
   for (const root of d.jobs.all()) {
     if (root.id !== root.rootId) continue;                 // 只看 root

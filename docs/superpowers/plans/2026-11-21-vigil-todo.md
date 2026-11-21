@@ -5531,3 +5531,172 @@ Expected: PASS（全部；spec-coverage 的 missing 为空）
 git add tests/selfcheck tests/ui/panel.test.ts src/ui/panel.ts docs/quality-matrix.md
 git commit -m "feat(vigil-todo): 规格↔测试映射自检、doctor 扩展与八方面证据矩阵（规格 §16.6）"
 ```
+
+---
+
+## 增补：范围收缩（规格 §17）
+
+### Task 25: 执行范围收缩决议（删并发跨会话与 defer，WIP 归 1）
+
+**Files:**
+- Delete: `src/jobs/claims.ts`, `src/jobs/heartbeat.ts`, `src/bind/adopt.ts`, `tests/jobs/claims.test.ts`, `tests/jobs/heartbeat.test.ts`, `tests/bind/adopt.test.ts`
+- Modify: `src/board/invariants.ts`、`src/board/reducer.ts`、`src/board/types.ts`、`src/board/selectors.ts`、`src/bind/sweep.ts`、`src/bind/halt.ts`、`src/lib/config.ts`、`src/lib/fingerprint.ts`、`src/jobs/types.ts`、`src/tool/schema.ts`、`src/tool/register.ts`、`src/ui/panel.ts`、`src/wake/compose.ts`、`extensions/vigil-todo.ts`
+- Modify tests: `tests/board/park-defer.test.ts`（改名 `park.test.ts`）、`invariants.test.ts`、`selectors.test.ts`、`cleanup.test.ts`、`lib/config.test.ts`、`lib/fingerprint.test.ts`、`bind/sweep.test.ts`、`bind/halt.test.ts`、`ui/panel.test.ts`、`wake/compose.test.ts`
+- Create: `tests/arch/scope.test.ts`
+
+**Interfaces:**
+- Consumes: T1–T24
+- Produces: 收缩后的规则集（§17.4）；`DEFAULTS.wipLimit === 1`；`classifyOverlap` 单一 `interferers`；无 defer/adopt/heartbeat/claims 标识符
+
+- [ ] **Step 1: 先写范围守卫测试（它会失败，正是删除清单）**
+
+```ts
+// tests/arch/scope.test.ts
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { expect, it } from "vitest";
+
+const ROOT = new URL("../../", import.meta.url).pathname;
+const walk = (dir: string): string[] => {
+  const out: string[] = [];
+  for (const e of readdirSync(dir)) {
+    const p = join(dir, e);
+    if (statSync(p).isDirectory()) out.push(...walk(p));
+    else if (p.endsWith(".ts")) out.push(p);
+  }
+  return out;
+};
+
+it("已废机制不得回潮：src/ 与 extensions/ 无 defer/adopt/heartbeat/claims/adoptedAway", () => {
+  const banned = [/\bdefer\b/i, /\badopt\w*/i, /\bheartbeat\w*/i, /\bclaims?\b/i, /adoptedAway/];
+  const hits: string[] = [];
+  for (const f of [...walk(join(ROOT, "src")), ...walk(join(ROOT, "extensions"))]) {
+    const src = readFileSync(f, "utf8");
+    for (const re of banned) if (re.test(src)) hits.push(`${f} matches ${re}`);
+  }
+  expect(hits).toEqual([]);
+});
+
+it("三个已废文件确实不存在", () => {
+  for (const p of ["src/jobs/claims.ts", "src/jobs/heartbeat.ts", "src/bind/adopt.ts"]) {
+    expect(() => statSync(join(ROOT, p))).toThrow();
+  }
+});
+
+it("WIP 默认归 1（模型串行专注一个 todo）", async () => {
+  const { DEFAULTS } = await import("../../src/lib/config.js");
+  expect(DEFAULTS.wipLimit).toBe(1);
+});
+```
+
+- [ ] **Step 2: 运行确认失败**
+
+Run: `npm test -- tests/arch/scope.test.ts`
+Expected: FAIL — 列出所有仍含已废标识符的文件（这就是删除工作清单）
+
+- [ ] **Step 3: 删除三个模块与其测试**
+
+```bash
+git rm src/jobs/claims.ts src/jobs/heartbeat.ts src/bind/adopt.ts \
+       tests/jobs/claims.test.ts tests/jobs/heartbeat.test.ts tests/bind/adopt.test.ts
+```
+
+- [ ] **Step 4: 移除 defer（9 个源文件）**
+
+逐处删除，**不要注释掉**：
+
+| 文件 | 删什么 |
+|---|---|
+| `board/types.ts` | `Task.defer` 字段 |
+| `board/invariants.ts` | `MutationParams.defer`、R13 互斥两处、R9 的 defer 分支、R14 的 `p.defer` 条件（保留让位判定） |
+| `board/reducer.ts` | defer 校验、`p.defer` 赋值/清除分支 |
+| `board/selectors.ts` | `selectNext` 的 `!t.defer` 条件 |
+| `bind/sweep.ts` | `sweepDefers` 整个函数 + `sweepAll` 里的调用与返回字段 |
+| `tool/schema.ts` | `DeferSpec` 与 `defer` 参数 |
+| `ui/panel.ts` | deferred 行渲染 |
+| `wake/compose.ts` | 「冲突需串行」那行文案 |
+| `extensions/vigil-todo.ts` | defer 相关接线 |
+
+- [ ] **Step 5: 移除 adoptedAway / R17，WIP 归 1**
+
+1. `board/invariants.ts`：删 `checkStructure` 开头的 `adoptedAway` 判定（R17）
+2. `lib/config.ts`：`DEFAULTS.wipLimit` **3 → 1**；`CONFIG_KEYS.wipLimit.default` 随之（它引用 DEFAULTS，自动跟随）
+3. `board/cleanup.ts`：注释里「R17 对 clear 放行」改为「无 R17，clear 不受冻结限制」
+
+- [ ] **Step 6: 指纹两集合合并 + sessionId 修正**
+
+`lib/fingerprint.ts`：
+
+```ts
+const overlaps = (a: Job, b: Job): boolean =>
+  a.id !== b.id && a.cwd === b.cwd
+  && (a.taskId !== b.taskId || a.sessionId !== b.sessionId)   // ★ §17.6 同 task 且同 session 才排除
+  && b.startedAt <= (a.endedAt ?? Number.MAX_SAFE_INTEGER)
+  && (b.endedAt ?? Number.MAX_SAFE_INTEGER) >= a.startedAt;
+
+/** 单一集合：缺 fpEnd 或有写入都算无法归因。 */
+export function classifyOverlap(job: Job, store: JobStore) {
+  const interferers: string[] = [];
+  for (const other of store.all()) {
+    if (!overlaps(job, other)) continue;
+    if (other.fpEnd === undefined || other.fpStart !== other.fpEnd) interferers.push(other.id);
+  }
+  return { interferers };
+}
+
+export function verdictAt(job: Job, store: JobStore): FpVerdict {
+  if (job.fpStart === undefined || job.fpEnd === undefined) return "unknown";
+  if (job.fpStart === job.fpEnd) return "fresh";
+  return classifyOverlap(job, store).interferers.length === 0 ? "stale" : "unknown";
+}
+```
+
+`jobs/types.ts` 删 `overlapUnfinished`；`bind/autofill.ts` 与 `fpReason` 同步（reason 统一为「期间有写入或未结束，无法归因」）。
+
+- [ ] **Step 7: 修测试（删已废、改断言、保回归）**
+
+| 测试文件 | 处置 |
+|---|---|
+| `board/park-defer.test.ts` | `git mv` 为 `park.test.ts`，删 defer 全部用例，保留 park/verify 用例 |
+| `board/invariants.test.ts` | 删 R13/R17/defer 用例；R1 用例改为 limit=1 语义；**保留** R4/R9(park)/R14 |
+| `board/selectors.test.ts` | 删 deferred 用例；WIP 满用例改 limit=1 |
+| `board/cleanup.test.ts` | 删 adoptedAway 用例 |
+| `lib/config.test.ts` | `wipLimit` 断言 3 → **1** |
+| `lib/fingerprint.test.ts` | 删两集合用例（F63/F75/F79），改为单集合断言；**新增**跨会话同 taskId 用例（§17.6） |
+| `bind/sweep.test.ts` | 删 sweepDefers 用例（F18/F34），保留 respawn/catchUp/retention |
+| `bind/halt.test.ts` | 删「不收养」用例，保留其余四处复活防护 |
+| `ui/panel.test.ts` | 删 deferred 渲染用例 |
+| `wake/compose.test.ts` | 删「冲突需串行」文案断言 |
+| `selfcheck/spec-coverage.test.ts` | F 编号全集改为**排除 §17.2 已废编号**后再校验（否则永远 missing） |
+
+**新增跨会话防御用例**（`lib/fingerprint.test.ts`）：
+
+```ts
+it("跨会话同 taskId 的写入作业不被误排除（§17.6）", () => {
+  const s = createJobStore(mkdtempSync(join(tmpdir(), "vigil-fp-")));
+  const a = j("A", { taskId: 1, sessionId: "SA", fpEnd: "B" }); s.put(a);
+  s.put(j("B", { taskId: 1, sessionId: "SB", startedAt: 150, endedAt: 250, fpStart: "A", fpEnd: "C" }));
+  expect(classifyOverlap(a, s).interferers).toEqual(["B"]);
+  expect(verdictAt(a, s)).toBe("unknown");
+});
+```
+
+- [ ] **Step 8: 运行全量确认**
+
+Run: `npm test && npm run typecheck`
+Expected: PASS。总数会**下降**（删了约 30 个已废用例），但 §17.3 保留清单对应的用例必须全绿：重试链有界、两步 finalize、唤醒单次性、catch-up、halt 四处防护、清理与 purged、指纹 stale 自动重验、性能三项、边界守卫。
+
+- [ ] **Step 9: 更新文档**
+
+`docs/configuration.md` 的 `wipLimit` 默认改 1；`docs/quality-matrix.md` 移除已废机制行；`README.md` 若提到 defer/收养则删除。规格 §17 已是决议，无需再改。
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add -A
+git commit -m "refactor(vigil-todo)!: 范围收缩——删 defer/收养/心跳/认领，WIP 归 1（规格 §17）
+
+用户显式撤回决策 13：单会话 resume 复用，模型串行专注一个 todo，
+并行收益由「一个 todo 挂多作业」承担。保留重试链、两步 finalize、
+唤醒单次性、指纹 stale 重验、halt 与清理。"
+```

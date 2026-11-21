@@ -1337,3 +1337,64 @@ pi 的 Esc/`ctx.abort()` 只中断**当前模型轮次**，不影响 detached �
 - halt 重复调用幂等（已 halted 则只补杀残留作业）。
 - halt 落盘后崩溃 ⇒ 启动 sweep 见 `halted && 本会话仍有 running` ⇒ **补杀**，不留孤儿。
 - resume 后 `turnsUsed` **不重置**（避免用 halt/resume 绕过 maxTurns 保险丝）；只有用户 input 才归零。
+
+---
+
+## 17. 范围收缩决议（用户 2026-11-22 显式撤回决策 13）
+
+### 17.1 用户原话与推导
+
+> 「不会有跨会话的 todo 执行，因此并发 todo 没有意义」
+> 「不会新开会话，还是用的老会话」
+
+由此确定运行模型：
+
+```
+单会话 · resume 复用 · 模型串行专注一个 todo · 该 todo 下可挂多个并行作业
+```
+
+**关键区分（此前设计混淆过）**：后台并行跑的是**命令**，不是**todo**。推进 todo 需要模型判断（证据够不够、要不要 park、下一步是谁），shell 进程没有这个判断力。所以「多 todo 并发推进」是伪需求；「一个 todo 下多作业并行」是真需求，收益全部保留。
+
+### 17.2 撤回与删除清单
+
+| 项 | 处置 | 依据 |
+|---|---|---|
+| 决策 13 的 `wipLimit: 3` | **改为 `wipLimit: 1`** | 模型物理串行，>1 只带来面板噪音与白堵位 |
+| 决策 13 的 `defer(untilJob)` | **整套删除** | WIP=1 已串行化任务，「B 等 A 的作业」场景不存在 |
+| §4.3 defer 语义 / §4.4 互斥 / §4.5 defer sweep | **废** | 同上 |
+| §7.1.1 孤儿链收养 A–F 全节 | **废** | 永不新开会话 ⇒ replay 足够 |
+| `src/jobs/claims.ts`（O_EXCL 认领 + rename 收回） | **删** | 无竞争者 |
+| `src/jobs/heartbeat.ts`（会话心跳判活） | **删** | 同时只有一个会话 |
+| `src/bind/adopt.ts`（收养/重编号/冻结） | **删** | 无接续新会话 |
+| R17 `adoptedAway` 冻结 | **删** | 无移交 |
+| R13 park/defer 互斥 | **删** | defer 不存在 |
+| §5.2 两集合收窄（`interferers` / `overlapUnfinished`） | **合并为单一 `interferers`** | 同任务排除后跨任务干扰不存在；缺 `fpEnd` 归 unknown 即可 |
+| 规则编号 R13/R17/R19(purged 防收养部分) | 见 §17.4 保留说明 | |
+
+**受影响验收用例**：F18 F27 F28 F34 F39 F62 F78（defer）、F88 F92 F93 F94 F95 F97 F98 F100 F104 F105（收养/心跳）、F90 F101 F103（认领）、F56 F57 F63 F75 F79（两集合）⇒ **删除或重写**，不得留下引用已废机制的测试。
+
+### 17.3 必须保留（与并发无关，删了会破北极星）
+
+| 项 | 为什么仍需要 |
+|---|---|
+| **一个 todo 挂多作业 + `maxConcurrentJobs: 10`** | 真并行收益全在这里（训练/回归/lint 同时跑） |
+| **指纹 stale + 自动重验** | 模型在**自己**的测试作业期间改代码照样失真，与跨会话无关 |
+| `recoverJobs` + `exitCodeKnown:false` | pi 关过再 resume，detached 作业可能已死或仍在跑，退出码不能猜 |
+| **running 作业排除** | resume 时昨晚遗留作业可能仍在跑，不得重复 spawn |
+| 两步 finalize（sidecar 权威 + 投影幂等） | pi 关着时作业结束无人记录；resume 后靠 `finalized`/`evidenceApplied` 幂等投影 |
+| `notifyState` + catch-up 补偿 | pi 关着期间完成 ⇒ resume 补发恰一次 |
+| 重试链有界性、`turnsUsed` 保险丝、唤醒单次性 | 与并发无关 |
+| halt/resume、选择性清理、`purged` | 与并发无关；`purged` 仍防**清理后 catch-up 补发** |
+| 配置契约、边界守卫、规格↔测试自检 | 八方面要求不变 |
+
+### 17.4 收缩后的规则集
+
+R1（WIP=1）、R2、R3、R4、R5、R6、R7（park 必带 reason）、R8 **废**（defer）、R9 简化（只有 park，无 defer）、R10、R11、R12、R13 **废**、R14 简化（让位仍要求无 running/退避链）、R15、R16（只读集去掉 defer 相关、加 halted）、R17 **废**、R18（清理孤儿防护）、R19（purged，仅防 catch-up）、R20（halt 复活防护，入口从五处减为四处：`tryDeliver`/`sweepRespawns`/`catchUpScan`/`before_settle`，adopt 已删）。
+
+### 17.5 新增不变量（防止已废机制回潮）
+
+`tests/arch/scope.test.ts` 必须断言：`src/` 与 `extensions/` 中**不出现** `defer`、`adopt`、`heartbeat`、`claims`、`adoptedAway` 这些标识符（`docs/` 与本决议除外）。删除是决议，不是临时注释掉。
+
+### 17.6 顺带修正（保留一行防御）
+
+`classifyOverlap` 的排除条件由 `a.taskId !== b.taskId` 改为 **`a.taskId !== b.taskId || a.sessionId !== b.sessionId`**（同 task **且同 session** 才排除）。当前范围下不会触发，但成本一行，防止范围再变时静默误判。已取证：改前跨会话同 taskId 的写入作业被误排除，`interferers: []`、`verdict: stale`（应为 unknown）。

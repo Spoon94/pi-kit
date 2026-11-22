@@ -1528,27 +1528,31 @@ renderPanel                             → 三个 pending 带 ⛓，观感完�
 
 `clear` 此前**只是工具 action**（`todo({action:"clear"})`，模型调用），命令面没有。用户想自己清历史任务必须先让模型代劳，与「刹车/继续都能自己按」的设计不一致。
 
-### 20.2 语义（与工具层完全一致，复用同一套清理逻辑）
+### 20.2 语义（用户收紧：只许清终态历史）
 
-| 命令 | 范围 | 确认 |
+**用户明确要求**：`clear` 子命令**只能清理已完成的历史任务**；**中断（parked）、异常、进行中（in_progress）一律不允许清理**。
+
+| 命令 | 范围 | 说明 |
 |---|---|---|
-| `/vt clear` | 默认 `settled` = completed + deleted | 直接执行（只清历史，不碰在跑的） |
-| `/vt clear completed` | 只清已完成 | 直接执行 |
-| `/vt clear deleted` | 只清 tombstone | 直接执行 |
-| `/vt clear settled` | 同默认 | 直接执行 |
-| `/vt clear all` | 全部任务 | **两步确认**（沿用 `/bg k` 的 `confirm` 模式），且仍受 R18 约束 |
+| `/vt clear` | 默认 `settled` = completed + deleted | 只清终态历史 |
+| `/vt clear completed` | 只清已完成 | |
+| `/vt clear deleted` | 只清 tombstone | |
+| `/vt clear settled` | 同默认 | |
+| ~~`/vt clear all`~~ | **删除该范围** | 它会删 pending/in_progress/parked，违反本约束 |
 
-- **必须复用** `planCleanup` / `applyCleanup` / `markPurged`，不得另写一份清理逻辑（否则两套语义会漂移）。
-- **必须落快照**（`appendEntry`）并 `markPurged`——否则清理后 catch-up 会把链重新投影回来（§16.7.4 的「清了又回来」）。
-- R18 不变：任何范围下绑有 **running** 作业的任务一律跳过并列出；`all` 遇 running/退避链直接拒并指向 `bg_kill` / `halt`。
-- `parked` **不属于历史**，默认不清（它是等人的决策物）。
+- **命令面不再提供 `all`**，连两步确认也不给——不给出这个能力，比给了再加确认更安全。误传 `all` 或未知范围 ⇒ 拒绝并列出允许的三个范围。
+- **pending 也受保护**：它不是历史，是还没干的活。
+- **parked 永不可清**：无论是等人拍板还是 halt 造成的中断，都是需要人处理的交接物，删掉等于丢证据。
+- 工具层 `todo({action:"clear", scope:"all", force:true})` 的既有能力**保持不变**（模型在明确 force 下仍可用，受 R18 约束）；本次收紧只针对**人用的命令面**。
+- 仍**必须复用** `planCleanup` / `applyCleanup` / `markPurged`，必须落快照 + `markPurged`（防 catch-up 复活）。
+- R18 不变：绑有 running 作业的任务即使在 completed 范围也跳过并列出。
 
 ### 20.3 输出与可发现性
 
 - 报告：清了几条、跳过哪些（附 id 与原因）、purge 了几条链。
 - 无可清时明确说「没有可清理的历史任务」，**不得静默**。
 - `all` 的第一步回显将被删除的任务清单（含 pending/in_progress），让用户看清代价再确认。
-- Tab 补全：一级加 `clear`；`clear ` 前缀给出 `completed / deleted / settled / all` 四个二级候选，各带说明。
+- Tab 补全：一级加 `clear`；`clear ` 前缀只给出 `completed / deleted / settled` **三个**二级候选（**不含 all**），各带说明。
 - `panelHint` 与三个命令的 description 同步加入 clear。
 
 ### 20.4 验收用例
@@ -1557,11 +1561,11 @@ renderPanel                             → 三个 pending 带 ⛓，观感完�
 |---|---|---|
 | F123 | `/vt clear` 默认 | 只清 completed+deleted；pending/in_progress/parked 保留；落快照 |
 | F124 | `/vt clear completed` / `deleted` | 各自只清一类 |
-| F125 | `/vt clear all` 无 confirm | 不删除，回显清单并要求 `confirm` |
-| F126 | `/vt clear all confirm` 且有 running 作业 | 拒（R18），指向 bg_kill / halt |
-| F127 | `/vt clear all confirm` 无作业 | 全清且落快照 |
+| F125 | `/vt clear all` | **拒绝**（命令面不提供 all），列出允许的 completed/deleted/settled |
+| F126 | `/vt clear all confirm` | **拒绝**（同上，confirm 也不给） |
+| F127 | board 含 pending/in_progress/parked 时 `/vt clear` | 三者**全部保留**，只清 completed+deleted |
 | F128 | 清理后 catch-up | 已 purge 的链不再被投影/补发 |
 | F129 | 绑 running 作业的任务在任意范围下 | 跳过并在输出里列出 |
 | F130 | 无可清历史 | 明确提示，不静默 |
-| F131 | Tab 补全 | 一级含 clear；`clear ` 前缀出四个范围候选 |
+| F131 | Tab 补全 | 一级含 clear；`clear ` 前缀只出 **completed/deleted/settled 三个**，无 all |
 | F132 | `/vt clear` 与 `/vigil-todo clear` | 行为完全一致 |

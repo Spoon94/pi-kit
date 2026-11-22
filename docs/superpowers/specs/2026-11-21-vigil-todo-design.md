@@ -1445,3 +1445,74 @@ renderPanel                             → 三个 pending 带 ⛓，观感完�
 | F109 | 自环 addBlockedBy[自身] | isError（既有防线不得回归） |
 | F110 | 历史快照带环 + WIP 有位 | doctor 报「无可推进」，面板首行有标记 |
 | F111 | 正常 DAG（菱形依赖） | 不得误报环，next 正常 |
+
+---
+
+## 19. 功能完备性与边界（piper 覆盖率审计发现）
+
+首次实测覆盖率：**行 90.89% / 分支 85.61% / 函数 87.85%**。据此定位出下列**功能级**缺口（非仅数字问题）。
+
+### 19.1 死参数与退化功能
+
+| # | 问题 | 取证 | 要求 |
+|---|---|---|---|
+| A1 | `includeDeleted` 声明未兑现 | `list` 与 `list includeDeleted:true` 输出**逐字相同**，deleted 永不可见 | 实现：`includeDeleted:true` 时包含 tombstone；默认仍隐藏 |
+| A2 | `get` 严重退化 | 输出仅 `#1 [pending] x`，丢 description/owner/verify/blockedBy/blocks/evidence/lastFailure/park | 输出完整多行详情（对齐原 rpiv-todo 的 get），含最近证据与失败原因 |
+| A3 | `list` 的 `status` 过滤无效 | 传 `status:"completed"` 仍返回全部 | 实现按 status 过滤；与 includeDeleted 可组合 |
+
+### 19.2 模型指引完全缺失（最高优先）
+
+**取证**：`promptSnippet` / `promptGuidelines` 在实现中**零出现**；schema 参数几乎无 `description`；工具级 description 仅 45–84 字符一句。
+
+**危害**：模型不知道长任务该用 `bg_run` 而非 `bash` ⇒ 可能用 bash 跑 40 分钟训练，**阻塞整个会话**，唤醒闭环无从发生 ⇒ 北极星从根上失效。也不知道 WIP=1、park 必带 reason、完成需证据、`scope`/`force`/`accept` 语义。
+
+**要求**：
+- 每个工具补 `promptSnippet`（一句）与 `promptGuidelines`（要点式），至少覆盖：
+  1. 长任务（训练/构建/全量测试）用 `bg_run` 而不是 `bash`；起完即可结束本轮，完成会自动唤醒
+  2. 一次只有一个 `in_progress`（WIP=1）；要换任务先完成或 `park`
+  3. `park` 必带 `reason`；parked 不占 WIP，不依赖它的任务可继续
+  4. 完成需真实证据；失败不可标 completed；`accept:"stale"` 是显式豁免并留痕
+  5. `clear` 默认只清 completed/deleted；`scope:"all"` 需 `force:true` 且无作业在跑
+  6. 被唤醒时按消息里的 next 直接推进，不要反问「要不要继续」
+- schema **每个参数**补 `description`，写明语义、必填条件、只读字段不可传
+- 指引可被配置覆盖（`guidance.promptSnippet` / `guidance.promptGuidelines`），沿用 §16.3 优先级链
+
+### 19.3 面板不截断（边界）
+
+**取证**：300 字 subject ⇒ 面板行 **308 字符**；终端通常 80–120 列 ⇒ 换行撑破布局，破坏「面板即答案」。原 rpiv-todo 用 `truncateToWidth` 处理过，本实现丢失。
+
+**要求**：所有面板行按可用宽度截断（含 subject / park.reason / job.label / command / 证据 note），截断加省略号；宽度不可知时用保守默认（如 100 列）。`/todos` 全量文本不截断（那是下钻视图）。
+
+### 19.4 覆盖率缺口（功能可用但无回归保护）
+
+已实测**功能本身可用**，但套件从未走到：
+
+| 位置 | 覆盖率 | 实测结论 |
+|---|---|---|
+| `jobs/kill.ts` `escalate()` | 行 53.57% / 函数 50% | 实测可杀掉忽略 SIGTERM 的进程（604ms），但**零回归测试** |
+| `bind/sweep.ts` `applyRetention()` | 行 80% / 函数 55.55% | 实测正确清旧留新并 purged，但**零回归测试** |
+| `bind/sweep.ts:49-52` | 未覆盖 | respawn 失败的 parkTask 分支 |
+| `halt` 命令入口 | 零测试引用 | halt 逻辑有单测，命令接线无测 |
+| `wake/ack.ts:27-36`、`tool/register.ts:187-201`、`board/reducer.ts:115-155`、`extensions:619-637` | 未覆盖 | 需补分支用例 |
+
+### 19.5 覆盖率门禁（自验证，防退化）
+
+- 新增 `npm run coverage` 与 `npm run coverage:check`
+- 阈值：**行 ≥95% / 分支 ≥90% / 函数 ≥95%**（`src/jobs/types.ts` 等纯类型文件排除）
+- 未达阈值即失败，纳入交付前必跑清单
+- `docs/quality-matrix.md` 记录覆盖率基线与测量命令
+
+### 19.6 新增验收用例
+
+| # | 用例 | 期望 |
+|---|---|---|
+| F112 | `list includeDeleted:true` | 含 tombstone；默认不含 |
+| F113 | `list status:"completed"` | 只返回 completed；与 includeDeleted 组合正确 |
+| F114 | `get` 详情 | 含 description/owner/verify/blockedBy/证据/失败原因 |
+| F115 | 300 字 subject + 300 字 park reason | 所有面板行 ≤ 宽度上限，带省略号 |
+| F116 | `escalate` 对忽略 SIGTERM 的进程 | 超时后 SIGKILL 生效，进程消失；已退出进程不抛 |
+| F117 | `applyRetention` 经 sweepAll | 旧 completed 被清且 purged，新任务保留 |
+| F118 | respawn 失败（spawn_error / 无槽重验） | 对应任务 parked 且原因正确 |
+| F119 | `/vigil-todo halt` 与 `resume` 命令入口 | 真实命令路径生效，非仅直调函数 |
+| F120 | 四个工具的 promptSnippet/promptGuidelines | 均非空且含 §19.2 六条要点；可被配置覆盖 |
+| F121 | 覆盖率门禁 | 达阈值通过；人为删测试后失败 |

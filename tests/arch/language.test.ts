@@ -26,6 +26,6 @@ it("src/, extensions/ and tests/ contain no CJK characters", () => {
 });
 
 it("the language guard excludes only the internal design archive", () => {
-  expect(() => statSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"))).not.toThrow();
-  expect(() => statSync(join(ROOT, "docs/superpowers/plans/2026-11-21-vigil-todo.md"))).not.toThrow();
+  expect(() => statSync(join(ROOT, "docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md"))).not.toThrow();
+  expect(() => statSync(join(ROOT, "docs/vigil-todo/design/plans/2026-11-21-vigil-todo.md"))).not.toThrow();
 });

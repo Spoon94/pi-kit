@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript（ESM，pi 用 jiti 直接加载 `.ts`）、typebox（参数 schema）、vitest（测试）、node:child_process / node:fs。pi 宿主提供 `@earendil-works/pi-coding-agent`、`pi-tui`、`pi-ai`、`pi-agent-core`、`typebox`，一律列 peerDependencies 不打包。
 
-**Spec:** `docs/superpowers/specs/2026-11-21-vigil-todo-design.md`（v12，check 已 APPROVE）。执行者必须同时读规格与本计划；本计划的每条规则编号 R1–R17、用例编号 F1–F105 均指向该规格。
+**Spec:** `docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md`（v12，check 已 APPROVE）。执行者必须同时读规格与本计划；本计划的每条规则编号 R1–R17、用例编号 F1–F105 均指向该规格。
 
 ## Global Constraints
 
@@ -78,7 +78,7 @@ src/tool/schema.ts                typebox 参数 schema（含只读字段声明�
 src/tool/envelope.ts              成功/拒绝信封 + details 快照
 src/tool/register.ts              todo/bg_* 注册 + L1 预检 + 冲突自检
 tests/**                          与 src 同构，每 Task 一个或多个测试文件
-docs/superpowers/plans/…          本计划
+docs/vigil-todo/design/plans/…          本计划
 ```
 
 ---
@@ -4778,7 +4778,7 @@ Expected: 加载成功
 
 - [ ] **Step 7: 文档结构自检（F102）**
 
-Run: `grep -c '^### Task' docs/superpowers/plans/2026-11-21-vigil-todo.md`
+Run: `grep -c '^### Task' docs/vigil-todo/design/plans/2026-11-21-vigil-todo.md`
 Expected: 20
 
 Run: `grep -n 'TBD\|TODO\|待补' src extensions | head`
@@ -5475,7 +5475,7 @@ const walk = (dir: string): string[] => {
 };
 
 it("规格 §13 的每个 F 编号都在测试文本中出现（规格与测试不脱节）", () => {
-  const spec = readFileSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"), "utf8");
+  const spec = readFileSync(join(ROOT, "docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md"), "utf8");
   const table = spec.slice(spec.indexOf("## 13. 验收用例"), spec.indexOf("## 14."));
   const ids = [...new Set([...table.matchAll(/\bF(\d+)\b/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
   expect(ids.length).toBeGreaterThanOrEqual(105);

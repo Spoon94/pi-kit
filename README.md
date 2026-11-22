@@ -12,17 +12,25 @@ Sub-agent dispatch guidance for `vigil-todo` lives at [docs/vigil-todo/dispatchi
 
 ## Install
 
-From a local checkout:
+Three installation modes, depending on your situation:
+
+**npm — recommended for users, after the release is published:**
 
 ```bash
-pi install ./
+pi install npm:pi-kit
 ```
 
-From a git source, name the branch explicitly — `main` currently contains only docs, while extension code lives on the build branch:
+**git — until the build branch is merged (the `main` branch currently contains docs only):**
 
 ```bash
 pi install git:github.com/Spoon94/pi-kit@feat/vigil-todo
 # or: pi install https://github.com/Spoon94/pi-kit#feat/vigil-todo
+```
+
+**local checkout — for development; code changes take effect with `/reload`:**
+
+```bash
+pi install ./
 ```
 
 Adjust the remote/fork as needed, then restart pi. Each extension's docs describe any additional setup (for example, `vigil-todo` requires removing the old `rpiv-todo` / `pi-bg-run` packages first).
@@ -54,4 +62,4 @@ Repository conventions:
 | `extensions/` | pi extension entry points (one thin `.ts` file per extension) |
 | `src/` | implementation namespaces; `src/<name>/` per extension (`src/vigil-todo/` today) |
 | `tests/` | Vitest suites; `tests/<name>/` per extension plus repo-wide `arch/` and `selfcheck/` guards |
-| `docs/` | collection docs plus one folder per extension; the internal design archive stays under `docs/superpowers/` |
+| `docs/` | collection docs plus one folder per extension; each extension's design archive lives under its own `docs/<name>/design/` (vigil-todo: `docs/vigil-todo/design/`) |

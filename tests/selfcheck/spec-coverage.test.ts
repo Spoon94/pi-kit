@@ -23,7 +23,7 @@ const RETIRED = new Set([
 ]);
 
 it("every F number in spec §13 appears in test text (spec and tests stay linked)", () => {
-  const spec = readFileSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"), "utf8");
+  const spec = readFileSync(join(ROOT, "docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md"), "utf8");
   const table = spec.slice(spec.indexOf("## 13."), spec.indexOf("## 14."));
   const ids = [...new Set([...table.matchAll(/\bF(\d+)\b/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
   expect(ids.length).toBeGreaterThanOrEqual(105);
@@ -48,7 +48,7 @@ it("entry-level F numbers must have event-order assertions under tests/vigil-tod
 });
 
 it("§18 F106-F111 all appear in test text (R21 / deadlock visibility)", () => {
-  const spec = readFileSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"), "utf8");
+  const spec = readFileSync(join(ROOT, "docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md"), "utf8");
   const start = spec.indexOf("### 18.4");
   const end = spec.indexOf("## 19.");
   const section = spec.slice(start, end > start ? end : undefined);
@@ -60,7 +60,7 @@ it("§18 F106-F111 all appear in test text (R21 / deadlock visibility)", () => {
 });
 
 it("§19 F112-F122 all appear in test text (completeness/guidance/truncation/coverage gate)", () => {
-  const spec = readFileSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"), "utf8");
+  const spec = readFileSync(join(ROOT, "docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md"), "utf8");
   const start = spec.indexOf("### 19.6");
   const end = spec.indexOf("## 20.");
   const section = spec.slice(start, end > start ? end : undefined);
@@ -72,7 +72,7 @@ it("§19 F112-F122 all appear in test text (completeness/guidance/truncation/cov
 });
 
 it("§20 F123-F132 all appear in test text (/vt clear)", () => {
-  const spec = readFileSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"), "utf8");
+  const spec = readFileSync(join(ROOT, "docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md"), "utf8");
   const section = spec.slice(spec.indexOf("### 20.4"));
   const ids = [...new Set([...section.matchAll(/\bF(\d+)\b/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
   expect(ids).toEqual([123, 124, 125, 126, 127, 128, 129, 130, 131, 132]);
@@ -97,7 +97,7 @@ it("the sub-agent dispatch doc exists and covers the key boundaries (atomic flow
 });
 
 it("the spec document has no duplicate top-level sections (F102)", () => {
-  const spec = readFileSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"), "utf8");
+  const spec = readFileSync(join(ROOT, "docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md"), "utf8");
   const sections = [...spec.matchAll(/^## (\d+)\./gm)].map((m) => m[1]);
   expect(sections.length).toBeGreaterThan(10);
   expect(new Set(sections).size).toBe(sections.length);

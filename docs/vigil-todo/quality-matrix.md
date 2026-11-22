@@ -113,7 +113,7 @@ The handle count stays at 3 throughout, and heap falls after clearAll. The root 
 
 `tests/arch/scope.test.ts` asserts retired mechanisms cannot return: `src/` and `extensions/` contain no defer / adopt / heartbeat / claims / adoptedAway, and the three retired module files really do not exist.
 
-`tests/arch/language.test.ts` asserts `src/`, `extensions/`, and `tests/` contain no CJK characters (U+4E00–U+9FFF); the internal design archive under `docs/superpowers/{specs,plans}/` is deliberately excluded and remains in Chinese.
+`tests/arch/language.test.ts` asserts `src/`, `extensions/`, and `tests/` contain no CJK characters (U+4E00–U+9FFF); the internal design archive under `docs/vigil-todo/design/{specs,plans}/` is deliberately excluded and remains in Chinese.
 
 ## Spec↔test mapping (§16.6)
 

@@ -11,7 +11,7 @@ This repository is a collection: one install, N independent pi extensions. Each 
      "pi": { "extensions": ["./extensions/vigil-todo.ts", "./extensions/<name>.ts"] }
    }
    ```
-3. **Create the docs folder**: `docs/<name>/README.md` (overview, tools, commands, quickstart) and any extra docs such as `configuration.md`.
+3. **Create the docs folder**: `docs/<name>/README.md` (overview, tools, commands, quickstart) and any extra docs such as `configuration.md`. Design archives (specs/plans) go under `docs/<name>/design/`, never at the repository top level.
 4. **Create tests** under `tests/<name>/`.
 5. **Run the full gate**: `npm run verify`.
 

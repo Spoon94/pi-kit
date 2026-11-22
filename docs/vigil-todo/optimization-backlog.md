@@ -1,7 +1,7 @@
 # vigil-todo 后续优化清单
 
 > 状态：**待优化**。本文件只记录后续工作，不表示这些能力已经实现或验证。
-> 关联规格：[`superpowers/specs/2026-11-21-vigil-todo-design.md`](./superpowers/specs/2026-11-21-vigil-todo-design.md)
+> 关联规格：[`design/specs/2026-11-21-vigil-todo-design.md`](./design/specs/2026-11-21-vigil-todo-design.md)
 > 原则：先完成规格中的 P1–P5，再按本清单持续优化；每项优化都需要相应测试或实测证据。
 
 ## 1. 性能

@@ -1,5 +1,7 @@
 # pi-kit · vigil-todo：todo + bg 融合设计方案
 
+> **Historical design record.** Superseded by [`docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md`](./design/specs/2026-11-21-vigil-todo-design.md). Kept for history; see the spec for current behavior.
+
 > 状态：草案 v0.2（未实现）
 > 范围：`extensions/vigil-todo.ts` 一个扩展，取代 `@juicesharp/rpiv-todo` + `pi-bg-run`
 > 本文只谈设计与取舍，不含实现代码

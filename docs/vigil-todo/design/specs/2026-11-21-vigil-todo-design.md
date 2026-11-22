@@ -1,6 +1,6 @@
 # vigil-todo 设计规格 v12（check 已 APPROVE）
 
-> 命名：**vigil-todo · 深夜守护者**
+> 命名：**vigil-todo**
 > 日期：2026-11-21
 > 状态：✅ **check 评审通过（第十二轮）**，允许按 §15 进入实现阶段
 > 最终结论原文："判定：通过。允许进入实现阶段，按 §15 顺序从 P1 开始。"
@@ -199,7 +199,7 @@ vigil-todo     → 任务该不该往下走（重试用尽 / 依赖未清 / 轮�
 | 5 | 动作边界交给权限层 |
 | 6 | 扩展算唯一 next，模型拍板 |
 | 7 | parked 是正式第 5 状态；兼容单向 |
-| 8 | 失败退避重试：立即 → 30s → 2min，重试 3 次可配；每次新 job id 各留日志 |
+| 8 | 失败退避重试：立即 → 30s → 2min → 5min → 10min，**总尝试 6 次**可配；每次新 job id 各留日志 |
 | 9 | 主动 kill 不重试；spawn 就失败不重试 |
 | 10 | 扩展自己重跑命令（不烧 token） |
 | 11 | `maxTurns: 50` 保险丝，重试不计数 |
@@ -421,12 +421,12 @@ fp stale → 自动 respawn 取证命令（新 job id，同 rootId，标 staleRe
 
 | 链级上限 | 派生口径 | 默认 |
 |---|---|---|
-| `attempt` | 失败重试序号，**含重验分支内的失败重试** | ≤ `1 + retries` = 4 |
+| `attempt` | 失败重试序号，**含重验分支内的失败重试** | ≤ `1 + retries` = 6 |
 | `chain.reverifies` | `count(rootId===R && staleReverifyOf != null)` | ≤ `staleReverify` = 1 |
 
 **继承规则**：沿 `retryOf` 向上走，只要任一祖先带 `staleReverifyOf`，该 job 即属**重验分支**；**重验分支的后代永不再触发新的重验**。
 **消耗口径**：重验 job 本身 `attempt` 继承父值（不增）；重验分支内的失败重试照常 `attempt++`，撞 4 即 parked。
-⇒ 单链 job 总数 ≤ `4 + 1 = 5`，**有界**。`turnsUsed` 只闸投递不闸 spawn，故不能充当此处的界。
+⇒ 单链 job 总数 ≤ `6 + 1 = 7`，**有界**。`turnsUsed` 只闸投递不闸 spawn，故不能充当此处的界。
 
 **capacity 死路（R4 附带意见③）**：重验走 spawn 路径，会被"新 spawn 准入"拒（R3-2 后新 spawn 不排队）。此时**直接 parked(reason="无空闲槽位重验")**，不静默停在 in_progress。
 
@@ -738,7 +738,9 @@ for task in toImport:
 
 ### 7.2 重试链
 
-`retries` 默认 **3**（额外次数，**总尝试 4 次**）。间隔：1→2 立即，2→3 30s，3→4 2min。
+`retries` 默认 **5**（额外次数，**总尝试 6 次**）。间隔：1→2 立即，2→3 30s，3→4 2min，4→5 5min，5→6 10min（最坏累计等待 ≈17.5 分钟）。
+
+**为什么是 6 不是 4**：用户明确要求避开 4（不吉利），且面板分母 `1 + retries` 直接呈现给用户，故取总尝试 6。
 无条件重试，零日志启发式。每次新 job id、同 `rootId`、日志各自保留。
 
 **容量与 spawn 分流（R2-4 / R3-2）**：
@@ -1000,7 +1002,7 @@ replay 失败 → 空列表 + notify；sidecar 读失败 → 改名留档 + 从�
 
 | # | 结论 |
 |---|---|
-| Q-A | 总尝试 **4** 次（`retries:3` = 额外次数） |
+| Q-A | 总尝试 **6** 次（`retries:5` = 额外次数）。原为 4，用户要求避开 4 ⇒ 改 6，退避扩到 5 档 |
 | Q-B | 指纹三态 + §5.2 两处收窄，**fpVerdict 延迟到回填时算**；非 git → unknown 标 `fp:n/a`；裁决点 = 是否叫醒人；stale 走**自动重验**而非 `expectChanges` 豁免（§5.2.1 反提案） |
 | Q-C | 重试期占 WIP 位，但面板 `↻ retry n/m` + park 能取消链 |
 | Q-D | 立即解除仅限根已终结或根记录不存在；后者 repair + notify |
@@ -1155,3 +1157,415 @@ extensions/vigil-todo.ts        注册面
 | P3 | bind + wake（回填、人工优先、**两步 finalizeChain（链级落 sidecar + owner 投影）**、派生 chainTerminated、pendingReverify 补驱动、sweep、next、四通道、投递时 watermark、turnsUsed 闸门、renudgeBudget、input 归零、指纹延迟判定、双路 ack、isIdle 守卫补偿） | F4 F6 F7 F8 F18 F19 F20 F21 F23 F24 F34 F35 F37 F38 F40 F41 F43 F44 F49 F55-F59 F61 F65 F70 F71 F72-F74 F76-F78 F80-F105 |
 | P4 | ui（汇总行 + fp 计数、parked reason、deferred、retry n/m、预算、doctor） | F25 + 观感对齐 |
 | P5 | 性能基准 + 迁移 + 文档 | §10.2 达标 |
+
+---
+
+## 16. 八方面贯穿要求（设计 / 实现 / 测试）
+
+本节是**验收维度**，不是可选优化。每个方面都必须在三层留下痕迹：设计有条款、实现有代码、测试有断言。
+
+| # | 方面 | 设计条款 | 实现落点 | 测试出口 |
+|---|---|---|---|---|
+| 1 | 性能 | §10.2 + §16.1 | `lib/config` 缓存、单 timer、字节尾读 | `tests/perf/budget.test.ts` |
+| 2 | 容灾 | §5.3 / §7.1 / §7.1.1 + §16.2 | 两步 finalize、认领、心跳、补偿 | `tests/bind/*`、`tests/jobs/*` |
+| 3 | 可自定义设置 | §16.3 配置契约 | `lib/config.ts` + 热更新矩阵 | `tests/lib/config.test.ts` |
+| 4 | 易用性 | §6.4 / §8 + §16.4 | 拒绝文案、命令、doctor | `tests/ui/*`、`tests/tool/*` |
+| 5 | 可扩展性 | §14 + §16.5 边界守卫 | 模块分层 + 公开接口清单 | `tests/arch/boundaries.test.ts` |
+| 6 | 自验证能力 | §13 + §16.6 | doctor + 规格映射校验 | `tests/selfcheck/*` |
+| 7 | 清理 todo | **§16.7（新）** | `board/cleanup.ts` + `clear` 扩展 | `tests/board/cleanup.test.ts` |
+| 8 | 强制中断 | **§16.8（新）** | `bind/halt.ts` + 投递闸门 | `tests/bind/halt.test.ts` |
+
+### 16.1 性能（补充约束）
+
+- 清理与中断**不得引入新定时器**：复用既有单 timer。
+- `halted` 为真且无 running 作业 ⇒ **0 定时器**（比 §10.2 更强：中断后必须彻底静默）。
+- 清理 N 个任务的复杂度 O(N)，不得对每个任务单独落盘（一次 `appendEntry`）。
+
+### 16.2 容灾（补充约束）
+
+- `halted` 随快照落盘 ⇒ **跨重启保持**；重启后不得自动恢复推进。
+- 清理必须同时处理 sidecar，否则 `finalized && !evidenceApplied` 的链会被 adopt/sweep **重新导入**（"清了又回来"）。
+- 中断过程中崩溃：`halted` 已落盘但作业未全杀 ⇒ 启动 sweep 必须补杀本会话残留作业，不得留孤儿。
+
+### 16.3 可自定义设置：配置契约
+
+**优先级链**（已实现）：`~/.config/pi-kit/config.json` → `pi.getSettings().vigilTodo` → `.bgRun`（旧键）→ `DEFAULTS`。
+
+**契约三件事**（缺一不可）：
+1. **类型与范围**：每个键有类型、最小值；非法值**逐项退回默认**，不整体失效、不抛异常。
+2. **热更新矩阵**：明确哪些键即时生效、哪些需 `/reload`。
+3. **文档**：`docs/configuration.md` 列出全部键、默认值、生效时机。
+
+| 键 | 类型 | 默认 | 生效时机 |
+|---|---|---|---|
+| `wipLimit` | int ≥1 | 3 | 即时（每次判定读缓存） |
+| `retries` | int ≥0 | 3 | 即时（下次重试判定） |
+| `retryDelaysMs` | int[] ≥0 | `[0,30000,120000]` | 即时 |
+| `staleReverify` | int ≥0 | 1 | 即时 |
+| `maxTurns` | int ≥1 | 50 | 即时 |
+| `maxConcurrentJobs` | int ≥1 | 10 | 即时 |
+| `completedTtlMs` | int ≥1 | 604800000 | 即时（下次 GC） |
+| `taskRetentionMs` | int ≥0 | **0（关闭）** | 即时（下次 sweep） |
+| `tailLines` / `maxTailBytes` | int ≥1 | 20 / 8192 | 即时 |
+| `maxWidgetLines` | int ≥3 | 12 | 即时（下次渲染） |
+| `collapseKey` | string | `ctrl+shift+t` / `off` | **需 `/reload`**（快捷键注册一次） |
+| `notifyRetryMs` | int ≥1 | 600000 | 即时 |
+| `heartbeatStaleMs` / `hungSuspectMs` | int ≥1 | 15000 / 600000 | 即时 |
+| `wakeMergeMs` / `adoptRecheckMs` | int ≥0 / ≥1 | 250 / 20000 | 即时 |
+
+**为什么 `taskRetentionMs` 默认 0**：自动删任务是不可逆的数据损失，默认关闭，由人显式开启。
+
+### 16.4 易用性（补充约束）
+
+- 清理与中断的拒绝文案必须给**下一步真实调用形态**（与 §6.4 同规格）。
+- `/vigil-todo doctor` 必须报告：halted 状态、被 purge 的链数、超期未清理任务数、孤儿作业数。
+- 中断是**人的动作**，必须有一条命令直达，不要求模型转述。
+
+### 16.5 可扩展性：边界守卫（可自动化）
+
+**稳定公开接口**（改动需同步文档与测试）：`board/types.ts` 的领域类型、`JobFacts`、`RuleContext`、`AutofillDeps`、`SweepDeps`、`AdoptDeps`、`DeliverInput`、`ToolDeps`、`VigilConfig`。
+
+**内部实现**（可随时重构）：其余一切函数与文件布局。
+
+**三条必须自动化断言的边界**：
+1. `src/board/**` **不得** import 任何 `@earendil-works/*` 或 `extensions/`（纯状态机可独立测试）。
+2. `src/jobs/**` **不得** import `src/board/*` 之外的上层（`bind/`、`wake/`、`ui/`、`tool/`）——作业子系统不懂任务编排。
+3. `src/ui/**` **不得**调用任何写入口（`commit`/`put`/`save`/`appendEntry`）。
+
+这三条用**源码扫描测试**断言，而不是靠人记住。
+
+### 16.6 自验证能力（补充约束）
+
+- `tests/selfcheck/spec-coverage.test.ts`：解析规格 §13 的 F 编号全集，断言**每个 F 编号都在某个测试文件的文本中出现**（用例名或注释）。缺失即失败 ⇒ 规格与测试不会静默脱节。
+- `doctor` 是运行期自检，`spec-coverage` 是开发期自检，两者互补。
+- 每个阶段出口必须可执行（`npm test` + `npm run typecheck`），不得以"文档写了"充当通过。
+
+### 16.7 清理 todo（新机制）
+
+#### 16.7.1 现状缺陷（已取证）
+
+`clear` 当前实现为一行 `{...emptyBoard(), counters}`，运行时验证：`hasRunning=true / hasBackoff=true` 时仍返回 `op.kind="clear"` 且任务清零 ⇒ **孤儿进程 + 链悬空**。且 sidecar 未处理 ⇒ adopt/sweep 会把链**重新导入**。
+
+#### 16.7.2 选择性清理
+
+`clear` 不新增 action（遵守全局约束），改为接受参数：
+
+```
+todo({action:"clear"})                              // 默认 scope:"settled"
+todo({action:"clear", scope:"completed"})           // 只清已完成
+todo({action:"clear", scope:"deleted"})             // 只清 tombstone
+todo({action:"clear", scope:"settled"})             // completed + deleted（默认）
+todo({action:"clear", scope:"all", force:true})     // 全清，需 force
+```
+
+| scope | 清理对象 | 前置 |
+|---|---|---|
+| `completed` | `status==="completed"` | 无 |
+| `deleted` | `status==="deleted"` | 无 |
+| `settled`（默认） | 上两者 | 无 |
+| `all` | 全部任务 | **必须 `force:true`**，且**无 running 作业、无退避链**；否则拒 |
+
+**默认不再是"全清"**：默认 `settled` 是最小意外原则——用户说"清理"通常指清掉已完成的噪音，不是删掉正在干的活。
+
+#### 16.7.3 孤儿防护（R18）
+
+- `scope:"all"` 且存在 running 作业或退避链 ⇒ **拒**，文案指向 `bg_kill` 或 `/vigil-todo halt`。
+- 任何 scope 下，被清任务若绑有 **running** 作业 ⇒ 该任务**跳过不清**并在结果里列出（部分成功优于静默孤儿）。
+- `adoptedAway` 冻结任务：允许清理（清理是丢弃本地死副本，不是修改远端状态）⇒ R17 对 `clear` 放行，对 `update` 仍拒。
+
+#### 16.7.4 sidecar 同步：`purged` 标记（R19）
+
+清理任务时，其绑定链的 root 记录置 **`purged: true`**：
+
+- `adoptableRoots` 过滤 `purged` ⇒ 不会重新导入（修 §16.7.1 的"清了又回来"）
+- `catchUpScan` 过滤 `purged` ⇒ 不再补发唤醒
+- `purged` 落 sidecar（与 `finalized` 同级），**不随 evidence 环形淘汰**
+- 作业日志与 TTL 仍按 §10.1 回收，`purged` 不延长保留
+
+#### 16.7.5 自动 retention
+
+`taskRetentionMs > 0` 时，sweep 顺带清理 `completed`/`deleted` 且 `statusSince` 早于 `now - taskRetentionMs` 的任务，走与手动 `settled` **完全相同**的路径（含 `purged`）。默认 0 = 关闭。
+
+**不清理 `parked`**：parked 是等人的决策物，自动删它等于丢掉北极星的交接物。
+
+### 16.8 强制中断（新机制）
+
+#### 16.8.1 语义
+
+**中断 = 停止自主推进 + 杀掉本会话作业 + 状态留痕**，且**只能由人恢复**。
+
+| 动作 | 谁能发起 | 效果 |
+|---|---|---|
+| `/vigil-todo halt` | **仅人**（命令） | 见下 |
+| `/vigil-todo resume` | **仅人**（命令） | 解除 halted， counters 不重置 |
+| `bg_kill({job_id})` | 人 + 模型 | 单链中止（已有） |
+
+**模型不得 halt/resume**：`todo` 工具**不接受** halted 字段（列入 R16 只读集）。理由：若模型能 resume，它会在下一轮把自己的"停"撤销，用户的刹车失效。
+
+#### 16.8.2 halt 的原子效果（同一同步块）
+
+```
+halt(sessionId):
+  1. counters.halted = true, haltedAt = now      → 落快照（跨重启保持）
+  2. 本会话所有 running 作业 → requestKill(by:"self")
+     本会话所有退避链 → 清 retryAt（全局取消，不需要逐个 id）
+  3. 受影响任务 → parked(reason:"用户强制中断")   ← 不写 lastFailure（不是失败）
+  4. 停 timer（若无 running 作业）
+```
+
+**只杀本会话作业**（`job.sessionId === me`）：作业 sidecar 是项目共享的，halt 不得杀别的会话的活。
+
+#### 16.8.3 复活防护（R20，最关键）
+
+halted 为真时，**所有自主推进入口一律短路**：
+
+| 入口 | halted 时行为 |
+|---|---|
+| `tryDeliver` | **第一行**返回 NONE（早于 maxTurns 判定） |
+| `sweepRespawns` | 跳过，不 respawn |
+| `adoptOrphans` | 跳过，不收养 |
+| `catchUpScan` | 返回空 |
+| `agent_before_settle` | 返回 undefined（不续跑） |
+| 单 timer | 只刷新 UI，不推进 |
+
+漏任何一个入口，用户的"停"都会在几十秒后被 sweep/timer 撤销 —— 这是本机制唯一不可接受的失败模式。
+
+#### 16.8.4 与 pi 的 abort 的关系
+
+pi 的 Esc/`ctx.abort()` 只中断**当前模型轮次**，不影响 detached 作业。本扩展**不挂钩 abort**：Esc 不等于 halt（用户可能只想停这一轮回答，不想杀训练）。两者语义分离，文档必须写明。
+
+#### 16.8.5 崩溃与幂等
+
+- halt 重复调用幂等（已 halted 则只补杀残留作业）。
+- halt 落盘后崩溃 ⇒ 启动 sweep 见 `halted && 本会话仍有 running` ⇒ **补杀**，不留孤儿。
+- resume 后 `turnsUsed` **不重置**（避免用 halt/resume 绕过 maxTurns 保险丝）；只有用户 input 才归零。
+
+---
+
+## 17. 范围收缩决议（用户 2026-11-22 显式撤回决策 13）
+
+### 17.1 用户原话与推导
+
+> 「不会有跨会话的 todo 执行，因此并发 todo 没有意义」
+> 「不会新开会话，还是用的老会话」
+
+由此确定运行模型：
+
+```
+单会话 · resume 复用 · 模型串行专注一个 todo · 该 todo 下可挂多个并行作业
+```
+
+**关键区分（此前设计混淆过）**：后台并行跑的是**命令**，不是**todo**。推进 todo 需要模型判断（证据够不够、要不要 park、下一步是谁），shell 进程没有这个判断力。所以「多 todo 并发推进」是伪需求；「一个 todo 下多作业并行」是真需求，收益全部保留。
+
+### 17.2 撤回与删除清单
+
+| 项 | 处置 | 依据 |
+|---|---|---|
+| 决策 13 的 `wipLimit: 3` | **改为 `wipLimit: 1`** | 模型物理串行，>1 只带来面板噪音与白堵位 |
+| 决策 13 的 `defer(untilJob)` | **整套删除** | WIP=1 已串行化任务，「B 等 A 的作业」场景不存在 |
+| §4.3 defer 语义 / §4.4 互斥 / §4.5 defer sweep | **废** | 同上 |
+| §7.1.1 孤儿链收养 A–F 全节 | **废** | 永不新开会话 ⇒ replay 足够 |
+| `src/jobs/claims.ts`（O_EXCL 认领 + rename 收回） | **删** | 无竞争者 |
+| `src/jobs/heartbeat.ts`（会话心跳判活） | **删** | 同时只有一个会话 |
+| `src/bind/adopt.ts`（收养/重编号/冻结） | **删** | 无接续新会话 |
+| R17 `adoptedAway` 冻结 | **删** | 无移交 |
+| R13 park/defer 互斥 | **删** | defer 不存在 |
+| §5.2 两集合收窄（`interferers` / `overlapUnfinished`） | **合并为单一 `interferers`** | 同任务排除后跨任务干扰不存在；缺 `fpEnd` 归 unknown 即可 |
+| 规则编号 R13/R17/R19(purged 防收养部分) | 见 §17.4 保留说明 | |
+
+**受影响验收用例**：F18 F27 F28 F34 F39 F62 F78（defer）、F88 F92 F93 F94 F95 F97 F98 F100 F104 F105（收养/心跳）、F90 F101 F103（认领）、F56 F57 F63 F75 F79（两集合）⇒ **删除或重写**，不得留下引用已废机制的测试。
+
+### 17.3 必须保留（与并发无关，删了会破北极星）
+
+| 项 | 为什么仍需要 |
+|---|---|
+| **一个 todo 挂多作业 + `maxConcurrentJobs: 10`** | 真并行收益全在这里（训练/回归/lint 同时跑） |
+| **指纹 stale + 自动重验** | 模型在**自己**的测试作业期间改代码照样失真，与跨会话无关 |
+| `recoverJobs` + `exitCodeKnown:false` | pi 关过再 resume，detached 作业可能已死或仍在跑，退出码不能猜 |
+| **running 作业排除** | resume 时昨晚遗留作业可能仍在跑，不得重复 spawn |
+| 两步 finalize（sidecar 权威 + 投影幂等） | pi 关着时作业结束无人记录；resume 后靠 `finalized`/`evidenceApplied` 幂等投影 |
+| `notifyState` + catch-up 补偿 | pi 关着期间完成 ⇒ resume 补发恰一次 |
+| 重试链有界性、`turnsUsed` 保险丝、唤醒单次性 | 与并发无关 |
+| halt/resume、选择性清理、`purged` | 与并发无关；`purged` 仍防**清理后 catch-up 补发** |
+| 配置契约、边界守卫、规格↔测试自检 | 八方面要求不变 |
+
+### 17.4 收缩后的规则集
+
+R1（WIP=1）、R2、R3、R4、R5、R6、R7（park 必带 reason）、R8 **废**（defer）、R9 简化（只有 park，无 defer）、R10、R11、R12、R13 **废**、R14 简化（让位仍要求无 running/退避链）、R15、R16（只读集去掉 defer 相关、加 halted）、R17 **废**、R18（清理孤儿防护）、R19（purged，仅防 catch-up）、R20（halt 复活防护，入口从五处减为四处：`tryDeliver`/`sweepRespawns`/`catchUpScan`/`before_settle`，adopt 已删）。
+
+### 17.5 新增不变量（防止已废机制回潮）
+
+`tests/arch/scope.test.ts` 必须断言：`src/` 与 `extensions/` 中**不出现** `defer`、`adopt`、`heartbeat`、`claims`、`adoptedAway` 这些标识符（`docs/` 与本决议除外）。删除是决议，不是临时注释掉。
+
+### 17.6 顺带修正（保留一行防御）
+
+`classifyOverlap` 的排除条件由 `a.taskId !== b.taskId` 改为 **`a.taskId !== b.taskId || a.sessionId !== b.sessionId`**（同 task **且同 session** 才排除）。当前范围下不会触发，但成本一行，防止范围再变时静默误判。已取证：改前跨会话同 taskId 的写入作业被误排除，`interferers: []`、`verdict: stale`（应为 unknown）。
+
+---
+
+## 18. 依赖环与静默死锁（piper 终审发现，规格原缺口）
+
+### 18.1 取证
+
+原 `rpiv-todo` 有 `detectCycle`（`state/task-graph.ts:11-40`）明确拒环。本实现**丢了这道防线**，且 §6.2 规则表从未列出环检测——规格本身的缺口。
+
+实测（真实 reducer）：
+
+```
+A addBlockedBy[2] 后 B addBlockedBy[1]   → op.kind=update（接受，无报错）
+三节点 A⛓C⛓B⛓A                        → op.kind=update（接受）
+selectNext(三节点环, wipLimit=3)         → null（全部永久不可推进）
+renderDoctor                            → "✓ 未发现问题"
+renderPanel                             → 三个 pending 带 ⛓，观感完全正常
+```
+
+**危害**：模型夜里造一个环，早上回来面板健康、doctor 说没问题，但整条流水线永久卡死。与 §16.8 修掉的 maxTurns 静默停摆同一类失败模式——**系统停摆却报健康**，直接违背北极星。
+
+### 18.2 R21 环检测（工具层强制）
+
+- `create` 的 `blockedBy` 与 `update` 的 `addBlockedBy`，**若会形成环则拒**（含自环，自环已有防线，保留）。
+- 判定：把提议边并入现有图后做 DFS；发现回边即拒。
+- 文案必须给出口：`#2 addBlockedBy[1] would create a cycle (#1 ⛓ #2 ⛓ #1) → todo({action:"update", id:2, removeBlockedBy:[1]})`
+- 复杂度 O(V+E)，任务数 ≤200 时无感；**不得**用「逐对比较」代替真正的图遍历（三节点以上环会漏）。
+
+### 18.3 死锁可见性（doctor + 面板）
+
+即使有 R21，历史快照或外部改写仍可能留下环。故要求**可观测**：
+
+- 条件：存在 `pending` 任务、`wipCount < wipLimit`、容量未满，但 `selectNext` 返回 `undefined`。
+- `doctor` 必须报：`⚠ 有 N 个 pending 但无可推进任务（依赖环或全部被阻塞）→ /todos 查依赖`
+- 面板首行追加 `⚠ 无可推进` 标记（与 `⏸ 达轮数上限` 同一位置策略）。
+- 若检测到真实环，doctor 额外列出环上任务 id。
+
+### 18.4 验收用例
+
+| # | 用例 | 期望 |
+|---|---|---|
+| F106 | A⛓B 后 B addBlockedBy[1] | isError，文案含 cycle 与 removeBlockedBy 出口 |
+| F107 | 三节点环 A⛓C⛓B⛓A 的最后一边 | isError（**逐对比较会漏，必须图遍历**） |
+| F108 | create 批量内互指 | isError（沿用既有兄弟引用拒绝） |
+| F109 | 自环 addBlockedBy[自身] | isError（既有防线不得回归） |
+| F110 | 历史快照带环 + WIP 有位 | doctor 报「无可推进」，面板首行有标记 |
+| F111 | 正常 DAG（菱形依赖） | 不得误报环，next 正常 |
+
+---
+
+## 19. 功能完备性与边界（piper 覆盖率审计发现）
+
+首次实测覆盖率：**行 90.89% / 分支 85.61% / 函数 87.85%**。据此定位出下列**功能级**缺口（非仅数字问题）。
+
+### 19.1 死参数与退化功能
+
+| # | 问题 | 取证 | 要求 |
+|---|---|---|---|
+| A1 | `includeDeleted` 声明未兑现 | `list` 与 `list includeDeleted:true` 输出**逐字相同**，deleted 永不可见 | 实现：`includeDeleted:true` 时包含 tombstone；默认仍隐藏 |
+| A2 | `get` 严重退化 | 输出仅 `#1 [pending] x`，丢 description/owner/verify/blockedBy/blocks/evidence/lastFailure/park | 输出完整多行详情（对齐原 rpiv-todo 的 get），含最近证据与失败原因 |
+| A3 | `list` 的 `status` 过滤无效 | 传 `status:"completed"` 仍返回全部 | 实现按 status 过滤；与 includeDeleted 可组合 |
+
+### 19.2 模型指引完全缺失（最高优先）
+
+**取证**：`promptSnippet` / `promptGuidelines` 在实现中**零出现**；schema 参数几乎无 `description`；工具级 description 仅 45–84 字符一句。
+
+**危害**：模型不知道长任务该用 `bg_run` 而非 `bash` ⇒ 可能用 bash 跑 40 分钟训练，**阻塞整个会话**，唤醒闭环无从发生 ⇒ 北极星从根上失效。也不知道 WIP=1、park 必带 reason、完成需证据、`scope`/`force`/`accept` 语义。
+
+**要求**：
+- 每个工具补 `promptSnippet`（一句）与 `promptGuidelines`（要点式），至少覆盖：
+  1. 长任务（训练/构建/全量测试）用 `bg_run` 而不是 `bash`；起完即可结束本轮，完成会自动唤醒
+  2. 一次只有一个 `in_progress`（WIP=1）；要换任务先完成或 `park`
+  3. `park` 必带 `reason`；parked 不占 WIP，不依赖它的任务可继续
+  4. 完成需真实证据；失败不可标 completed；`accept:"stale"` 是显式豁免并留痕
+  5. `clear` 默认只清 completed/deleted；`scope:"all"` 需 `force:true` 且无作业在跑
+  6. 被唤醒时按消息里的 next 直接推进，不要反问「要不要继续」
+- schema **每个参数**补 `description`，写明语义、必填条件、只读字段不可传
+- 指引可被配置覆盖（`guidance.promptSnippet` / `guidance.promptGuidelines`），沿用 §16.3 优先级链
+
+### 19.3 面板不截断（边界）
+
+**取证**：300 字 subject ⇒ 面板行 **308 字符**；终端通常 80–120 列 ⇒ 换行撑破布局，破坏「面板即答案」。原 rpiv-todo 用 `truncateToWidth` 处理过，本实现丢失。
+
+**要求**：所有面板行按可用宽度截断（含 subject / park.reason / job.label / command / 证据 note），截断加省略号；宽度不可知时用保守默认（如 100 列）。`/todos` 全量文本不截断（那是下钻视图）。
+
+### 19.4 覆盖率缺口（功能可用但无回归保护）
+
+已实测**功能本身可用**，但套件从未走到：
+
+| 位置 | 覆盖率 | 实测结论 |
+|---|---|---|
+| `jobs/kill.ts` `escalate()` | 行 53.57% / 函数 50% | 实测可杀掉忽略 SIGTERM 的进程（604ms），但**零回归测试** |
+| `bind/sweep.ts` `applyRetention()` | 行 80% / 函数 55.55% | 实测正确清旧留新并 purged，但**零回归测试** |
+| `bind/sweep.ts:49-52` | 未覆盖 | respawn 失败的 parkTask 分支 |
+| `halt` 命令入口 | 零测试引用 | halt 逻辑有单测，命令接线无测 |
+| `wake/ack.ts:27-36`、`tool/register.ts:187-201`、`board/reducer.ts:115-155`、`extensions:619-637` | 未覆盖 | 需补分支用例 |
+
+### 19.5 覆盖率门禁（自验证，防退化）
+
+- 新增 `npm run coverage` 与 `npm run coverage:check`
+- 阈值：**行 ≥95% / 分支 ≥90% / 函数 ≥95%**（`src/jobs/types.ts` 等纯类型文件排除）
+- 未达阈值即失败，纳入交付前必跑清单
+- `docs/quality-matrix.md` 记录覆盖率基线与测量命令
+
+### 19.6 新增验收用例
+
+| # | 用例 | 期望 |
+|---|---|---|
+| F112 | `list includeDeleted:true` | 含 tombstone；默认不含 |
+| F113 | `list status:"completed"` | 只返回 completed；与 includeDeleted 组合正确 |
+| F114 | `get` 详情 | 含 description/owner/verify/blockedBy/证据/失败原因 |
+| F115 | 300 字 subject + 300 字 park reason | 所有面板行 ≤ 宽度上限，带省略号 |
+| F116 | `escalate` 对忽略 SIGTERM 的进程 | 超时后 SIGKILL 生效，进程消失；已退出进程不抛 |
+| F117 | `applyRetention` 经 sweepAll | 旧 completed 被清且 purged，新任务保留 |
+| F118 | respawn 失败（spawn_error / 无槽重验） | 对应任务 parked 且原因正确 |
+| F119 | `/vigil-todo halt` 与 `resume` 命令入口 | 真实命令路径生效，非仅直调函数 |
+| F120 | 四个工具的 promptSnippet/promptGuidelines | 均非空且含 §19.2 六条要点；可被配置覆盖 |
+| F121 | 覆盖率门禁 | 达阈值通过；人为删测试后失败 |
+| F122 | 四个工具的 `promptSnippet` | 互不相同且非空；配置可按工具覆盖（`guidance.snippets.<tool>`）；全局 `promptSnippet` 兜底仍生效 |
+
+---
+
+## 20. `/vt clear` 子指令（用户要求：自己清历史任务，不必让模型代劳）
+
+### 20.1 缺口
+
+`clear` 此前**只是工具 action**（`todo({action:"clear"})`，模型调用），命令面没有。用户想自己清历史任务必须先让模型代劳，与「刹车/继续都能自己按」的设计不一致。
+
+### 20.2 语义（用户收紧：只许清终态历史）
+
+**用户明确要求**：`clear` 子命令**只能清理已完成的历史任务**；**中断（parked）、异常、进行中（in_progress）一律不允许清理**。
+
+| 命令 | 范围 | 说明 |
+|---|---|---|
+| `/vt clear` | 默认 `settled` = completed + deleted | 只清终态历史 |
+| `/vt clear completed` | 只清已完成 | |
+| `/vt clear deleted` | 只清 tombstone | |
+| `/vt clear settled` | 同默认 | |
+| ~~`/vt clear all`~~ | **删除该范围** | 它会删 pending/in_progress/parked，违反本约束 |
+
+- **命令面不再提供 `all`**，连两步确认也不给——不给出这个能力，比给了再加确认更安全。误传 `all` 或未知范围 ⇒ 拒绝并列出允许的三个范围。
+- **pending 也受保护**：它不是历史，是还没干的活。
+- **parked 永不可清**：无论是等人拍板还是 halt 造成的中断，都是需要人处理的交接物，删掉等于丢证据。
+- 工具层 `todo({action:"clear", scope:"all", force:true})` 的既有能力**保持不变**（模型在明确 force 下仍可用，受 R18 约束）；本次收紧只针对**人用的命令面**。
+- 仍**必须复用** `planCleanup` / `applyCleanup` / `markPurged`，必须落快照 + `markPurged`（防 catch-up 复活）。
+- R18 不变：绑有 running 作业的任务即使在 completed 范围也跳过并列出。
+
+### 20.3 输出与可发现性
+
+- 报告：清了几条、跳过哪些（附 id 与原因）、purge 了几条链。
+- 无可清时明确说「没有可清理的历史任务」，**不得静默**。
+- `all` 的第一步回显将被删除的任务清单（含 pending/in_progress），让用户看清代价再确认。
+- Tab 补全：一级加 `clear`；`clear ` 前缀只给出 `completed / deleted / settled` **三个**二级候选（**不含 all**），各带说明。
+- `panelHint` 与三个命令的 description 同步加入 clear。
+
+### 20.4 验收用例
+
+| # | 用例 | 期望 |
+|---|---|---|
+| F123 | `/vt clear` 默认 | 只清 completed+deleted；pending/in_progress/parked 保留；落快照 |
+| F124 | `/vt clear completed` / `deleted` | 各自只清一类 |
+| F125 | `/vt clear all` | **拒绝**（命令面不提供 all），列出允许的 completed/deleted/settled |
+| F126 | `/vt clear all confirm` | **拒绝**（同上，confirm 也不给） |
+| F127 | board 含 pending/in_progress/parked 时 `/vt clear` | 三者**全部保留**，只清 completed+deleted |
+| F128 | 清理后 catch-up | 已 purge 的链不再被投影/补发 |
+| F129 | 绑 running 作业的任务在任意范围下 | 跳过并在输出里列出 |
+| F130 | 无可清历史 | 明确提示，不静默 |
+| F131 | Tab 补全 | 一级含 clear；`clear ` 前缀只出 **completed/deleted/settled 三个**，无 all |
+| F132 | `/vt clear` 与 `/vigil-todo clear` | 行为完全一致 |

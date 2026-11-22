@@ -1,0 +1,7 @@
+node_modules/
+coverage/
+*.log
+coverage-json/
+
+# local publishing config (registry choice is per-machine, not a package property)
+.npmrc

@@ -89,11 +89,19 @@ function reapAndScan(d: SweepDeps, all: readonly Job[]): string[] {
   const halted = board.counters.halted;
   const candidates: string[] = [];
   let dirty = false;
+  let chains: Map<string, Job[]> | undefined;
   for (const root of all) {
     if (root.id !== root.rootId) continue;                       // roots only
     if (root.sessionId !== d.sessionId || root.purged) continue;
     if (root.taskId === undefined || !taskIds.has(root.taskId)) {
-      for (const j of all.filter((x) => x.rootId === root.id)) {
+      if (!chains) {
+        chains = new Map<string, Job[]>();
+        for (const j of all) {
+          const list = chains.get(j.rootId);
+          if (list) list.push(j); else chains.set(j.rootId, [j]);
+        }
+      }
+      for (const j of chains.get(root.id)!) {
         if (j.purged && j.retryAt == null && j.pendingReverify == null) continue;
         const next = { ...j, purged: true };
         delete next.retryAt;

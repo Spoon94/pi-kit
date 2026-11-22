@@ -9,8 +9,7 @@ pi remove pi-bg-run
 
 Behavior of pi 1.5.2, evidenced from `dist/` sources (see [p0-findings.md](p0-findings.md)):
 
-- **pi fails to load the later-registered extension with an explicit tool-conflict error** (`Failed to load extension "...": Tool "todo" conflicts with ...`; observed on pi 1.5.2). The definition layer also falls back to first-registrant-wins, but the loader error already prevents normal coexistence.
-- **If both packages somehow load** (only by bypassing the loader error), events are broadcast: both packages receive `tool_call` / `tool_result`, producing a theoretical half-effective state — the old package's reducer writing state while the new package's preflight blocks calls. This is a theoretical risk, not the normal user-visible outcome; the loader error normally stops coexistence first.
+- **With both packages present, pi 1.5.2 prints** `Error: Failed to load extension "<path>": Tool "todo" conflicts with <path>` **and refuses to start (exit 1).** The prefix is misleading — the extension is loaded; the conflict is a startup diagnostic. At the loader level both extensions stay loaded and the first registrant owns the tool, so a half-effective state (both receive events; the old reducer writes while the new preflight blocks) is possible only where such diagnostics are non-fatal (embedded/SDK use); the `session_start` self-check (F13) guards exactly that. Uninstalling the old packages is therefore a hard prerequisite.
 - Startup self-check: at `session_start` the extension looks up `todo`'s `sourceInfo` via `getAllTools()`; if it is not ours it notifies an error and **registers no event handlers**. `/vigil-todo doctor` reports the conflict as its first line.
 
 **Appending this package without removing the old ones is not a successful install.**

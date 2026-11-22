@@ -6,8 +6,8 @@
 
 ## 1. Performance — done
 
-- Baselines established: `tests/vigil-todo/perf/{budget,scale,burst,soak,wake,tick}.test.ts`.
-- Full idle tick (`gc` + `sweepAll` + `renderPanel` + `needsTimer`) is measured by `tests/vigil-todo/perf/tick.test.ts` at 50/20, 200/100, 200/300, and 200/2000; the test prints every component and asserts the total < 1 ms. Before the fix, `sweepAll` alone cost 22.8 ms from unconditional sidecar writes; now zero-change ticks write nothing.
+- Baselines established: `tests/vigil-todo/perf/{budget,scale,burst,soak,wake,tick,reap}.test.ts`.
+- Full idle tick (`gc` + `sweepAll` + `renderPanel` + `needsTimer`) is measured by `tests/vigil-todo/perf/tick.test.ts` at 50/20, 200/100, 200/300, and 200/2000; the test prints every component and asserts the median total < 1 ms at 50/20, 200/100, and 200/300 (< 2 ms at the 200/2000 terminal cap). Before the fix, `sweepAll` alone cost 22.8 ms from unconditional sidecar writes; now zero-change ticks write nothing.
 - Wake composition budgeted: 50 chains 6.86 ms; 200 chains with a 2000-char next subject 5.83 ms / 4736 chars, footer intact, log reads stop at budget (`tests/vigil-todo/perf/wake.test.ts`).
 - Real-GC soak: +0.10 MB / +0.06 MB per 300 job cycles; handles flat; `clearAll` recovers.
 - No timers when there is nothing to do; no per-job polling; single coalesced sidecar write per changed tick.
@@ -51,7 +51,7 @@ Open:
 ## 6. Self-verification — done
 
 - Spec↔test mapping enforced: `tests/selfcheck/spec-coverage.test.ts` parses every F-id from the spec and fails if any lacks a test; verified live by deleting an F-id and watching it fail.
-- Coverage gate: lines ≥95 / branches ≥90 / functions ≥95 via `npm run coverage:check`; current 99.51 / 94.29 / 98.83.
+- Coverage gate: lines ≥95 / branches ≥90 / functions ≥95 via `npm run coverage:check`; current 99.52 / 94.31 / 98.83.
 - `npm run verify` = test + typecheck + coverage, non-zero on any failure.
 - `/vt doctor` reports conflicts, orphans, overdue retention, cycles, WIP oversell, turn limit — each with an executable next step.
 

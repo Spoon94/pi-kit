@@ -41,6 +41,22 @@ it("F120：四个工具都有 promptSnippet/promptGuidelines，合起来覆盖�
   expect(DEFAULT_GUIDANCE.promptGuidelines.length).toBeGreaterThanOrEqual(6);
 });
 
+it("F122：四个 per-tool snippet 互不相同；支持按工具覆盖与全局兜底", () => {
+  const list = defs();
+  expect(new Set(list.map((d) => d.promptSnippet)).size).toBe(4);
+  for (const s of Object.values(DEFAULT_GUIDANCE.snippets)) expect(s.trim()).not.toBe("");
+
+  const per = resolveGuidance({ file: { guidance: { snippets: { todo: "T", bg_run: "R" } } } });
+  expect(per.snippets.todo).toBe("T");
+  expect(per.snippets.bg_run).toBe("R");
+  expect(per.snippets.bg_list).toBe(DEFAULT_GUIDANCE.snippets.bg_list);
+  expect(per.snippets.bg_kill).toBe(DEFAULT_GUIDANCE.snippets.bg_kill);
+
+  const global = resolveGuidance({ file: { guidance: { promptSnippet: "G" } } });
+  expect(Object.values(global.snippets)).toEqual(["G", "G", "G", "G"]);
+  expect(global.promptSnippet).toBe("G");
+});
+
 it("schema 每个参数都有非空 description（含嵌套对象）", () => {
   const check = (schema: any, where: string): void => {
     for (const [key, prop] of Object.entries<any>(schema.properties ?? {})) {
@@ -58,14 +74,21 @@ it("schema 每个参数都有非空 description（含嵌套对象）", () => {
 it("指引可被配置覆盖，优先级 file > settings > legacy > 默认", () => {
   expect(resolveGuidance({})).toEqual(DEFAULT_GUIDANCE);
   const custom = { promptSnippet: "CUSTOM SNIPPET", promptGuidelines: ["CUSTOM LINE"] };
-  expect(resolveGuidance({ file: { guidance: custom } })).toEqual(custom);
-  expect(resolveGuidance({
+  const file = resolveGuidance({ file: { guidance: custom } });
+  expect(file.promptSnippet).toBe("CUSTOM SNIPPET");
+  expect(file.promptGuidelines).toEqual(["CUSTOM LINE"]);
+  expect(Object.values(file.snippets)).toEqual(["CUSTOM SNIPPET", "CUSTOM SNIPPET", "CUSTOM SNIPPET", "CUSTOM SNIPPET"]);
+
+  const layered = resolveGuidance({
     legacy: { guidance: { promptSnippet: "legacy", promptGuidelines: ["legacy"] } },
     settings: { guidance: { promptSnippet: "settings", promptGuidelines: ["settings"] } },
     file: { guidance: { promptSnippet: "file" } },
-  })).toEqual({ promptSnippet: "file", promptGuidelines: ["settings"] });
+  });
+  expect(layered.promptSnippet).toBe("file");
+  expect(layered.promptGuidelines).toEqual(["settings"]);
+  expect(Object.values(layered.snippets)).toEqual(["file", "file", "file", "file"]);
   expect(resolveGuidance({ file: { guidance: { promptSnippet: "", promptGuidelines: [""] } } })).toEqual(DEFAULT_GUIDANCE);
-  const d = createTodoTool(deps(), custom);
+  const d = createTodoTool(deps(), file);
   expect(d.promptSnippet).toBe("CUSTOM SNIPPET");
   expect(d.promptGuidelines).toEqual(["CUSTOM LINE"]);
 });

@@ -5,6 +5,8 @@ import type { JobStore } from "../jobs/store.js";
 export type ClearScope = "completed" | "deleted" | "settled" | "all";
 export interface CleanupPlan { remove: number[]; skipped: number[]; error?: string }
 
+const SCOPES: ClearScope[] = ["completed", "deleted", "settled", "all"];
+
 const inScope = (t: Task, scope: ClearScope): boolean =>
   scope === "all" ? true
   : scope === "completed" ? t.status === "completed"
@@ -12,6 +14,12 @@ const inScope = (t: Task, scope: ClearScope): boolean =>
   : t.status === "completed" || t.status === "deleted";
 
 export function planCleanup(state: BoardState, scope: ClearScope | undefined, force: boolean | undefined, facts: JobFacts): CleanupPlan {
+  if (scope !== undefined && !SCOPES.includes(scope)) {
+    return { remove: [], skipped: [], error: `invalid scope "${String(scope)}" → scope:"completed" | "deleted" | "settled" | "all"` };
+  }
+  if (force !== undefined && typeof force !== "boolean") {
+    return { remove: [], skipped: [], error: `force must be a boolean` };
+  }
   const s = scope ?? "settled";
   if (s === "all") {
     if (force !== true) return { remove: [], skipped: [], error: `clear scope:"all" 需要 force:true` };

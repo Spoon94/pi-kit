@@ -77,7 +77,7 @@ export function createTodoTool(deps: ToolDeps, guidance: ToolGuidance = DEFAULT_
     name: "todo",
     label: "Todo",
     description: "Session task board for multi-step work (create/update/list/get/delete/clear/verify). Long-running commands belong in bg_run; keep exactly one task in_progress and complete only with evidence.",
-    promptSnippet: guidance.promptSnippet,
+    promptSnippet: guidance.snippets.todo,
     promptGuidelines: guidance.promptGuidelines,
     parameters: TodoParamsSchema,
     prepareArguments: prepareTodoArguments,
@@ -152,14 +152,28 @@ export function createBgRunTool(deps: ToolDeps, guidance: ToolGuidance = DEFAULT
     name: "bg_run",
     label: "Background run",
     description: "Start a long-running shell command as a background job bound to a task and return immediately. Use this instead of bash for training/builds/full suites; completion is delivered by a wake message.",
-    promptSnippet: guidance.promptSnippet,
+    promptSnippet: guidance.snippets.bg_run,
     promptGuidelines: guidance.promptGuidelines,
     parameters: BgRunParamsSchema,
     async execute(raw) {
       const command = raw.command;
       if (typeof command !== "string" || command.trim() === "") return errResult("Command cannot be empty");
+      if (command.length > 100_000) return errResult("Command too long (max 100000)");
+      if (command.includes("\u0000")) return errResult("Command contains NUL");
+      let label: string | undefined;
+      if (raw.label !== undefined) {
+        if (typeof raw.label !== "string") return errResult("label must be a string");
+        label = raw.label.trim();
+        if (label.length > 500) return errResult("label too long (max 500)");
+      }
       const state = deps.board();
-      let taskId = typeof raw.task_id === "number" ? raw.task_id : undefined;
+      let taskId: number | undefined;
+      if (raw.task_id !== undefined) {
+        if (typeof raw.task_id !== "number" || !Number.isSafeInteger(raw.task_id)) {
+          return errResult("task_id must be a safe integer");
+        }
+        taskId = raw.task_id;
+      }
       if (taskId === undefined) {
         const active = state.tasks.filter((t) => t.status === "in_progress");
         if (active.length === 1) taskId = active[0].id;
@@ -178,7 +192,7 @@ export function createBgRunTool(deps: ToolDeps, guidance: ToolGuidance = DEFAULT
         return errResult(`capacity full (${deps.cfg.maxConcurrentJobs}/${deps.cfg.maxConcurrentJobs} jobs) → bg_kill 释放，或稍后再试（任务保持 pending，未被 park）`);
       }
       const spawned = deps.spawn({
-        command, label: typeof raw.label === "string" ? raw.label : undefined,
+        command, label,
         cwd: deps.cwd(), taskId: task.id, sessionId: deps.sessionId(),
       });
       if (!spawned.ok || !spawned.jobId) return errResult(spawned.error ?? "spawn failed");
@@ -214,7 +228,7 @@ export function createBgListTool(deps: ToolDeps, guidance: ToolGuidance = DEFAUL
     name: "bg_list",
     label: "Background jobs",
     description: "List background jobs with id, status, exit code, label, and command so you can inspect progress or decide what to unblock.",
-    promptSnippet: guidance.promptSnippet,
+    promptSnippet: guidance.snippets.bg_list,
     promptGuidelines: guidance.promptGuidelines,
     parameters: BgListParamsSchema,
     async execute() {
@@ -232,14 +246,21 @@ export function createBgKillTool(deps: ToolDeps, guidance: ToolGuidance = DEFAUL
     name: "bg_kill",
     label: "Kill background chain",
     description: "Cancel a whole job chain (the running job plus any retries or backoff). Use only when stopping is intended; otherwise let the job finish.",
-    promptSnippet: guidance.promptSnippet,
+    promptSnippet: guidance.snippets.bg_kill,
     promptGuidelines: guidance.promptGuidelines,
     parameters: BgKillParamsSchema,
     async execute(raw) {
-      const id = raw.job_id;
-      if (typeof id !== "string") return errResult("job_id required");
+      const rawId = raw.job_id;
+      if (typeof rawId !== "string" || rawId.trim() === "") return errResult("job_id required");
+      const id = rawId.trim();
       const target = deps.jobs.get(id);
       if (!target) return errResult(`${id} not found`);
+      if (target.status !== "running" && target.retryAt == null) {
+        return errResult(`${id} is ${target.status}; 无需中止`);
+      }
+      if (target.kill) {
+        return errResult(`kill already requested for ${target.rootId} (${target.kill.requestedBy})`);
+      }
       const chain = deps.jobs.all().filter((j) => j.rootId === target.rootId).map((j) => j.id);
       deps.kill(id, "self");
       deps.jobs.save();

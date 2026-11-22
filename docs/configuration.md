@@ -45,13 +45,19 @@
 ```json
 {
   "guidance": {
-    "promptSnippet": "一句工具摘要",
+    "snippets": {
+      "todo": "一句 todo 摘要",
+      "bg_run": "一句 bg_run 摘要",
+      "bg_list": "一句 bg_list 摘要",
+      "bg_kill": "一句 bg_kill 摘要"
+    },
+    "promptSnippet": "全局兜底摘要（可省略）",
     "promptGuidelines": ["要点 1", "要点 2"]
   }
 }
 ```
 
-优先级与主配置链相同（file > settings.vigilTodo > legacy.bgRun > 默认）；`promptSnippet` 与 `promptGuidelines` 分别逐项回退。工具在 `session_start` 按生效值注册/重注册：改了 guidance 后**下一次 session_start（或 `/reload`）生效**，不需要重启 pi。默认指引已覆盖 bg_run/bash 选择、WIP=1、park reason、证据完成、clear scope、唤醒后直接推进六条要点。
+`snippets.<tool>` 按工具覆盖（四者应互不相同，Available tools 区逐工具一行）；`promptSnippet` 保持向后兼容，作为未单独覆盖的工具的兜底。优先级与主配置链相同（file > settings.vigilTodo > legacy.bgRun > 默认），全局与 per-tool 均逐项回退。`promptGuidelines` 共享（pi 的 buildRules 会去重，不会 4× 膨胀）。工具在 `session_start` 按生效值注册/重注册：改了 guidance 后**下一次 session_start（或 `/reload`）生效**，不需要重启 pi。默认指引已覆盖 bg_run/bash 选择、WIP=1、park reason、证据完成、clear scope、唤醒后直接推进六条要点。
 
 ## `taskRetentionMs` 为什么默认 0
 

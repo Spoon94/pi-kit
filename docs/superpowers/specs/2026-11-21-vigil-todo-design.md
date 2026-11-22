@@ -1516,3 +1516,4 @@ renderPanel                             → 三个 pending 带 ⛓，观感完�
 | F119 | `/vigil-todo halt` 与 `resume` 命令入口 | 真实命令路径生效，非仅直调函数 |
 | F120 | 四个工具的 promptSnippet/promptGuidelines | 均非空且含 §19.2 六条要点；可被配置覆盖 |
 | F121 | 覆盖率门禁 | 达阈值通过；人为删测试后失败 |
+| F122 | 四个工具的 `promptSnippet` | 互不相同且非空；配置可按工具覆盖（`guidance.snippets.<tool>`）；全局 `promptSnippet` 兜底仍生效 |

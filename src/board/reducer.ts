@@ -2,6 +2,7 @@ import { READONLY_FIELDS, checkStructure, type MutationParams, type RuleContext 
 import { appendEvidence, completionGate } from "./evidence.js";
 import { applyCleanup, planCleanup } from "./cleanup.js";
 import { detectCycle, formatCycle } from "./graph.js";
+import { isJsonSafe, verifyError } from "./json.js";
 import type { BoardState, Status, Task } from "./types.js";
 
 export type Op =
@@ -22,13 +23,24 @@ export function applyMutation(state: BoardState, p: MutationParams, ctx: RuleCon
     const fromTasks = p.tasks !== undefined;
     const items = p.tasks ?? (p.subject !== undefined ? [{ subject: p.subject, description: p.description, activeForm: p.activeForm, blockedBy: p.blockedBy, owner: p.owner, metadata: p.metadata, verify: p.verify }] : []);
     if (items.length === 0) return err(state, "subject required for create");
+    if (!Number.isSafeInteger(state.nextId) || !Number.isSafeInteger(state.nextId + items.length)) {
+      return err(state, "nextId overflow; id must stay a safe integer");
+    }
     const sibling = new Set(items.map((_, i) => state.nextId + i));
     for (const [i, it] of items.entries()) {
       if (typeof it.subject !== "string" || it.subject.trim() === "") {
         return err(state, fromTasks ? `tasks[${i}]: subject required for create` : "subject required for create");
       }
-      if (it.metadata !== undefined && !isBag(it.metadata)) return err(state, "metadata must be an object");
+      if (it.metadata !== undefined) {
+        if (!isBag(it.metadata)) return err(state, "metadata must be an object");
+        if (!isJsonSafe(it.metadata)) return err(state, "metadata must be JSON-safe (no cycles, depth ≤64, nodes ≤10000, finite numbers)");
+      }
+      if (it.verify !== undefined) {
+        const bad = verifyError(it.verify);
+        if (bad) return err(state, bad);
+      }
       for (const dep of it.blockedBy ?? []) {
+        if (!Number.isSafeInteger(dep)) return err(state, `blockedBy: #${String(dep)} must be a safe integer`);
         if (sibling.has(dep)) return err(state, `blockedBy: #${dep} is another item in this batch`);
         const d = state.tasks.find((t) => t.id === dep);
         if (!d) return err(state, `blockedBy: #${dep} not found`);
@@ -40,7 +52,7 @@ export function applyMutation(state: BoardState, p: MutationParams, ctx: RuleCon
       if (it.description) t.description = it.description;
       if (it.activeForm) t.activeForm = it.activeForm;
       if (it.owner) t.owner = it.owner;
-      if (it.blockedBy?.length) t.blockedBy = [...it.blockedBy];
+      if (it.blockedBy?.length) t.blockedBy = [...new Set(it.blockedBy)];
       if (it.metadata) t.metadata = { ...it.metadata };
       if (it.verify) t.verify = { ...it.verify };
       return t;
@@ -65,6 +77,7 @@ export function applyMutation(state: BoardState, p: MutationParams, ctx: RuleCon
   if (p.action === "list") return { state, op: { kind: "list" } };
 
   if (p.id === undefined) return err(state, `id required for ${p.action}`);
+  if (typeof p.id !== "number" || !Number.isSafeInteger(p.id)) return err(state, "id must be a safe integer");
   const idx = state.tasks.findIndex((t) => t.id === p.id);
   if (idx < 0) return err(state, `#${p.id} not found`);
   const cur = state.tasks[idx];
@@ -91,6 +104,19 @@ export function applyMutation(state: BoardState, p: MutationParams, ctx: RuleCon
   if (p.status === "parked" && (typeof p.reason !== "string" || p.reason.trim() === "")) {
     return err(state, `park requires reason → todo({action:"update", id:${cur.id}, status:"parked", reason:"…"})`);
   }
+  if (p.reason !== undefined && p.status !== "parked") {
+    return err(state, `reason is only valid with status:"parked" → todo({action:"update", id:${cur.id}, status:"parked", reason:"…"})`);
+  }
+  if (p.accept !== undefined && p.status !== "completed") {
+    return err(state, `accept:"stale" is only valid with status:"completed"`);
+  }
+  if (p.verify !== undefined) {
+    const bad = verifyError(p.verify);
+    if (bad) return err(state, bad);
+  }
+  if (p.status === "completed" && p.verify !== undefined && p.verify.command !== cur.verify?.command) {
+    return err(state, `#${cur.id} cannot change verify and complete in one update → 先改 verify，再 todo({action:"verify", id:${cur.id}})，最后 completed`);
+  }
   if (p.status === "completed") {
     const gate = completionGate(cur, ctx.facts, p.accept);
     if (gate) return err(state, gate);
@@ -113,13 +139,17 @@ export function applyMutation(state: BoardState, p: MutationParams, ctx: RuleCon
   if (p.owner !== undefined) set("owner", p.owner);
   if (p.metadata !== undefined) {
     if (!isBag(p.metadata)) return err(state, "metadata must be an object");
+    if (!isJsonSafe(p.metadata)) return err(state, "metadata must be JSON-safe (no cycles, depth ≤64, nodes ≤10000, finite numbers)");
     const merged: Record<string, unknown> = { ...(cur.metadata ?? {}) };
     for (const [k, v] of Object.entries(p.metadata)) { if (v === null) delete merged[k]; else merged[k] = v; }
     set("metadata", Object.keys(merged).length ? merged : undefined);
   }
   if (p.removeBlockedBy?.length || p.addBlockedBy?.length) {
+    const both = (p.addBlockedBy ?? []).filter((d) => (p.removeBlockedBy ?? []).includes(d));
+    if (both.length) return err(state, `blockedBy id(s) ${both.map((d) => `#${d}`).join(" ")} cannot be both added and removed`);
     let deps = (cur.blockedBy ?? []).filter((d) => !(p.removeBlockedBy ?? []).includes(d));
     for (const d of p.addBlockedBy ?? []) {
+      if (!Number.isSafeInteger(d)) return err(state, `addBlockedBy: #${String(d)} must be a safe integer`);
       if (d === cur.id) return err(state, `cannot block #${cur.id} on itself`);
       const t = state.tasks.find((x) => x.id === d);
       if (!t) return err(state, `addBlockedBy: #${d} not found`);

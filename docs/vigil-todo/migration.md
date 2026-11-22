@@ -1,67 +1,67 @@
-# 从 rpiv-todo + pi-bg-run 迁移到 vigil-todo
+# Migrating from rpiv-todo + pi-bg-run to vigil-todo
 
-## 0. 硬前置：必须卸载两个旧包
+## 0. Hard prerequisite: uninstall both old packages first
 
 ```bash
 pi remove @juicesharp/rpiv-todo
 pi remove pi-bg-run
 ```
 
-pi 1.5.2 的行为（已从 `dist/` 源码取证，见 [p0-findings.md](p0-findings.md)）：
+Behavior of pi 1.5.2, evidenced from `dist/` sources (see [p0-findings.md](p0-findings.md)):
 
-- **同名工具先注册者胜，后来者被静默丢弃**（`runner.js:410-421`）。两包同时在场时，`todo` 归谁完全取决于 `settings.packages` 的声明顺序。
-- **事件是广播的**，两个包都会收到 `tool_call` / `tool_result`。于是可能出现「旧包的 reducer 在写状态、新包的预检在拦截」的半生效状态——比完全不生效更难排查。
-- 启动自检：`session_start` 用 `getAllTools()` 查 `todo` 的 `sourceInfo`，不是本扩展就 `notify(..., "error")` 并且**不注册事件处理器**。`/vigil-todo doctor` 第一条也会报冲突。
+- **For same-named tools the first registrant wins; later ones are silently dropped** (`runner.js:410-421`). With both packages present, who owns `todo` depends purely on the declaration order in `settings.packages`.
+- **Events are broadcast**: both packages receive `tool_call` / `tool_result`. This can produce a half-effective state — the old package's reducer writing state while the new package's preflight blocks calls — which is harder to debug than not working at all.
+- Startup self-check: at `session_start` the extension looks up `todo`'s `sourceInfo` via `getAllTools()`; if it is not ours it notifies an error and **registers no event handlers**. `/vigil-todo doctor` reports the conflict as its first line.
 
-**只追加本包而不卸载旧包，不算安装成功。**
+**Appending this package without removing the old ones is not a successful install.**
 
-## 1. 兼容方向：单向
+## 1. Compatibility direction: one-way
 
-- 本扩展**读得懂旧包的 4 状态快照**（`customType: "rpiv-todo-state"`），并原样呈现。
-- 本扩展写**超集**：同样是 `rpiv-todo-state`，新增 `parked`、`evidence`、`lastFailure`、`inProgressSince`、`park` 等字段。
-- **旧包读不了新快照**：它对快照做整体 `every(isTask)` 校验，遇到不认识的 `parked` 会跳过整份快照。因此**回滚不可行**（见 §4）。
+- This extension **reads old 4-state snapshots** (`customType: "rpiv-todo-state"`) and renders them as-is.
+- It writes a **superset**: same `rpiv-todo-state` type, adding `parked`, `evidence`, `lastFailure`, `inProgressSince`, `park`, and more.
+- **The old package cannot read new snapshots**: it validates the whole snapshot with `every(isTask)` and skips the entire snapshot when it meets an unknown `parked`. Therefore **rollback is not viable** (see §4).
 
-## 2. `inProgressSince` 迁移 fallback
+## 2. `inProgressSince` migration fallback
 
-旧快照没有 `inProgressSince`。replay 时：
+Old snapshots have no `inProgressSince`. On replay:
 
 ```
 inProgressSince = task.inProgressSince ?? task.statusSince ?? 0
 ```
 
-`0` 表示「无信息」，R3 新近度判定会跳过它 ⇒ 迁移任务仍可被自动完成，不会只能 park。
+`0` means "no information"; the R3 freshness check skips it ⇒ migrated tasks can still be auto-completed instead of being forced to park.
 
-## 3. 配置迁移
+## 3. Configuration migration
 
-旧包 `pi-bg-run` 的配置表（`maxConcurrentJobs` / `completedTtlMs` / `widgetRefreshMs` / `killTimeoutMs`）**从来没有生效过**：它读 `ctx.settings?.bgRun`，而 pi 的 extension context 里根本没有 `settings` 字段（恒为 `undefined`）。
+The old `pi-bg-run` configuration table (`maxConcurrentJobs` / `completedTtlMs` / `widgetRefreshMs` / `killTimeoutMs`) **never took effect**: it read `ctx.settings?.bgRun`, and pi's extension context has no `settings` field at all (always `undefined`).
 
-新读取链固定为：
+The new read chain is fixed:
 
 ```
 ~/.config/pi-kit/config.json
   → pi.getSettings().vigilTodo
-  → pi.getSettings().bgRun        （旧键兼容）
-  → 默认值
+  → pi.getSettings().bgRun        (legacy key, still honored)
+  → defaults
 ```
 
-把旧配置从 `settings.json` 的 `bgRun` 键挪到 `vigilTodo`（或直接改配置文件）即可，非法值逐项退回默认。
+Move old values from the `bgRun` key in `settings.json` to `vigilTodo` (or edit the config file directly). Invalid values fall back per-key to defaults.
 
-## 4. 为什么不能回滚
+## 4. Why rollback is not possible
 
-1. 旧包跳过含 `parked` 的整份快照 ⇒ 任务列表直接消失。
-2. 新包的 `inProgressSince` / `evidence` / `lastFailure` 旧包不认识，重新按旧包写回会丢证据与失败阻断。
-3. sidecar 的链级状态（`finalized` / `pendingReverify`）与旧包的 `jobs.json` 布局不兼容，混用会让链级判断失真。
+1. The old package skips any snapshot containing `parked` ⇒ the task list disappears entirely.
+2. The old package does not understand `inProgressSince` / `evidence` / `lastFailure`; writing back through it loses evidence and failure blocking.
+3. Sidecar chain-level state (`finalized` / `pendingReverify`) is incompatible with the old `jobs.json` layout; mixing them corrupts chain-level decisions.
 
-如果确实要回退：先 `/todos` 导出任务文本、备份 `~/.pi/agent/sessions/` 与 `/tmp/bg-run/`，再接受「已完成的自动判定丢失、parked 任务需手工重建」的代价。
+If you must roll back: export task text via `/todos`, back up `~/.pi/agent/sessions/` and `/tmp/bg-run/`, and accept losing automatic completion judgments and rebuilding parked tasks by hand.
 
-## 5. 迁移后自检
+## 5. Post-migration self-check
 
 ```
-/vigil-todo doctor     # ✓ 未发现问题
-/todos                 # 旧任务应原样出现
-/bg                    # 旧作业记录可见（sidecar 损坏会留档并从空开始）
+/vigil-todo doctor     # expect: no problems found
+/todos                 # old tasks should appear as-is
+/bg                    # old job records visible (a corrupt sidecar is archived and restarted empty)
 ```
 
-- 继续用同一个会话（resume）：任务快照与 sidecar 都在，模型与看板直接恢复。
-- pi 关着期间完成的作业：resume 后两步 finalize 保证链只终结一次，`notifyState` catch-up 补发恰一次。
-- resume 时昨晚遗留的 running 作业：pid + startStamp 仍匹配就继续监控；已消失的标 `exitCodeKnown:false` 并 parked，退出码绝不伪造。
+- Keep using the same session (resume): task snapshots and the sidecar are both present; model and panel resume directly.
+- Jobs that finished while pi was down: after resume, two-step finalize guarantees each chain terminates exactly once, and `notifyState` catch-up delivers exactly once.
+- Running jobs left over from last night at resume time: if pid + startStamp still match, monitoring continues; vanished ones are marked `exitCodeKnown:false` and parked — exit codes are never fabricated.

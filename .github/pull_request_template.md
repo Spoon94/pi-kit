@@ -1,18 +1,18 @@
-## 变更
+## Change
 
-<!-- 一句话说明改了什么 -->
+<!-- One sentence: what changed -->
 
-## 评审方式
+## Review mode
 
-- [ ] 本 PR 是完整构建完成后的最终提交，不是中间小任务
-- [ ] 等待人工审核；agent 不自动批准、不自动合并
+- [ ] This PR is the final submission of a completed build, not an intermediate task
+- [ ] Waiting for human review; agents do not approve or merge automatically
 
-## 自查
+## Self-check
 
-- [ ] 只改了本次目标相关的文件
-- [ ] 设计文档 / 验收用例已同步（若行为有变）
-- [ ] 本地测试通过
+- [ ] Only files related to this goal were touched
+- [ ] Design docs / acceptance cases synced (if behavior changed)
+- [ ] `npm run verify` passes locally
 
-## 关联
+## Related
 
-<!-- 里程碑 / issue / 设计文档章节 -->
+<!-- milestone / issue / spec section -->

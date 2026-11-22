@@ -1,73 +1,68 @@
-# vigil-todo 后续优化清单
+# vigil-todo optimization backlog
 
-> 状态：**待优化**。本文件只记录后续工作，不表示这些能力已经实现或验证。
-> 关联规格：[`design/specs/2026-11-21-vigil-todo-design.md`](./design/specs/2026-11-21-vigil-todo-design.md)
-> 原则：先完成规格中的 P1–P5，再按本清单持续优化；每项优化都需要相应测试或实测证据。
+> Living document. Records what is done (with evidence) and what remains open.
+> Related spec: [`design/specs/2026-11-21-vigil-todo-design.md`](./design/specs/2026-11-21-vigil-todo-design.md)
+> Rule: an item leaves this list only when it is implemented, has automated/fault-injection/measured evidence, docs are in sync, and a real-pi smoke passes.
 
-## 1. 性能
+## 1. Performance — done
 
-现状：规格 §10.2 已有性能预算，但还没有实现和基准数据。
+- Baselines established: `tests/perf/{budget,scale,burst,soak}.test.ts`.
+- Idle tick (full path incl. gc) measured: 0.0426 ms (50 tasks/20 jobs) → 0.2485 ms (200/2000). Before the fix, `sweepAll` alone cost 22.8 ms from unconditional sidecar writes; now zero-change ticks write nothing.
+- Wake composition budgeted: 50 chains 6.86 ms; 200 chains with a 2000-char next subject 5.83 ms / 4736 chars, footer intact, log reads stop at budget.
+- Real-GC soak: +0.10 MB / +0.06 MB per 300 job cycles; handles flat; `clearAll` recovers.
+- No timers when there is nothing to do; no per-job polling; single coalesced sidecar write per changed tick.
 
-- [ ] 建立基准测试：`todo` p95、1 万条 replay、100MB 日志尾读、面板渲染。
-- [ ] 验证无 running 作业且无 retryAt 时，不留定时器。
-- [ ] 验证唤醒消息 ≤1200 token，多个作业完成时按窗口合并。
-- [ ] 根据实测结果优化配置缓存、状态写入与日志读取，避免无依据的提前优化。
+Open: none known. Re-measure after any change to the tick path (`npm run verify` includes the perf gate).
 
-## 2. 容灾
+## 2. Disaster recovery — done, with residual ideas
 
-现状：规格已有恢复、补偿、收养与认领设计，但尚未经过故障注入验证。
+Done and tested: sidecar corruption (quarantine + restart empty), crash recovery (`recoverJobs`, `pendingReverify` sweep), idempotent two-step finalize, single-delivery watermark, catch-up with `notifyState`, orphan-root reaping, kill/halt/shutdown timer cleanup, no orphan or zombie processes (real-process tests).
 
-- [ ] 覆盖 sidecar 损坏、写入中断、pi 崩溃、进程消失、pid 复用。
-- [ ] 验证重启后 retryAt、pendingReverify、defer 与唤醒补偿均能继续，不悬置。
-- [ ] 验证同一证据不重复投递、同一链不重复 finalize、跨会话不双头驱动。
-- [ ] 验证人工接管只收终态链，running 链不被两个会话同时接管。
+Note: cross-session adoption and O_EXCL claims were **removed by scope decision** (spec §17): single session, resumed, no concurrent sessions. Their tests were deleted, not left failing.
 
-## 3. 可自定义设置的内容
+Open (ideas, not defects):
+- [ ] Disk-full during `save()` — current behavior throws and keeps `dirty`; worth an explicit test.
+- [ ] `kill -9` mid-write — atomic rename covers it; a fault-injection test would prove it.
 
-现状：已有若干默认值和配置读取优先级，但缺少完整配置契约。
+## 3. Customizability — done
 
-- [ ] 定义统一配置 schema：字段、类型、默认值、合法范围与非法值处理。
-- [ ] 明确 `wipLimit`、`retries`、退避时间、`staleReverify`、`maxTurns`、作业并发数等核心选项。
-- [ ] 明确面板行数、折叠键、日志尾行数、通知补偿时间等展示与唤醒选项。
-- [ ] 制定热更新矩阵：哪些配置立即生效，哪些需要 `/reload` 或重启。
-- [ ] 保留 `~/.config/pi-kit/config.json` → `pi.getSettings().vigilTodo` → 旧 `bgRun` → 默认值的兼容链。
+- Full config contract: `CONFIG_KEYS` with type/min/max per key, per-key fallback on invalid values, hot-reload matrix in [`configuration.md`](configuration.md).
+- Guard: `tests/selfcheck/config-consumed.test.ts` fails if a declared key has no consumer.
+- Guidance (prompt snippet/guidelines) overridable per tool via the same priority chain.
 
-## 4. 易用性
+Open: none known.
 
-现状：工具名、面板、命令和错误文案已有设计，但尚未在真实 TUI 中验证。
+## 4. Usability — done except hands-on feel
 
-- [ ] 验证默认零配置即可完成常见流程。
-- [ ] 验证唯一 next、park/defer/verify 的模型调用路径清晰且不容易误用。
-- [ ] 验证每条拒绝都给出可执行的下一步，不只报告错误。
-- [ ] 验证早上面板能直接呈现完成证据、parked 原因与遗留任务。
-- [ ] 完善 `/vigil-todo`、`/todos`、`/bg`、`/vigil-todo adopt`、`/vigil-todo doctor` 的一致性与排障体验。
+Done: rejection/warning messages always carry an executable next step (tested); panel with summary line, parked reasons, retry/fp markers, width clamp; `/vt` alias; status bar; `haltKey` (`alt+h`, `off` supported); Tab completion incl. dynamic job ids; `/vt clear` limited to terminal history by user decision.
 
-## 5. 可扩展性
+Open:
+- [ ] **Real TUI hands-on verification** — panel feel at various terminal widths, `alt+h` responsiveness, Tab dropdown interaction, overnight unattended behavior. This is the user's week-long trial; record findings here.
 
-现状：已有内部模块边界，但没有公开插件 API。
+## 5. Extensibility — done
 
-- [ ] 保持 `board` 纯状态机、`jobs` 不懂任务、`bind` 唯一跨界写入、`ui` 只读。
-- [ ] 明确哪些模块和类型是稳定接口，哪些属于可随时调整的内部实现。
-- [ ] 评估新规则、新证据来源、新面板展示的扩展点，避免为了假想需求提前做插件系统。
-- [ ] 支持 `pi-kit` 后续增加其他 extension，同时避免共享全局状态和配置冲突。
+- Multi-extension layout: `extensions/<name>.ts` + `src/<name>/` + `tests/<name>/` + `docs/<name>/`; guide in [`../adding-an-extension.md`](../adding-an-extension.md).
+- Repo guards: module boundaries, retired-mechanism scope, CJK-free source — each proven by an injected-violation probe.
+- No premature `src/shared/`: extract only when a second real consumer appears.
 
-## 6. 自验证能力
+Open:
+- [ ] Validate the layout with an actual second extension (the layout is currently exercised by exactly one member).
 
-现状：规格有 F1–F105 和阶段出口；check 已完成十二轮设计评审，但测试尚未执行。
+## 6. Self-verification — done
 
-- [ ] 将 F1–F105 逐步落实为自动化单元测试和集成测试，而非只保留文档用例。
-- [ ] 建立性能基准与故障注入测试，覆盖本清单第 1、2 项。
-- [ ] 在真实 pi 环境验证工具强制、真实面板、唤醒、压缩恢复和多会话行为。
-- [ ] 为 P1–P5 设置可执行出口检查，未通过不得标记完成。
-- [ ] 完善 `/vigil-todo doctor`，让运行期能够自检冲突、孤儿链、证据缺失和恢复异常。
+- Spec↔test mapping enforced: `tests/selfcheck/spec-coverage.test.ts` parses every F-id from the spec and fails if any lacks a test; verified live by deleting an F-id and watching it fail.
+- Coverage gate: lines ≥95 / branches ≥90 / functions ≥95 via `npm run coverage:check`; current 99.51 / 94.20 / 98.83.
+- `npm run verify` = test + typecheck + coverage, non-zero on any failure.
+- `/vt doctor` reports conflicts, orphans, overdue retention, cycles, WIP oversell, turn limit — each with an executable next step.
 
----
+Open:
+- [ ] Real-session `/compact` interaction (replay is unit-tested; a live compaction run is not).
 
-## 完成标准
+## 7. Publishing — blocked on auth, by design not yet published
 
-每一项只有同时满足以下条件，才能从本清单移除：
+- Package metadata ready: `private` removed, MIT license, repository/homepage/bugs, `publishConfig.access`, `files` excludes the design archive (verified via `npm pack --dry-run`: 53 files / 84.7 kB).
+- Blocked: the account uses iPhone passkeys (no TOTP), and the npm website is unreachable (HTTP 403) from this network, so `npm login` cannot complete.
+- Candidate path: **trusted publishing** (`npm trust github …` + a release workflow) — needs one authenticated session or website access to set up.
 
-1. 已实现或已优化；
-2. 有对应自动化测试、故障注入或实测数据；
-3. 规格与使用文档已同步；
-4. 在真实 pi 环境完成必要的冒烟验证。
+Open:
+- [ ] Resolve auth (add a TOTP factor from another network, or configure trusted publishing), then publish 0.1.0 after the trial week.

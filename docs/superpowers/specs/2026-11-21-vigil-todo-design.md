@@ -199,7 +199,7 @@ vigil-todo     → 任务该不该往下走（重试用尽 / 依赖未清 / 轮�
 | 5 | 动作边界交给权限层 |
 | 6 | 扩展算唯一 next，模型拍板 |
 | 7 | parked 是正式第 5 状态；兼容单向 |
-| 8 | 失败退避重试：立即 → 30s → 2min，重试 3 次可配；每次新 job id 各留日志 |
+| 8 | 失败退避重试：立即 → 30s → 2min → 5min → 10min，**总尝试 6 次**可配；每次新 job id 各留日志 |
 | 9 | 主动 kill 不重试；spawn 就失败不重试 |
 | 10 | 扩展自己重跑命令（不烧 token） |
 | 11 | `maxTurns: 50` 保险丝，重试不计数 |
@@ -421,12 +421,12 @@ fp stale → 自动 respawn 取证命令（新 job id，同 rootId，标 staleRe
 
 | 链级上限 | 派生口径 | 默认 |
 |---|---|---|
-| `attempt` | 失败重试序号，**含重验分支内的失败重试** | ≤ `1 + retries` = 4 |
+| `attempt` | 失败重试序号，**含重验分支内的失败重试** | ≤ `1 + retries` = 6 |
 | `chain.reverifies` | `count(rootId===R && staleReverifyOf != null)` | ≤ `staleReverify` = 1 |
 
 **继承规则**：沿 `retryOf` 向上走，只要任一祖先带 `staleReverifyOf`，该 job 即属**重验分支**；**重验分支的后代永不再触发新的重验**。
 **消耗口径**：重验 job 本身 `attempt` 继承父值（不增）；重验分支内的失败重试照常 `attempt++`，撞 4 即 parked。
-⇒ 单链 job 总数 ≤ `4 + 1 = 5`，**有界**。`turnsUsed` 只闸投递不闸 spawn，故不能充当此处的界。
+⇒ 单链 job 总数 ≤ `6 + 1 = 7`，**有界**。`turnsUsed` 只闸投递不闸 spawn，故不能充当此处的界。
 
 **capacity 死路（R4 附带意见③）**：重验走 spawn 路径，会被"新 spawn 准入"拒（R3-2 后新 spawn 不排队）。此时**直接 parked(reason="无空闲槽位重验")**，不静默停在 in_progress。
 
@@ -738,7 +738,9 @@ for task in toImport:
 
 ### 7.2 重试链
 
-`retries` 默认 **3**（额外次数，**总尝试 4 次**）。间隔：1→2 立即，2→3 30s，3→4 2min。
+`retries` 默认 **5**（额外次数，**总尝试 6 次**）。间隔：1→2 立即，2→3 30s，3→4 2min，4→5 5min，5→6 10min（最坏累计等待 ≈17.5 分钟）。
+
+**为什么是 6 不是 4**：用户明确要求避开 4（不吉利），且面板分母 `1 + retries` 直接呈现给用户，故取总尝试 6。
 无条件重试，零日志启发式。每次新 job id、同 `rootId`、日志各自保留。
 
 **容量与 spawn 分流（R2-4 / R3-2）**：
@@ -1000,7 +1002,7 @@ replay 失败 → 空列表 + notify；sidecar 读失败 → 改名留档 + 从�
 
 | # | 结论 |
 |---|---|
-| Q-A | 总尝试 **4** 次（`retries:3` = 额外次数） |
+| Q-A | 总尝试 **6** 次（`retries:5` = 额外次数）。原为 4，用户要求避开 4 ⇒ 改 6，退避扩到 5 档 |
 | Q-B | 指纹三态 + §5.2 两处收窄，**fpVerdict 延迟到回填时算**；非 git → unknown 标 `fp:n/a`；裁决点 = 是否叫醒人；stale 走**自动重验**而非 `expectChanges` 豁免（§5.2.1 反提案） |
 | Q-C | 重试期占 WIP 位，但面板 `↻ retry n/m` + park 能取消链 |
 | Q-D | 立即解除仅限根已终结或根记录不存在；后者 repair + notify |

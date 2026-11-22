@@ -1517,3 +1517,49 @@ renderPanel                             → 三个 pending 带 ⛓，观感完�
 | F120 | 四个工具的 promptSnippet/promptGuidelines | 均非空且含 §19.2 六条要点；可被配置覆盖 |
 | F121 | 覆盖率门禁 | 达阈值通过；人为删测试后失败 |
 | F122 | 四个工具的 `promptSnippet` | 互不相同且非空；配置可按工具覆盖（`guidance.snippets.<tool>`）；全局 `promptSnippet` 兜底仍生效 |
+
+---
+
+## 20. `/vt clear` 子指令（用户要求：自己清历史任务，不必让模型代劳）
+
+### 20.1 缺口
+
+`clear` 此前**只是工具 action**（`todo({action:"clear"})`，模型调用），命令面没有。用户想自己清历史任务必须先让模型代劳，与「刹车/继续都能自己按」的设计不一致。
+
+### 20.2 语义（与工具层完全一致，复用同一套清理逻辑）
+
+| 命令 | 范围 | 确认 |
+|---|---|---|
+| `/vt clear` | 默认 `settled` = completed + deleted | 直接执行（只清历史，不碰在跑的） |
+| `/vt clear completed` | 只清已完成 | 直接执行 |
+| `/vt clear deleted` | 只清 tombstone | 直接执行 |
+| `/vt clear settled` | 同默认 | 直接执行 |
+| `/vt clear all` | 全部任务 | **两步确认**（沿用 `/bg k` 的 `confirm` 模式），且仍受 R18 约束 |
+
+- **必须复用** `planCleanup` / `applyCleanup` / `markPurged`，不得另写一份清理逻辑（否则两套语义会漂移）。
+- **必须落快照**（`appendEntry`）并 `markPurged`——否则清理后 catch-up 会把链重新投影回来（§16.7.4 的「清了又回来」）。
+- R18 不变：任何范围下绑有 **running** 作业的任务一律跳过并列出；`all` 遇 running/退避链直接拒并指向 `bg_kill` / `halt`。
+- `parked` **不属于历史**，默认不清（它是等人的决策物）。
+
+### 20.3 输出与可发现性
+
+- 报告：清了几条、跳过哪些（附 id 与原因）、purge 了几条链。
+- 无可清时明确说「没有可清理的历史任务」，**不得静默**。
+- `all` 的第一步回显将被删除的任务清单（含 pending/in_progress），让用户看清代价再确认。
+- Tab 补全：一级加 `clear`；`clear ` 前缀给出 `completed / deleted / settled / all` 四个二级候选，各带说明。
+- `panelHint` 与三个命令的 description 同步加入 clear。
+
+### 20.4 验收用例
+
+| # | 用例 | 期望 |
+|---|---|---|
+| F123 | `/vt clear` 默认 | 只清 completed+deleted；pending/in_progress/parked 保留；落快照 |
+| F124 | `/vt clear completed` / `deleted` | 各自只清一类 |
+| F125 | `/vt clear all` 无 confirm | 不删除，回显清单并要求 `confirm` |
+| F126 | `/vt clear all confirm` 且有 running 作业 | 拒（R18），指向 bg_kill / halt |
+| F127 | `/vt clear all confirm` 无作业 | 全清且落快照 |
+| F128 | 清理后 catch-up | 已 purge 的链不再被投影/补发 |
+| F129 | 绑 running 作业的任务在任意范围下 | 跳过并在输出里列出 |
+| F130 | 无可清历史 | 明确提示，不静默 |
+| F131 | Tab 补全 | 一级含 clear；`clear ` 前缀出四个范围候选 |
+| F132 | `/vt clear` 与 `/vigil-todo clear` | 行为完全一致 |

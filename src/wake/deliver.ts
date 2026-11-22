@@ -54,12 +54,13 @@ export function tryDeliver(i: DeliverInput): DeliverResult {
   if (c.turnsUsed >= i.cfg.maxTurns) return { kind: "none" };      // ★ 第一行硬闸门
 
   const pending = i.board.tasks.flatMap((t) => t.evidence ?? [])
-    .filter((e) => e.origin === "async" && e.chainFinal && e.trigger !== "self" && e.at > c.wakeWatermark)
+    .filter((e) => e.origin === "async" && e.chainFinal && e.trigger !== "self")
     .filter((e) => {
-      // 与 catch-up 共用 per-root 去重：已 sent/acked 的链不得再走正常通道
-      if (typeof e.ref !== "string") return true;
+      // per-root 的 sidecar 状态是权威；watermark 只是优化，时钟回拨后不得挡住从未投递的链（A3）
+      const withinWatermark = e.at > c.wakeWatermark;
+      if (typeof e.ref !== "string") return withinWatermark;
       const root = i.jobs.get(e.ref);
-      if (!root || root.id !== root.rootId) return true;
+      if (!root || root.id !== root.rootId) return withinWatermark;
       if (root.purged) return false;
       return root.notifyState !== "sent" && root.notifyState !== "acked";
     });

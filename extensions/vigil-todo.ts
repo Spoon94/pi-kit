@@ -15,10 +15,11 @@ import { selectNext } from "../src/board/selectors.js";
 import { createBoardStore } from "../src/board/store.js";
 import type { BoardState } from "../src/board/types.js";
 import { chainJobs, chainTerminated, terminalJob } from "../src/jobs/chain.js";
-import { escalate, requestKill } from "../src/jobs/kill.js";
+import { escalate, killNow, requestKill } from "../src/jobs/kill.js";
 import { jobFactsOf } from "../src/jobs/facts.js";
 import { createMonitor, recoverJobs, recoveredExit } from "../src/jobs/monitor.js";
-import { spawnJob, type SpawnRequest } from "../src/jobs/spawn.js";
+import { createSaveCoalescer, withCoalescedSave, type SaveCoalescer } from "../src/jobs/coalesce.js";
+import { spawnJob, takeChild, trackSpawned, type SpawnRequest } from "../src/jobs/spawn.js";
 import { createJobStore, runDir, type JobStore } from "../src/jobs/store.js";
 import type { Job } from "../src/jobs/types.js";
 import { createConfigLoader } from "../src/lib/config.js";
@@ -31,7 +32,7 @@ import {
 } from "../src/tool/register.js";
 import { createGuidanceLoader, DEFAULT_GUIDANCE, type ToolGuidance } from "../src/tool/guidance.js";
 import { createOverlayController } from "../src/ui/overlay.js";
-import { WIDGET_KEY, renderDoctor, renderPanel, renderTodos } from "../src/ui/panel.js";
+import { WIDGET_KEY, STATUS_KEY, renderDoctor, renderPanel, renderStatus, renderTodos } from "../src/ui/panel.js";
 import { clearRenudgeOnSettled, createAckTracker, markSent, resetOnUserInput } from "../src/wake/ack.js";
 import { WAKE_CUSTOM_TYPE, composeWake } from "../src/wake/compose.js";
 import { needsTimer, recoveryWake, settleSend, tryDeliver } from "../src/wake/deliver.js";
@@ -61,7 +62,17 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   let toolCtx: ExtensionToolContext | undefined;
   let sid = "";
   let cwd = process.cwd();
-  let jobs: JobStore = createJobStore(runDir(cwd));
+  const initialStore = createJobStore(runDir(cwd));
+  let saves: SaveCoalescer = createSaveCoalescer(() => initialStore.save());
+  let jobs: JobStore = withCoalescedSave(initialStore, saves);
+  /** 换 store 前先同步落盘旧记录，再绑定新的合并器。 */
+  const openJobs = (dir: string): void => {
+    saves.flush();
+    const raw = createJobStore(dir);
+    const c = createSaveCoalescer(() => raw.save());
+    saves = c;
+    jobs = withCoalescedSave(raw, c);
+  };
   let degradedNote: string | undefined;
   let timer: NodeJS.Timeout | undefined;
   let mergeTimer: NodeJS.Timeout | undefined;
@@ -105,11 +116,20 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     maxTurns: getCfg().maxTurns,
   });
 
+  let lastPersisted: BoardState | undefined;
+
   const persistBoard = (board: BoardState): void => {
-    boards.commit(sid, board);
+    if (boards.get(sid) !== board) boards.commit(sid, board);   // 已是当前态则不重复 commit（B2）
     pi.appendEntry(BOARD_CUSTOM_TYPE, {
       action: "snapshot", params: {}, tasks: board.tasks, nextId: board.nextId, counters: board.counters,
     });
+    lastPersisted = boards.get(sid);
+  };
+
+  /** board 有未落快照的变化才 append：同一 tick 内每任务至多一次（A1/B2）。 */
+  const persistIfChanged = (): void => {
+    const cur = boards.get(sid);
+    if (cur !== lastPersisted) persistBoard(cur);
   };
 
   const persistCounters = (board: BoardState, counters: BoardState["counters"]): void => {
@@ -119,6 +139,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   const refreshOverlay = (): void => {
     const ctx = activeCtx;
     if (!ctx?.hasUI) return;
+    ctx.ui.setStatus(STATUS_KEY, renderStatus(boards.get(sid), jobs));   // C2：常驻状态栏
     overlay.update(boards.get(sid));
     if (collapsed) { ctx.ui.setWidget(WIDGET_KEY, undefined); return; }
     if (overlay.isRegistered()) ctx.ui.setWidget(WIDGET_KEY, renderPanel(boards.get(sid), jobs, getCfg()));
@@ -130,9 +151,13 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     const fpStart = collectFingerprint(req.cwd);
     const r = spawnJob({ ...req, fpStart }, runDir(req.cwd), Date.now());
     if (!r.ok) return { ok: false, error: r.error };
-    jobs.put(r.job);
-    jobs.save();
-    monitor.watch(r.job, onJobExit, r.child);
+    const tracked = trackSpawned(r.job, enqueueJobExit, {
+      put: (j) => jobs.put(j),
+      save: () => jobs.save(),
+      watch: (j, onExit) => monitor.watch(j, onExit, r.child),      // 异常路径：子进程已 spawn 但登记失败 ⇒ 立即杀掉，绝不留下无主进程（B3）
+      abandon: (j) => { takeChild(j.id); killNow(j.pid); },
+    });
+    if (!tracked.ok) return { ok: false, error: tracked.error };
     refreshTimer();
     return { ok: true, jobId: r.job.id };
   };
@@ -169,7 +194,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
       ...task, status: "parked", statusSince: now,
       park: { reason: note, at: now, from: "in_progress" },
     };
-    persistBoard({ ...board, tasks });
+    boards.commit(sid, { ...board, tasks });     // 快照由 onJobExit/runSweep 末尾统一 append
   };
 
   const finalizeTerminated = (): void => {
@@ -189,19 +214,69 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     }
   };
 
-  const onJobExit = (job: Job): void => {
-    const now = Date.now();
-    job.fpEnd = collectFingerprint(job.cwd);
+  /** 同一同步批次的 sidecar 写合并 + 指纹缓存（仅存活于批次内）。 */
+  const fpCache = new Map<string, string | undefined>();
+  let burstDepth = 0;
+  const batch = <T>(fn: () => T): T => {
+    burstDepth++;
+    saves.begin();
+    try {
+      return fn();
+    } finally {
+      try { saves.end(); } finally {
+        burstDepth--;
+        if (burstDepth === 0) fpCache.clear();
+      }
+    }
+  };
+  const fpEndFor = (job: Job): string | undefined => {
+    if (job.fpStart === undefined) return undefined;
+    if (fpCache.has(job.cwd)) return fpCache.get(job.cwd);
+    const fp = collectFingerprint(job.cwd);
+    fpCache.set(job.cwd, fp);
+    return fp;
+  };
+
+  /** 单个退出的内存处理；落盘/快照/投递由外层批次统一收口。 */
+  const processJobExit = (job: Job): void => {
+    if (job.fpEnd === undefined) job.fpEnd = fpEndFor(job);
     jobs.put(job);
     jobs.save();
-    const deps: AutofillDeps = { boards, jobs, cfg: getCfg(), now, sessionId: sid, respawn: spawnChain, notify };
+    const deps: AutofillDeps = { boards, jobs, cfg: getCfg(), now: Date.now(), sessionId: sid, respawn: spawnChain, notify };
     autofillJob(job.id, deps);
     finalizeTerminated();
-    persistBoard(boards.get(sid));
-    runSweep(false);                       // 退出路径交给 250ms 合并窗口，catch-up 不抢跑
-    refreshOverlay();
-    refreshTimer();
-    scheduleDeliver();
+    runSweep(false);                         // 退出路径交给 250ms 合并窗口，catch-up 不抢跑
+  };
+
+  // 多个 close 回调落在同一事件循环 turn 时，先排队，check 阶段一次批次处理（B2）。
+  // 不是定时器：setImmediate 在当前 turn 让出到事件循环等待之前执行。
+  const exitQueue: Job[] = [];
+  let exitFlush: NodeJS.Immediate | undefined;
+
+  const drainExitQueue = (): number => {
+    const queued = exitQueue.splice(0);
+    for (const job of queued) processJobExit(job);
+    return queued.length;
+  };
+
+  const flushExitQueue = (): void => {
+    if (exitFlush) { clearImmediate(exitFlush); exitFlush = undefined; }
+    if (!exitQueue.length) return;
+    batch(() => {
+      drainExitQueue();
+      persistIfChanged();
+      refreshOverlay();
+      refreshTimer();
+      scheduleDeliver();
+    });
+  };
+
+  const enqueueJobExit = (job: Job): void => {
+    job.fpEnd = fpEndFor(job);               // 指纹在退出回调当下采集
+    exitQueue.push(job);
+    if (exitFlush) return;
+    exitFlush = setImmediate(() => { flushExitQueue(); });
+    exitFlush.unref?.();
   };
 
   // ── sweep ─────────────────────────────────────────────────────────────
@@ -227,6 +302,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     const counters = { ...board.counters, turnsUsed: board.counters.turnsUsed + 1, renudgeBudget: 1 };
     persistCounters(board, counters);                       // 补偿与正常 DELIVER 同样计入保险丝
     markSent(jobs, roots, wakeId, Date.now());
+    saves.flush();                                          // 先落 sent 再发消息
     sendWake(composeWake(roots, board, jobs, cfg, next), wakeId, roots);
     return true;
   };
@@ -246,10 +322,10 @@ export default function vigilTodo(pi: ExtensionAPI): void {
       boards, jobs, cfg, now: Date.now(), sessionId: sid, respawn: spawnChain,
       notify: (n) => notify(n), isIdle: () => activeCtx?.isIdle() ?? false,
     };
-    const r = sweepAll(d);
+    sweepAll(d);
     finalizeTerminated();
     const catchUp = catchUpScan(d);
-    if (r.respawned || r.retained || catchUp.length) persistBoard(boards.get(sid));
+    persistIfChanged();                                     // A1：park/项目/retention 均在此落快照
     const sent = deliver ? deliverCatchUp(catchUp) : false;
     refreshTimer();
     return sent;
@@ -268,52 +344,68 @@ export default function vigilTodo(pi: ExtensionAPI): void {
 
   const tick = (): void => {
     if (!activeCtx || !sid) return;
-    const now = Date.now();
-    // 恢复作业的退出探活即使 halted 也要跑（halt 时 kill 失败的残留进程不能被拖到 resume 之后）
-    for (const id of [...recovered]) {
-      const job = jobs.get(id);
-      if (!job || job.status !== "running") { recovered.delete(id); continue; }
-      const exited = recoveredExit(job, now);
-      if (!exited) continue;
-      recovered.delete(id);
-      jobs.put(exited);
-      jobs.save();
-      onJobExit(exited);
-    }
-    if (isHalted(boards.get(sid))) {
+    batch(() => {
+      const now = Date.now();
+      const drained = drainExitQueue();        // 先合并本 turn 已排队的真实退出
+      if (drained > 0) scheduleDeliver();
+      // 恢复作业的退出探活即使 halted 也要跑（halt 时 kill 失败的残留进程不能被拖到 resume 之后）
+      for (const id of [...recovered]) {
+        const job = jobs.get(id);
+        if (!job || job.status !== "running") { recovered.delete(id); continue; }
+        const exited = recoveredExit(job, now);
+        if (!exited) continue;
+        recovered.delete(id);
+        jobs.put(exited);
+        jobs.save();
+        processJobExit(exited);
+      }
+      if (isHalted(boards.get(sid))) {
+        refreshOverlay();
+        refreshTimer();
+        return;
+      }
+      runSweep();
+      const removed = jobs.gc(getCfg().completedTtlMs, now);
+      if (removed > 0) jobs.save();
+      persistIfChanged();
       refreshOverlay();
       refreshTimer();
-      return;
-    }
-    runSweep();
-    const removed = jobs.gc(getCfg().completedTtlMs, now);
-    if (removed > 0) jobs.save();
-    refreshOverlay();
-    refreshTimer();
+    });                                        // 整个 tick 的 sidecar 变更合并为一次写（B2）
   };
 
   const initSession = (ctx: ExtensionContext): void => {
     activeCtx = ctx;
     const nextSid = ctx.sessionManager.getSessionId();
     if (nextSid === sid && ctx.cwd === cwd) return;
+    flushExitQueue();                        // 旧会话排队的退出先落盘
+    if (mergeTimer) { clearTimeout(mergeTimer); mergeTimer = undefined; }
     sid = nextSid;
     cwd = ctx.cwd;
-    jobs = createJobStore(runDir(cwd));
-    const loaded = jobs.load();
-    degradedNote = loaded.note;
-    if (loaded.degraded) notify(loaded.note ?? "sidecar 降级，已从空开始", "error");
-    const recoveredCount = recoverJobs(jobs, Date.now());
-    if (recoveredCount > 0) jobs.save();
-    recovered.clear();
-    for (const job of jobs.all()) {
-      if (job.status === "running") recovered.add(job.id);   // 由单 timer 探活，不另起每作业 3s 轮询
-    }
-    boards.replace(sid, replayBranch(ctx.sessionManager.getBranch()));
-    boards.setForeground(sid);
-    if (isHalted(boards.get(sid))) {
-      reapHaltedLeftovers(haltDeps());                           // §16.8.5：崩溃后补杀残留
-    }
-    runSweep();
+    openJobs(runDir(cwd));
+    batch(() => {
+      const loaded = jobs.load();
+      degradedNote = loaded.note;
+      if (loaded.degraded) notify(loaded.note ?? "sidecar 降级，已从空开始", "error");
+      const runningOnLoad = jobs.all().filter((j) => j.status === "running").map((j) => j.id);
+      const recoveredCount = recoverJobs(jobs, Date.now());
+      if (recoveredCount > 0) jobs.save();
+      recovered.clear();
+      for (const job of jobs.all()) {
+        if (job.status === "running") recovered.add(job.id);   // 由单 timer 探活，不另起每作业 3s 轮询
+      }
+      boards.replace(sid, replayBranch(ctx.sessionManager.getBranch()));
+      lastPersisted = boards.get(sid);                          // 分支里已有快照，无需重复 append
+      boards.setForeground(sid);
+      if (isHalted(boards.get(sid))) {
+        reapHaltedLeftovers(haltDeps());                           // §16.8.5：崩溃后补杀残留
+      }
+      // 恢复时已消失的作业补走退出路径：fpEnd / autofill / finalize 不与正常运行分叉（A2）
+      for (const id of runningOnLoad) {
+        const job = jobs.get(id);
+        if (job?.status === "failed") processJobExit(job);
+      }
+      runSweep();
+    });
     refreshOverlay();
     refreshTimer();
   };
@@ -330,6 +422,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     if (d.kind !== "deliver") return;
     persistCounters(board, d.counters);
     markSent(jobs, d.roots, d.wakeId, Date.now());
+    saves.flush();
     sendWake(d.text, d.wakeId, d.roots);
   };
 
@@ -354,6 +447,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     if (d.kind !== "deliver") return undefined;
     persistCounters(board, d.counters);
     markSent(jobs, d.roots, d.wakeId, Date.now());
+    saves.flush();
     ackTracker.expectBoundary(d.wakeId, d.roots);
     return {
       entries: [{
@@ -370,7 +464,10 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     cwd: () => cwd,
     board: () => boards.get(sid),
     commit: (state) => boards.commit(sid, state),
-    appendEntry: (type, data) => pi.appendEntry(type, data),
+    appendEntry: (type, data) => {
+      pi.appendEntry(type, data);
+      if (type === BOARD_CUSTOM_TYPE) lastPersisted = boards.get(sid);   // 工具已自写快照
+    },
     ruleCtx,
     get jobs() { return jobs; },
     get cfg() { return getCfg(); },
@@ -396,8 +493,10 @@ export default function vigilTodo(pi: ExtensionAPI): void {
         try {
           return await def.execute(params as unknown as Record<string, unknown>) as never;
         } finally {
+          persistIfChanged();
           refreshOverlay();
           refreshTimer();
+          saves.flush();
         }
       },
     } as ToolDefinition);
@@ -422,15 +521,14 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     async (args: string, ctx: ExtensionCommandContext): Promise<void> => {
       activeCtx = ctx;
       initSession(ctx);
-      run(args.trim(), ctx);
+      batch(() => run(args.trim(), ctx));
     };
 
   if (!conflict) {
     registerTools(DEFAULT_GUIDANCE);
 
-    pi.registerCommand("vigil-todo", {
-      description: "vigil-todo 面板 / halt / resume / doctor",
-      handler: commandHandler((arg, ctx) => {
+    const panelHint = "halt 停 · resume 继续 · doctor 自检 · /todos 全量 · /bg 作业";
+    const panelHandler = commandHandler((arg, ctx) => {
         if (arg === "halt") {
           halt(haltDeps());
           persistBoard(boards.get(sid));
@@ -471,17 +569,26 @@ export default function vigilTodo(pi: ExtensionAPI): void {
               maxConcurrentJobs: getCfg().maxConcurrentJobs }));
           return;
         }
-        output(ctx, renderTodos(boards.get(sid), jobs));
-      }),
+        output(ctx, `${renderTodos(boards.get(sid), jobs)}\n${panelHint}`);
+    });
+
+    pi.registerCommand("vigil-todo", {
+      description: "任务面板与控制：无参数看板 + 快捷提示；halt 立即停止全部后台工作；resume 继续；doctor 自检。短别名 /vt",
+      handler: panelHandler,
+    });
+
+    pi.registerCommand("vt", {
+      description: "/vigil-todo 短别名：halt 一键停 · resume 继续 · doctor 自检",
+      handler: panelHandler,
     });
 
     pi.registerCommand("todos", {
-      description: "列出全部任务（exit code / fp 下钻）",
+      description: "列出全部任务（含 exit code / fp 下钻）。想看后台作业用 /bg",
       handler: commandHandler((_arg, ctx) => output(ctx, renderTodos(boards.get(sid), jobs))),
     });
 
     pi.registerCommand("bg", {
-      description: "列出后台作业；/bg k <id> 两步确认；/bg tail <id> 看日志尾",
+      description: "后台作业列表；/bg k <id> 两步确认后中止整条链；/bg tail <id> 看日志尾",
       handler: commandHandler((arg, ctx) => {
         if (arg.startsWith("k ")) {
           const [id, confirm] = arg.slice(2).trim().split(/\s+/);
@@ -540,6 +647,28 @@ export default function vigilTodo(pi: ExtensionAPI): void {
         },
       });
       collapseRegistered = true;
+    } catch { /* 非法按键配置不致命 */ }
+  };
+
+  let haltRegistered = false;
+  const registerHaltShortcut = (): void => {
+    if (haltRegistered) return;
+    const haltKey = getCfg().haltKey;
+    if (haltKey === "off") return;
+    try {
+      pi.registerShortcut(haltKey as Parameters<ExtensionAPI["registerShortcut"]>[0], {
+        description: "vigil-todo: halt all background work",
+        handler: (ctx) => {
+          activeCtx = ctx;
+          initSession(ctx);
+          halt(haltDeps());
+          persistBoard(boards.get(sid));
+          saves.flush();
+          refreshTimer();
+          refreshOverlay();
+        },
+      });
+      haltRegistered = true;
     } catch { /* 非法按键配置不致命 */ }
   };
 
@@ -616,6 +745,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     const rebuild = (_event: unknown, ctx: ExtensionContext): void => {
       initSession(ctx);
       boards.replace(sid, replayBranch(ctx.sessionManager.getBranch()));
+      lastPersisted = boards.get(sid);
       runSweep();
       refreshOverlay();
     };
@@ -623,8 +753,11 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     pi.on("session_tree", rebuild);
 
     pi.on("session_shutdown", (_event, ctx) => {
+      flushExitQueue();                      // 关闭前处理完排队退出
       if (timer) { clearInterval(timer); timer = undefined; }
       if (mergeTimer) { clearTimeout(mergeTimer); mergeTimer = undefined; }
+      saves.flush();
+      if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, undefined);
       if (!sid) return;
       boards.evict(sid);
       recovered.clear();
@@ -646,6 +779,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     registerTools(getGuidance());           // 配置覆盖的指引（与加载期默认不同才重注册）
     wire();
     registerCollapseShortcut();
+    registerHaltShortcut();
     refreshOverlay();
   });
 }

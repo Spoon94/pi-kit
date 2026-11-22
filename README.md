@@ -38,14 +38,18 @@ park      todo({action:"update", id, status:"parked", reason:"…"})
 
 | 命令 | 作用 |
 |---|---|
-| `/vigil-todo` | 全量任务列表 |
+| `/vigil-todo` 或 `/vt` | 看板 + 一行快捷提示（halt/resume/doctor 不必记） |
 | `/vigil-todo halt` | 强制中断：停止自主推进、杀本会话作业、受影响任务 parked |
 | `/vigil-todo resume` | 解除中断（不重置 turnsUsed） |
 | `/vigil-todo doctor` | 冲突 / sidecar 降级 / halted / purged / 超期 / 无作业 in_progress |
 | `/todos` | 逐条任务（exit code + fp 下钻） |
 | `/bg` | 作业列表；`/bg k <id>` 两步确认中止链；`/bg tail <id>` 看日志尾 |
 
-折叠快捷键默认 `ctrl+shift+t`（`off` 关闭）。
+状态栏常驻显示 `vigil ● N jobs` / `vigil ⚠ N parked` / `vigil ⏸ halted` / `vigil ✓ done/total`，空闲时自动清空。
+
+折叠快捷键默认 `ctrl+shift+t`，一键中断默认 `alt+h`（两者都可用 `off` 关闭，需 `/reload`）。
+
+模型侧触发：用户说「后台跑 / 我去睡 / 批量 / 长任务 / 跑一晚上」时，指引要求模型主动建 todo 并 `bg_run`，不必点名工具；随时可用 `/vt halt` 一键刹车。
 
 ## 配置
 
@@ -59,12 +63,13 @@ park      todo({action:"update", id, status:"parked", reason:"…"})
 | `staleReverify` | 1 |
 | `maxTurns` | 50 |
 | `maxConcurrentJobs` | 10 |
-| `completedTtlMs` | 7 天 |
+| `completedTtlMs` | 7 天（另有 2000 条终态记录硬上限，防 sidecar 无界增长） |
 | `taskRetentionMs` | 0（关闭自动清理） |
 | `tailLines` / `maxTailBytes` | 20 / 8192 |
 | `maxWidgetLines` | 12 |
 | `wakeMergeMs` | 250 |
 | `notifyRetryMs` | 10min |
+| `collapseKey` / `haltKey` | 折叠键 / 一键中断键（默认 `alt+h`，`off` 关闭） |
 
 ## 开发
 

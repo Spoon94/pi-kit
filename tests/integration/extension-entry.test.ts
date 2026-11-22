@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import vigilTodo from "../../extensions/vigil-todo.js";
+import { replayBranch } from "../../src/board/replay.js";
 import { emptyBoard, type BoardState } from "../../src/board/types.js";
 import { createJobStore, runDir } from "../../src/jobs/store.js";
 import { readStartStamp } from "../../src/jobs/spawn.js";
@@ -46,16 +47,22 @@ function makeHarness(
 ) {
   const handlers = new Map<string, Handler[]>();
   const commands = new Map<string, (args: string, ctx: any) => unknown>();
+  const commandDefs = new Map<string, any>();
   const toolDefs = new Map<string, any>();
   const shortcuts = new Map<string, (ctx: any) => unknown>();
   const widgets: (string | undefined)[] = [];
+  const statuses: (string | undefined)[] = [];
   const sent: any[] = [];
   const notifications: string[] = [];
   let isIdle = idle;
   const hasUI = opts.hasUI ?? false;
   const ctx = {
     cwd, hasUI, mode: "text",
-    ui: { notify: (msg: string) => { notifications.push(msg); }, setWidget: (key?: string) => { widgets.push(key); } },
+    ui: {
+      notify: (msg: string) => { notifications.push(msg); },
+      setWidget: (key?: string) => { widgets.push(key); },
+      setStatus: (_key: string, text?: string) => { statuses.push(text); },
+    },
     isIdle: () => isIdle,
     executeTool: opts.executeTool ?? (async () => ({
       isError: false,
@@ -76,7 +83,7 @@ function makeHarness(
       return () => {};
     },
     registerTool: (def: any) => { toolDefs.set(def.name, def); },
-    registerCommand: (name: string, opts: any) => { commands.set(name, opts.handler); },
+    registerCommand: (name: string, opts: any) => { commands.set(name, opts.handler); commandDefs.set(name, opts); },
     registerShortcut: (key: string, options: any) => {
       if (opts.shortcutThrows) throw new Error("invalid key");
       shortcuts.set(key, options.handler);
@@ -108,7 +115,7 @@ function makeHarness(
   };
   const setIdle = (v: boolean) => { isIdle = v; };
   return {
-    api, emit, runCommand, runTool, sent, notifications, toolDefs, shortcuts, widgets, setIdle, ctx,
+    api, emit, runCommand, runTool, sent, notifications, toolDefs, shortcuts, widgets, statuses, commandDefs, setIdle, ctx,
   };
 }
 
@@ -419,6 +426,8 @@ it("恢复作业并入单 timer，不产生每作业 3s 轮询（MAJOR #4）", a
   vigilTodo(h.api);
   await h.emit("session_start", { type: "session_start", reason: "startup" });
   expect(vi.getTimerCount()).toBe(1);   // 只有扩展的单 timer
+  await vi.advanceTimersByTimeAsync(1000);   // 非 halted 的正常探活 tick 也走 runSweep/gc
+  expect(vi.getTimerCount()).toBe(1);
 });
 
 it("halted 时 recovered 探活仍执行，残留退出不被拖到 resume 后（MINOR）", async () => {
@@ -643,7 +652,7 @@ it("启动冲突自检：旧包占位时 notify error 且不 wire", async () => 
   expect(h.notifications.join("\n")).toContain("不注册事件处理器");
 });
 
-it("collapseKey=off 时不注册快捷键", async () => {
+it("collapseKey=off 只关折叠键，haltKey 默认仍注册（C4）", async () => {
   const home = mkdtempSync(join(tmpdir(), "vigil-ext-cfg-"));
   mkdirSync(join(home, "pi-kit"), { recursive: true });
   writeFileSync(join(home, "pi-kit", "config.json"), JSON.stringify({ collapseKey: "off" }));
@@ -653,7 +662,102 @@ it("collapseKey=off 时不注册快捷键", async () => {
   const h = makeHarness(cwd, [snapshot(emptyBoard())], true);
   vigilTodo(h.api);
   await h.emit("session_start", { type: "session_start", reason: "startup" });
-  expect(h.shortcuts.size).toBe(0);
+  expect([...h.shortcuts.keys()]).toEqual(["alt+h"]);
+});
+
+it("haltKey=off 时可关闭一键中断（C4）", async () => {
+  const home = mkdtempSync(join(tmpdir(), "vigil-ext-cfg-"));
+  mkdirSync(join(home, "pi-kit"), { recursive: true });
+  writeFileSync(join(home, "pi-kit", "config.json"), JSON.stringify({ haltKey: "off" }));
+  process.env.XDG_CONFIG_HOME = home;
+
+  const h = makeHarness(mkdtempSync(join(tmpdir(), "vigil-ext-")), [snapshot(emptyBoard())], true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  expect(h.shortcuts.size).toBe(1);          // 只剩折叠键
+  expect(h.shortcuts.has("alt+h")).toBe(false);
+});
+
+it("C4 halt 快捷键真实中断并落快照", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  setupJobs(cwd, [job({
+    id: "R", status: "failed", exitCode: 1, endedAt: 2, taskId: 1, sessionId: "S",
+    retryAt: Date.now() + 60_000, finalized: false, evidenceApplied: true, finalResult: undefined,
+  })]);
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "跑", status: "in_progress", jobs: ["R"], inProgressSince: 0 }];
+  b.nextId = 2;
+  const branch: unknown[] = [snapshot(b)];
+  const h = makeHarness(cwd, branch, true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+
+  await h.shortcuts.get("alt+h")!(h.ctx);
+  const last = (branch.filter((e: any) => e?.customType === "rpiv-todo-state") as any[]).at(-1)?.data;
+  expect(last.counters.halted).toBe(true);
+  expect(last.tasks[0].status).toBe("parked");
+});
+
+it("C1/C3/C6：/vt 等价 /vigil-todo，无参数带快捷提示，命令描述自文档化", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "a", status: "pending" }];
+  b.nextId = 2;
+  const branch: unknown[] = [snapshot(b)];
+  const h = makeHarness(cwd, branch, true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+
+  expect([...h.commandDefs.keys()].sort()).toEqual(["bg", "todos", "vigil-todo", "vt"]);
+  await h.runCommand("vt", "halt");
+  expect((branch.filter((e: any) => e?.customType === "rpiv-todo-state") as any[]).at(-1)?.data.counters.halted).toBe(true);
+  await h.runCommand("vt", "resume");
+  await h.runCommand("vt", "");
+  expect(h.notifications.at(-1)).toContain("halt 停");
+  expect(h.notifications.at(-1)).toContain("resume 继续");
+  await h.runCommand("vigil-todo", "");
+  expect(h.notifications.at(-1)).toContain("doctor 自检");
+
+  expect(h.commandDefs.get("vigil-todo").description).toContain("halt 立即停止");
+  expect(h.commandDefs.get("vigil-todo").description).toContain("/vt");
+  expect(h.commandDefs.get("vt").description).toContain("/vigil-todo");
+  expect(h.commandDefs.get("todos").description).toContain("/bg");
+  expect(h.commandDefs.get("bg").description).toContain("/bg k <id>");
+});
+
+it("C2 状态栏随看板刷新，空闲清空，shutdown 移除", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const b = emptyBoard();
+  b.tasks = [
+    { id: 1, subject: "a", status: "completed", statusSince: 1 },
+    { id: 2, subject: "b", status: "pending" },
+  ];
+  b.nextId = 3;
+  const h = makeHarness(cwd, [snapshot(b)], true, "S", { hasUI: true });
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  expect(h.statuses.at(-1)).toBe("vigil ✓ 1/2");
+
+  await h.runCommand("vigil-todo", "halt");
+  expect(h.statuses.at(-1)).toBe("vigil ⏸ halted");
+  await h.runCommand("vigil-todo", "resume");
+  expect(h.statuses.at(-1)).toBe("vigil ✓ 1/2");
+
+  await h.emit("session_shutdown", { type: "session_shutdown" });
+  expect(h.statuses.at(-1)).toBeUndefined();
+
+  const runningCwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const stamp = readStartStamp(process.pid);
+  setupJobs(runningCwd, [job({
+    id: "R", pid: process.pid, startStamp: stamp, status: "running", endedAt: null,
+    exitCode: null, exitCodeKnown: false, finalized: false, finalResult: undefined,
+    taskId: undefined, sessionId: "S",
+  })]);
+  const h2 = makeHarness(runningCwd, [snapshot(emptyBoard())], true, "S", { hasUI: true });
+  vigilTodo(h2.api);
+  await h2.emit("session_start", { type: "session_start", reason: "startup" });
+  expect(h2.statuses.at(-1)).toBe("vigil ● 1 job");
+  expect(vi.getTimerCount()).toBe(1);       // 状态栏复用既有 tick，不新增定时器
 });
 
 it("配置缺失/损坏/不可序列化 settings 时仍能启动", async () => {
@@ -805,6 +909,81 @@ it("shutdown 清理单 timer 与合并 timer", async () => {
   await waitForFinalized(cwd, 1);
   await h.emit("session_shutdown", { type: "session_shutdown" });
   expect(vi.getTimerCount()).toBe(0);
+});
+
+it("A1 respawn 失败的 park 落入分支快照，重放读回 parked（磁盘级）", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  setupJobs(cwd, [job({
+    id: "R", rootId: "R", command: "", status: "failed", exitCode: 1, endedAt: 2,
+    retryAt: 0, finalized: false, evidenceApplied: false, notifyState: "acked",
+    finalResult: undefined, taskId: 1, sessionId: "S",
+  })]);
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "跑", status: "in_progress", jobs: ["R"], inProgressSince: 0 }];
+  b.nextId = 2;
+  const branch: unknown[] = [snapshot(b)];
+  const h = makeHarness(cwd, branch, true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+
+  const replay = replayBranch(branch as never[]);
+  expect(replay.tasks[0].status).toBe("parked");
+  expect(replay.tasks[0].park?.reason).toBe("spawn failed");
+  const store = createJobStore(runDir(cwd));
+  store.load();
+  expect(store.get("R")?.retryAt).toBeUndefined();
+});
+
+it("A2 非 owner 残留作业退出：fpEnd 落盘（autofill/finalize 均 early-return）", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  setupJobs(cwd, [job({
+    id: "R", pid: 999_999, status: "running", endedAt: null, exitCode: null, exitCodeKnown: false,
+    finalized: false, finalResult: undefined, taskId: undefined, sessionId: "OTHER",
+    cwd: process.cwd(), fpStart: "abc",     // 真实 git 工作区，fpEnd 可采集
+  })]);
+  const h = makeHarness(cwd, [snapshot(emptyBoard())], true, "S");
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  await vi.advanceTimersByTimeAsync(1000);
+  const store = createJobStore(runDir(cwd));
+  store.load();
+  expect(store.get("R")?.status).toBe("failed");
+  expect(typeof store.get("R")?.fpEnd).toBe("string");
+});
+
+it("B3 shutdown 不杀作业（跨重启语义），但记录完整、下一实例可 halt 到进程消失", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const child = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+  const pid = child.pid!;
+  try {
+    const stamp = readStartStamp(pid);
+    setupJobs(cwd, [job({
+      id: "R", pid, startStamp: stamp, status: "running", endedAt: null,
+      exitCode: null, exitCodeKnown: false, finalized: false, finalResult: undefined,
+      taskId: 1, sessionId: "S",
+    })]);
+    const h = makeHarness(cwd, [snapshot(emptyBoard())], true);
+    vigilTodo(h.api);
+    await h.emit("session_start", { type: "session_start", reason: "startup" });
+    await h.emit("session_shutdown", { type: "session_shutdown", reason: "quit" });
+
+    // 不是孤儿：仍由 sidecar 的 pid + startStamp 跟踪
+    expect(() => process.kill(pid, 0)).not.toThrow();
+    const store = createJobStore(runDir(cwd));
+    store.load();
+    expect(store.get("R")?.status).toBe("running");
+    expect(store.get("R")?.startStamp).toBe(stamp);
+
+    const h2 = makeHarness(cwd, [snapshot(emptyBoard())], true);
+    vigilTodo(h2.api);
+    await h2.emit("session_start", { type: "session_start", reason: "resume" });
+    const exited = new Promise<void>((res) => child.once("exit", () => res()));
+    await h2.runCommand("vt", "halt");
+    await exited;
+    expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+  } finally {
+    if (child.exitCode === null) child.kill("SIGKILL");
+  }
 });
 
 it("finalizeTerminated 对 killed 链写 note=killed", async () => {

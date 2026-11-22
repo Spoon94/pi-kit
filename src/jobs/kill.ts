@@ -16,6 +16,12 @@ export function requestKill(store: JobStore, idOrRoot: string, by: "self" | "ext
   return { killed, cancelledBackoff };
 }
 
+/** 同步强杀：进程组优先，用于 spawn 后登记失败等异常路径（B3）。 */
+export function killNow(pid: number): void {
+  try { process.kill(-pid, "SIGKILL"); return; } catch { /* 无进程组 */ }
+  try { process.kill(pid, "SIGKILL"); } catch { /* 已退出 */ }
+}
+
 /** SIGTERM → 等 timeoutMs → SIGKILL；进程组优先。 */
 export async function escalate(pid: number, timeoutMs: number): Promise<void> {
   const send = (sig: NodeJS.Signals) => {

@@ -14,7 +14,7 @@
 ## 契约
 
 - **类型与范围**：每个键声明类型与最小值（见下表），`CONFIG_KEYS` 是唯一元数据来源，`default` 直接引用 `DEFAULTS`，文档、校验、默认值不会三处漂移。
-- **热更新矩阵**：除 `collapseKey` 外全部即时生效（每次判定读 mtime 缓存）；`collapseKey` 涉及快捷键注册，需要 `/reload`。
+- **热更新矩阵**：除 `collapseKey`、`haltKey` 外全部即时生效（每次判定读 mtime 缓存）；两个快捷键涉及注册，需要 `/reload`。
 - **失败方向**：配置问题永远不会让扩展崩溃或禁用；最坏情况是某个键回到默认值。
 
 ## 全键表
@@ -33,10 +33,13 @@
 | `maxTailBytes` | int | 1 | 1048576（1MB） | 8192 | 即时（下次尾读） |
 | `maxWidgetLines` | int | 3 | 200 | 12 | 即时（下次渲染） |
 | `collapseKey` | string | — | — | `ctrl+shift+t` / `off` | **需 `/reload`**（快捷键只注册一次） |
+| `haltKey` | string | — | — | `alt+h` / `off` | **需 `/reload`**（一键强制中断快捷键） |
 | `notifyRetryMs` | int | 1 | 86400000（24h） | 600000（10 分钟） | 即时（下次补偿扫描） |
 | `wakeMergeMs` | int | 0 | 60000（1min） | 250 | 即时（下次唤醒合并窗口） |
 
 超出最小值或最大值的键**逐项退回默认**，不影响其他键；上限用于防止 `maxTailBytes` 之类配置造成 TB 级缓冲/读盘自伤。
+
+`jobs.json` 另有不可配置的 **2000 条终态记录硬上限**（约 1.4 MB）：sweep 的 GC 在 TTL 之外只回收「已终结 + 已投影 + 已 ack/self」的完整链，running / 退避 / 未投影 / 未 ack 的记录永不因上限被删。
 
 ## 工具指引覆盖（§19.2）
 
@@ -73,8 +76,9 @@
   "retries": 2,
   "maxTurns": 30,
   "taskRetentionMs": 604800000,
-  "collapseKey": "off"
+  "collapseKey": "off",
+  "haltKey": "alt+h"
 }
 ```
 
-`collapseKey: "off"` 表示不注册折叠快捷键（该键仍需 `/reload` 生效）。
+`collapseKey: "off"` 表示不注册折叠快捷键，`haltKey: "off"` 同理关闭一键中断（两个键都需 `/reload` 生效）。

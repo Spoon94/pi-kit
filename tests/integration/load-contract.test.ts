@@ -100,7 +100,7 @@ it("工厂体加载期只调用注册类 API，action 类必须等到 session_st
   expect(() => vigilTodo(h.api as never)).not.toThrow();
   expect(h.actionCalls).toEqual([]);
   expect(h.registered.tools).toEqual(["todo", "bg_run", "bg_list", "bg_kill"]);
-  expect(h.registered.commands).toEqual(["vigil-todo", "todos", "bg"]);
+  expect(h.registered.commands).toEqual(["vigil-todo", "vt", "todos", "bg"]);
   expect(h.registered.shortcuts).toEqual([]);            // 快捷键延到 session_start
   expect(h.registered.handlers.has("session_start")).toBe(true);
 
@@ -109,5 +109,5 @@ it("工厂体加载期只调用注册类 API，action 类必须等到 session_st
   await h.emit("session_start", { type: "session_start", reason: "startup" });
   expect(h.actionCalls).toContain("getAllTools");
   expect(h.actionCalls).toContain("getSettings");
-  expect(h.registered.shortcuts).toHaveLength(1);
+  expect(h.registered.shortcuts).toHaveLength(2);        // 折叠 + 一键中断
 });

@@ -3,6 +3,7 @@ export interface VigilConfig {
   maxTurns: number; maxConcurrentJobs: number; completedTtlMs: number;
   taskRetentionMs: number;
   tailLines: number; maxTailBytes: number; maxWidgetLines: number; collapseKey: string;
+  haltKey: string;
   notifyRetryMs: number;
   wakeMergeMs: number;
 }
@@ -12,6 +13,7 @@ export const DEFAULTS: VigilConfig = {
   maxTurns: 50, maxConcurrentJobs: 10, completedTtlMs: 7 * 24 * 3600_000,
   taskRetentionMs: 0,
   tailLines: 20, maxTailBytes: 8192, maxWidgetLines: 12, collapseKey: "ctrl+shift+t",
+  haltKey: "alt+h",
   notifyRetryMs: 600_000,
   wakeMergeMs: 250,
 };
@@ -32,6 +34,7 @@ export const CONFIG_KEYS: Record<keyof VigilConfig, { type: "int" | "int[]" | "s
   maxTailBytes: { type: "int", min: 1, max: 1_048_576, reload: false, default: DEFAULTS.maxTailBytes },
   maxWidgetLines: { type: "int", min: 3, max: 200, reload: false, default: DEFAULTS.maxWidgetLines },
   collapseKey: { type: "string", reload: true, default: DEFAULTS.collapseKey },
+  haltKey: { type: "string", reload: true, default: DEFAULTS.haltKey },
   notifyRetryMs: { type: "int", min: 1, max: 86_400_000, reload: false, default: DEFAULTS.notifyRetryMs },
   wakeMergeMs: { type: "int", min: 0, max: 60_000, reload: false, default: DEFAULTS.wakeMergeMs },
 };
@@ -59,8 +62,10 @@ export function resolveConfig(s: { file?: unknown; settings?: unknown; legacy?: 
       }
     }
   }
-  const key = pick("collapseKey");
-  if (typeof key === "string" && key.trim() !== "") out.collapseKey = key.trim().toLowerCase();
+  for (const k of ["collapseKey", "haltKey"] as const) {
+    const key = pick(k);
+    if (typeof key === "string" && key.trim() !== "") out[k] = key.trim().toLowerCase();
+  }
   return out;
 }
 

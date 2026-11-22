@@ -37,6 +37,7 @@ it("F120：四个工具都有 promptSnippet/promptGuidelines，合起来覆盖�
   for (const needle of [
     "bg_run", "bash", "WIP=1", "park", "reason", "evidence", 'accept:"stale"',
     'scope:"all"', "force", "next", "wake",
+    "sleep", "overnight", "background", "/vt halt",
   ]) expect(text, needle).toContain(needle);
   expect(DEFAULT_GUIDANCE.promptGuidelines.length).toBeGreaterThanOrEqual(6);
 });

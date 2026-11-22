@@ -10,6 +10,9 @@ export function projectHash(cwd: string): string {
 }
 export const runDir = (cwd: string): string => join("/tmp/bg-run", projectHash(cwd));
 
+/** 终态记录硬上限：7 天 TTL 在高吞吐下仍可累积数万条（见 B4），按完整链最旧优先回收。 */
+export const MAX_JOB_RECORDS = 2000;
+
 const isJob = (v: unknown): v is Job => {
   if (typeof v !== "object" || v === null) return false;
   const j = v as Record<string, unknown>;
@@ -62,15 +65,30 @@ export function createJobStore(dir: string) {
       jobs = new Map(list.map((j) => [j.id, j]));
       return { degraded: false };
     },
-    gc: (ttlMs: number, now: number): number => {
+    gc: (ttlMs: number, now: number, maxRecords = MAX_JOB_RECORDS): number => {
       let removed = 0;
+      const drop = (j: Job): void => {
+        jobs.delete(j.id);
+        removed++;
+        try { unlinkSync(j.logPath); } catch { /* 日志可能已被删 */ }
+      };
       for (const j of [...jobs.values()]) {
         if (j.status === "running" || j.retryAt != null) continue;
-        if (j.endedAt != null && now - j.endedAt >= ttlMs) {
-          jobs.delete(j.id);
-          removed++;
-          try { unlinkSync(j.logPath); } catch { /* 日志可能已被删 */ }
-        }
+        if (j.endedAt != null && now - j.endedAt >= ttlMs) drop(j);
+      }
+      if (jobs.size <= maxRecords) return removed;
+      // 只回收「整条链已终结 + 已投影 + 已 ack/self」的记录；未终结链留给 finalize
+      const doneRoots = new Set<string>();
+      for (const j of jobs.values()) {
+        if (j.id === j.rootId && j.finalized && j.evidenceApplied
+          && (j.notifyState === "acked" || j.finalResult?.trigger === "self")) doneRoots.add(j.id);
+      }
+      const oldest = [...jobs.values()]
+        .filter((j) => doneRoots.has(j.rootId) && j.status !== "running" && j.retryAt == null)
+        .sort((a, b) => (a.endedAt ?? a.startedAt) - (b.endedAt ?? b.startedAt));
+      for (const j of oldest) {
+        if (jobs.size <= maxRecords) break;
+        drop(j);
       }
       return removed;
     },

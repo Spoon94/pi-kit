@@ -48,8 +48,26 @@ it("有未投递 chainFinal → 投递并推进 watermark（F59）", () => {
 it("同一证据第二次不再投递（F59/F7）", () => {
   const a = tryDeliver(input());
   if (a.kind !== "deliver") throw new Error("expected deliver");
+  markSent(jobs, a.roots, a.wakeId, 100);        // 生产路径：投递后必写 sent
   board = { ...board, counters: a.counters };
   expect(tryDeliver(input({ trigger: "boundary", modelAdvanced: true })).kind).toBe("none");
+});
+
+it("时钟回拨：watermark 高于证据 at，但 root 从未投递 ⇒ 仍投递（A3）", () => {
+  board.counters.wakeWatermark = 5000;
+  const r = tryDeliver(input());
+  expect(r.kind).toBe("deliver");
+  if (r.kind !== "deliver") return;
+  expect(r.counters.wakeWatermark).toBe(500);    // 水印取 max，不回退
+  markSent(jobs, r.roots, r.wakeId, 100);
+  board = { ...board, counters: r.counters };
+  expect(tryDeliver(input()).kind).toBe("none");
+});
+
+it("未知 ref 仍受 watermark 约束（A3 保守）", () => {
+  board.counters.wakeWatermark = 5000;
+  board.tasks[0].evidence = [ev({ ref: "GHOST", at: 400 })];
+  expect(tryDeliver(input()).kind).toBe("none");
 });
 
 it("tool 证据不进 undelivered（F44）", () => {
@@ -76,6 +94,7 @@ it("turnsUsed 达上限第一行硬停（F24/F43）", () => {
 it("模型无动作 + next 存在 → re-nudge 恰一次（F23）", () => {
   const a = tryDeliver(input());
   if (a.kind !== "deliver") throw new Error("expected deliver");
+  markSent(jobs, a.roots, a.wakeId, 100);
   board = { ...board, counters: a.counters };
   const b = tryDeliver(input({ trigger: "boundary", modelAdvanced: false }));
   expect(b.kind).toBe("deliver");
@@ -89,6 +108,7 @@ it("模型无动作 + next 存在 → re-nudge 恰一次（F23）", () => {
 it("模型已推进则不 re-nudge（F23）", () => {
   const a = tryDeliver(input());
   if (a.kind !== "deliver") throw new Error("expected deliver");
+  markSent(jobs, a.roots, a.wakeId, 100);
   board = { ...board, counters: a.counters };
   expect(tryDeliver(input({ trigger: "boundary", modelAdvanced: true })).kind).toBe("none");
 });

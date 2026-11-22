@@ -35,8 +35,11 @@ describe("resolveConfig", () => {
     expect(c.collapseKey).toBe(DEFAULTS.collapseKey);
   });
 
-  it("collapseKey 允许 off 哨兵", () => {
+  it("collapseKey / haltKey 允许 off 哨兵（C4）", () => {
     expect(resolveConfig({ file: { collapseKey: "off" } }).collapseKey).toBe("off");
+    expect(resolveConfig({ file: { haltKey: "off" } }).haltKey).toBe("off");
+    expect(resolveConfig({ file: { haltKey: " alt+H " } }).haltKey).toBe("alt+h");
+    expect(resolveConfig({ file: { haltKey: "" } }).haltKey).toBe(DEFAULTS.haltKey);
   });
 });
 
@@ -50,14 +53,18 @@ it("每个键的 default 与 DEFAULTS 一致（文档不会漂移）", () => {
   }
 });
 
-it("只有 collapseKey 需要 reload", () => {
+it("只有 collapseKey / haltKey 需要 reload", () => {
   const needReload = Object.entries(CONFIG_KEYS).filter(([, m]) => m.reload).map(([k]) => k);
-  expect(needReload).toEqual(["collapseKey"]);
+  expect(needReload).toEqual(["collapseKey", "haltKey"]);
 });
 
 it("taskRetentionMs 默认 0（自动删任务默认关闭）", () => {
   expect(DEFAULTS.taskRetentionMs).toBe(0);
   expect(resolveConfig({}).taskRetentionMs).toBe(0);
+});
+
+it("合法的 int[] 覆盖生效（不是静默忽略）", () => {
+  expect(resolveConfig({ file: { retryDelaysMs: [0, 1000] } }).retryDelaysMs).toEqual([0, 1000]);
 });
 
 it("逐键非法值只影响该键，其他键仍生效", () => {

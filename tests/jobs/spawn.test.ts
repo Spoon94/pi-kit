@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { spawnJob, readStartStamp } from "../../src/jobs/spawn.js";
+import { spawnJob, readStartStamp, takeChild, trackSpawned } from "../../src/jobs/spawn.js";
 import { createMonitor } from "../../src/jobs/monitor.js";
 
 const dir = () => mkdtempSync(join(tmpdir(), "vigil-spawn-"));
@@ -51,6 +51,26 @@ it("无效 cwd 只返回错误，不产生未处理 error 事件（BLOCKER）", 
   const r = spawnJob({ command: "true", cwd: "/nonexistent-vigil-cwd" }, d, 1);
   expect(r.ok).toBe(false);
   await new Promise((res) => setTimeout(res, 50));
+});
+
+it("B3 登记失败即放弃子进程（异常路径不产生无主进程）", () => {
+  const d = dir();
+  const r = spawnJob({ command: "sleep 30", cwd: d }, d, 1);
+  if (!r.ok) throw new Error(r.error);
+  const abandoned: string[] = [];
+  let watched = false;
+  const res = trackSpawned(r.job, () => {}, {
+    put: () => { throw new Error("put boom"); },
+    save: () => {},
+    watch: () => { watched = true; },
+    abandon: (j) => abandoned.push(j.id),
+  });
+  expect(res.ok).toBe(false);
+  expect(res).toMatchObject({ error: expect.stringContaining("bookkeeping") });
+  expect(abandoned).toEqual([r.job.id]);
+  expect(watched).toBe(false);
+  takeChild(r.job.id);
+  if (r.child.pid) { try { process.kill(-r.child.pid, "SIGKILL"); } catch { /* 已清理 */ } }
 });
 
 it("readStartStamp 对无效 pid 返回 undefined", () => {

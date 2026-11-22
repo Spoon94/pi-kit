@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { expect, it } from "vitest";
-import { escalate, requestKill } from "../../src/jobs/kill.js";
+import { escalate, killNow, requestKill } from "../../src/jobs/kill.js";
 import { createJobStore } from "../../src/jobs/store.js";
 import type { Job } from "../../src/jobs/types.js";
 
@@ -105,4 +105,17 @@ it("F116 escalate：已退出进程不抛", async () => {
   const pid = child.pid!;
   await new Promise<void>((res) => child.once("exit", () => res()));
   await expect(escalate(pid, 100)).resolves.toBeUndefined();
+});
+
+it("killNow 对不存在的 pid 不抛（进程组与单 pid 两条兜底）", () => {
+  expect(() => killNow(999_999)).not.toThrow();
+});
+
+it("killNow 真杀进程组（B3 异常清理路径）", async () => {
+  const child = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+  const pid = child.pid!;
+  const exited = new Promise<void>((res) => child.once("exit", () => res()));
+  killNow(pid);
+  await exited;
+  expect(child.signalCode).toBe("SIGKILL");
 });

@@ -23,6 +23,7 @@ export const DEFAULT_GUIDANCE: ToolGuidance = {
     "Only mark completed with real evidence. Failures cannot be completed. accept:\"stale\" is an explicit, logged waiver.",
     "clear defaults to completed/deleted only. scope:\"all\" requires force:true and no running or backoff jobs.",
     "When woken, act on the message's next item directly; do not ask whether to continue.",
+    "If the user says they are going to sleep, wants an overnight/batch run, or asks for work to continue in the background, proactively create a todo and start bg_run without waiting for the tool name. Tell them `/vt halt` stops everything immediately.",
   ],
 };
 

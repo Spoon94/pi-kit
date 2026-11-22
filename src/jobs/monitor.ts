@@ -4,24 +4,26 @@ import type { JobStore } from "./store.js";
 import { readStartStamp, takeChild } from "./spawn.js";
 
 export function createMonitor() {
-  const fired = new Set<string>();
   const stops = new Map<string, () => void>();
   const handlers = new Map<string, (j: Job) => void>();
   const jobs = new Map<string, Job>();
 
   const emit = (id: string, code: number | null, signal?: string | null) => {
-    if (fired.has(id)) return;                       // F31：exit/close 只生效一次
-    fired.add(id);
     const j = jobs.get(id);
-    if (!j) return;
+    if (!j) return;                    // 已终结/未登记 ⇒ late duplicate 直接忽略（F31）
+    // 终结即释放本 job 的全部登记：长命会话不会随作业数线性增长（B1）
+    const handler = handlers.get(id);
+    const stop = stops.get(id);
+    jobs.delete(id);
+    handlers.delete(id);
+    stops.delete(id);
+    stop?.();
     j.exitCode = code;
     j.signal = signal ?? null;
     j.exitCodeKnown = code !== null;
     j.endedAt = Date.now();
     j.status = j.kill ? "killed" : code === 0 ? "completed" : "failed";
-    stops.get(id)?.();
-    stops.delete(id);
-    handlers.get(id)?.(j);
+    handler?.(j);
   };
 
   const attach = (job: Job, child: ChildProcess): () => void => {

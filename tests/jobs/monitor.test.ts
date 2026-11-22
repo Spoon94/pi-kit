@@ -25,6 +25,31 @@ it("同一 job 的 exit 与 close 只回调一次（F31 / Review Focus 3）", as
   mon.clearAll();
 });
 
+it("终结后释放 per-job 登记：late duplicate 仍被忽略（B1/F31）", () => {
+  const mon = createMonitor();
+  let calls = 0;
+  const j = base();
+  mon.watch(j, () => { calls++; });
+  expect(mon.pending()).toBe(1);
+  mon.__emitForTest(j.id, 0);
+  expect(calls).toBe(1);
+  expect(mon.pending()).toBe(0);
+  mon.__emitForTest(j.id, 0);          // close/error 双触发晚到
+  expect(calls).toBe(1);
+  mon.clearAll();
+});
+
+it("watch 收到已退出的 child ⇒ microtask 内回调一次", async () => {
+  const mon = createMonitor();
+  let calls = 0;
+  const fake = { exitCode: 0, signalCode: null, once: () => {}, off: () => {}, unref: () => {} };
+  mon.watch(base(), () => { calls++; }, fake as never);
+  await Promise.resolve();
+  expect(calls).toBe(1);
+  expect(mon.pending()).toBe(0);
+  mon.clearAll();
+});
+
 it("恢复态不伪造退出码（F5）", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "vigil-rec-")));
   s.put(base());

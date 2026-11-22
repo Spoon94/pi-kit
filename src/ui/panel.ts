@@ -7,6 +7,20 @@ import { formatElapsed } from "../lib/format.js";
 import { sanitizeMultiline, sanitizeTerminalText } from "../lib/sanitize.js";
 
 export const WIDGET_KEY = "vigil-todo";
+export const STATUS_KEY = "vigil-todo-status";
+
+/** 状态栏常驻指示（C2）；无任务无作业时清空，不占位。 */
+export function renderStatus(state: BoardState, jobs: JobStore): string | undefined {
+  if (state.counters.halted) return "vigil ⏸ halted";
+  const active = jobs.all().filter((j) => j.status === "running" || j.retryAt != null).length;
+  if (active > 0) return `vigil ● ${active} job${active === 1 ? "" : "s"}`;
+  const parked = state.tasks.filter((t) => t.status === "parked").length;
+  if (parked > 0) return `vigil ⚠ ${parked} parked`;
+  const visible = state.tasks.filter((t) => t.status !== "deleted");
+  if (visible.length === 0) return undefined;
+  const done = visible.filter((t) => t.status === "completed").length;
+  return `vigil ✓ ${done}/${visible.length}`;
+}
 
 /** 面板行按显示宽度（保守按字符数）截断，加省略号；/todos 全量视图不截断。 */
 export function truncateToWidth(value: string, width: number): string {

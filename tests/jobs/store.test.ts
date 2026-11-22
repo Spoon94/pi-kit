@@ -53,6 +53,31 @@ it("GC 只清超 TTL 的终态作业，running 永不清，并返回删除数", 
   expect(s.get("run")).toBeDefined();
 });
 
+it("B4 记录上限：TTL 未到时按最旧完整链回收，未终结/未 ack 的链绝不删", () => {
+  const d = dir(); const s = createJobStore(d);
+  for (let i = 0; i < 5; i++) {
+    const done = job(`R${i}`, {
+      endedAt: 10 + i, finalized: true, evidenceApplied: true, notifyState: "acked",
+    });
+    const child = job(`R${i}j2`, {
+      rootId: `R${i}`, endedAt: 10 + i, status: "failed",
+    });
+    s.put(done); s.put(child);
+  }
+  s.put(job("pending", { finalized: true, evidenceApplied: true, notifyState: "pending" }));
+  expect(s.gc(1e15, 0, 5)).toBe(6);
+  expect(s.all().map((j) => j.id).sort()).toEqual(["R3", "R3j2", "R4", "R4j2", "pending"]);
+});
+
+it("B4 上限不清 running / 退避 / 未投影的链", () => {
+  const d = dir(); const s = createJobStore(d);
+  s.put(job("run", { status: "running", endedAt: null, finalized: false }));
+  s.put(job("backoff", { retryAt: 1, finalized: false }));
+  s.put(job("unprojected", { finalized: true, evidenceApplied: false, notifyState: "acked" }));
+  expect(s.gc(1e15, 0, 1)).toBe(0);
+  expect(s.all()).toHaveLength(3);
+});
+
 it("isSafeLogPath 只允许 runDir 内路径（MINOR #2）", () => {
   const d = dir(); const s = createJobStore(d);
   writeFileSync(join(d, "a.log"), "x");

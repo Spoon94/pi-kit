@@ -20,6 +20,26 @@ export function takeChild(id: string): ChildProcess | undefined {
   return child;
 }
 
+export interface TrackDeps {
+  put(job: Job): void;
+  save(): void;
+  watch(job: Job, onExit: (j: Job) => void): void;
+  abandon(job: Job): void;
+}
+
+/** spawn 后的登记；任一步失败 ⇒ 放弃子进程（调用方负责杀），不留下无主进程（B3）。 */
+export function trackSpawned(job: Job, onExit: (j: Job) => void, d: TrackDeps): { ok: true } | { ok: false; error: string } {
+  try {
+    d.put(job);
+    d.save();
+    d.watch(job, onExit);
+    return { ok: true };
+  } catch (e) {
+    d.abandon(job);
+    return { ok: false, error: `spawn bookkeeping failed: ${String(e)}` };
+  }
+}
+
 export function readStartStamp(pid: number): string | undefined {
   try { return execFileSync("ps", ["-p", String(pid), "-o", "lstart="], { encoding: "utf8" }).trim() || undefined; }
   catch { return undefined; }

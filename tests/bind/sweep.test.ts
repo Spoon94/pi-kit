@@ -154,8 +154,22 @@ const countSaves = (store: ReturnType<typeof createJobStore>): (() => number) =>
 it("F123 空闲 sweepAll 零落盘（P1 性能回归）", () => {
   jobs.put(j("R", { attempt: 4, finalized: true, evidenceApplied: true, notifyState: "acked" }));
   const saves = countSaves(jobs);
-  expect(sweepAll(d)).toEqual({ respawned: 0, catchUp: [], retained: 0 });
+  expect(sweepAll(d)).toEqual({ respawned: 0, catchUp: [], retained: 0, boardDirty: false });
   expect(saves()).toBe(0);
+});
+
+it("A1 respawn 失败导致 parkTask 时上报 boardDirty", () => {
+  jobs.put(j("R", { retryAt: 500 }));
+  d.respawn = () => ({ ok: false });
+  const r = sweepAll(d);
+  expect(r.respawned).toBe(0);
+  expect(r.boardDirty).toBe(true);
+  expect(boards.get("S").tasks[0].status).toBe("parked");
+});
+
+it("A1 respawn 成功只改 sidecar，不上报 boardDirty", () => {
+  jobs.put(j("R", { retryAt: 500 }));
+  expect(sweepAll(d).boardDirty).toBe(false);
 });
 
 it("F123 到期 respawn 成功恰好落盘一次（P1）", () => {

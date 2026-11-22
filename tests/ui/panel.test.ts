@@ -6,7 +6,7 @@ import { emptyBoard, type Evidence, type Task } from "../../src/board/types.js";
 import type { Job } from "../../src/jobs/types.js";
 import { createJobStore } from "../../src/jobs/store.js";
 import { DEFAULTS } from "../../src/lib/config.js";
-import { layoutRows, renderDoctor, renderPanel, renderTodos } from "../../src/ui/panel.js";
+import { layoutRows, renderDoctor, renderPanel, renderStatus, renderTodos } from "../../src/ui/panel.js";
 
 const ev = (o: Partial<Evidence> = {}): Evidence => ({
   ok: true, kind: "job", origin: "async", chainFinal: true, at: 1, known: true, fp: "fresh", exitCode: 0, ref: "R", ...o,
@@ -50,6 +50,29 @@ it("超预算优先保 parked，截断给出 +N more parked（F25）", () => {
 
 it("空列表返回空数组（自动卸载）", () => {
   expect(renderPanel(emptyBoard(), jobs(), DEFAULTS)).toEqual([]);
+});
+
+it("C2 状态栏：进度 / 运行作业 / parked / halted / 空态清空", () => {
+  const empty = jobs();
+  expect(renderStatus(emptyBoard(), empty)).toBeUndefined();
+
+  const progress = b([done(1), { id: 2, subject: "p", status: "pending" }]);
+  expect(renderStatus(progress, empty)).toBe("vigil ✓ 1/2");
+
+  const parked = b([{ id: 1, subject: "p", status: "parked", park: { reason: "r", at: 1, from: "pending" } }]);
+  expect(renderStatus(parked, empty)).toBe("vigil ⚠ 1 parked");
+
+  const halted = { ...progress, counters: { ...progress.counters, halted: true } };
+  expect(renderStatus(halted, empty)).toBe("vigil ⏸ halted");
+
+  const running = jobs();
+  running.put({
+    id: "bg_x", label: "x", command: "true", logPath: "/tmp/x.log", cwd: "/tmp", pid: 1,
+    status: "running", exitCode: null, exitCodeKnown: false, startedAt: 1, endedAt: null,
+    fpVerdict: "unknown", interferers: [], rootId: "bg_x", attempt: 1,
+    evidenceApplied: false, notifyState: "pending",
+  });
+  expect(renderStatus(progress, running)).toBe("vigil ● 1 job");
 });
 
 it("/todos 逐条带 exit code 与 fp（F58 下钻）", () => {

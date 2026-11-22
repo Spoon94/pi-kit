@@ -11,6 +11,8 @@ export interface SweepDeps {
   respawn(req: SpawnRequest): { ok: boolean };
   notify(note: string): void;
   isIdle(): boolean;
+  /** board 被本函数修改后的同步回调；调用方据此持久化快照（A1）。 */
+  boardChanged?: () => void;
 }
 
 export function sweepRespawns(d: SweepDeps): number {
@@ -85,11 +87,15 @@ export function catchUpScan(d: SweepDeps): string[] {
 }
 
 export function sweepAll(d: SweepDeps) {
-  for (const id of catchUpScan(d)) projectFinal(id, d.jobs, d.boards, d.sessionId, d.now);
-  const respawned = sweepRespawns(d);
-  const catchUp = catchUpScan(d);
-  const retained = applyRetention(d);
-  return { respawned, catchUp, retained };
+  let boardDirty = false;
+  const dd: SweepDeps = { ...d, boardChanged: () => { boardDirty = true; } };
+  for (const id of catchUpScan(dd)) {
+    if (projectFinal(id, dd.jobs, dd.boards, dd.sessionId, dd.now)) boardDirty = true;
+  }
+  const respawned = sweepRespawns(dd);
+  const catchUp = catchUpScan(dd);
+  const retained = applyRetention(dd);
+  return { respawned, catchUp, retained, boardDirty };
 }
 
 /** 无 job 记录的终结路径：失败后直接把绑定任务 parked。 */
@@ -106,6 +112,7 @@ function parkTask(d: SweepDeps, taskId: number | undefined, reason: string): voi
     park: { reason, at: d.now, from: "in_progress" },
   };
   d.boards.commit(d.sessionId, { ...board, tasks });
+  d.boardChanged?.();
 }
 
 /** taskRetentionMs > 0 时清 completed/deleted，走与手动 settled 相同路径（§16.7.5）。 */
@@ -120,5 +127,6 @@ function applyRetention(d: SweepDeps): number {
   if (!plan.remove.length) return 0;
   markPurged(d.jobs, plan.remove, board.tasks);
   d.boards.commit(d.sessionId, applyCleanup(board, plan, d.now));
+  d.boardChanged?.();
   return plan.remove.length;
 }

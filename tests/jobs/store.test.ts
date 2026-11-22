@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync, existsSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -55,10 +55,30 @@ it("GC 只清超 TTL 的终态作业，running 永不清，并返回删除数", 
 
 it("isSafeLogPath 只允许 runDir 内路径（MINOR #2）", () => {
   const d = dir(); const s = createJobStore(d);
+  writeFileSync(join(d, "a.log"), "x");
+  mkdirSync(join(d, "sub"));
+  writeFileSync(join(d, "sub", "a.log"), "x");
   expect(s.isSafeLogPath(join(d, "a.log"))).toBe(true);
   expect(s.isSafeLogPath(join(d, "sub", "a.log"))).toBe(true);
   expect(s.isSafeLogPath("/etc/passwd")).toBe(false);
   expect(s.isSafeLogPath(join(d))).toBe(false);
   expect(s.isSafeLogPath(join(d, "..", "escape.log"))).toBe(false);
+  expect(s.isSafeLogPath(join(d, "missing.log"))).toBe(false);
   expect(s.isSafeLogPath("")).toBe(false);
+});
+
+it("isSafeLogPath 拒绝 runDir 内指向外部的 symlink（MINOR）", () => {
+  const root = dir();
+  const d = join(root, "run");
+  mkdirSync(d);
+  const outside = join(root, "secret.txt");
+  writeFileSync(outside, "SECRET-CONTENT");
+  const link = join(d, "link.log");
+  symlinkSync(outside, link);
+  const normal = join(d, "normal.log");
+  writeFileSync(normal, "ok");
+  const s = createJobStore(d);
+  expect(s.isSafeLogPath(normal)).toBe(true);
+  expect(s.isSafeLogPath(link)).toBe(false);
+  expect(s.isSafeLogPath(join(d, "missing.log"))).toBe(false);
 });

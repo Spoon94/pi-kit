@@ -1,4 +1,4 @@
-import { mkdirSync, unlinkSync } from "node:fs";
+import { mkdirSync, realpathSync, unlinkSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import { quarantine, readJsonSafe, writeJsonAtomic } from "../lib/atomic.js";
 import type { Job } from "./types.js";
@@ -25,11 +25,23 @@ export function createJobStore(dir: string) {
     all: (): Job[] => [...jobs.values()],
     get: (id: string) => jobs.get(id),
     put: (j: Job) => { jobs.set(j.id, { ...j }); },
-    /** logPath 必须落在本 store 的 runDir 内（防 sidecar 被篡改后读任意文件）。 */
+    /**
+     * logPath 必须落在本 store 的 runDir 内：
+     * 1) 便宜的 relative 判定挡绝对路径/..；2) realpath containment 挡 runDir 内的 symlink 逃逸。
+     * 路径不存在（realpath 抛错）一律拒绝，不放行。
+     */
     isSafeLogPath: (p: string): boolean => {
       if (typeof p !== "string" || p === "") return false;
       const rel = relative(dir, p);
-      return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+      if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return false;
+      try {
+        const realDir = realpathSync(dir);
+        const realFile = realpathSync(p);
+        const realRel = relative(realDir, realFile);
+        return realRel !== "" && !realRel.startsWith("..") && !isAbsolute(realRel);
+      } catch {
+        return false;
+      }
     },
     save: () => { ensure(); writeJsonAtomic(path, { jobs: [...jobs.values()] }); },
     load: (): { degraded: boolean; note?: string } => {

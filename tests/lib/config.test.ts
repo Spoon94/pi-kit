@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CONFIG_KEYS, DEFAULTS, createConfigLoader, resolveConfig } from "../../src/lib/config.js";
 
@@ -108,4 +109,15 @@ it("CONFIG_KEYS 暴露上限（MINOR #4）", () => {
   expect(CONFIG_KEYS.maxConcurrentJobs.max).toBe(200);
   expect(CONFIG_KEYS.maxTurns.max).toBe(10_000);
   expect(CONFIG_KEYS.tailLines.max).toBe(500);
+});
+
+it("docs/configuration.md 的 max 列与 CONFIG_KEYS 完全一致", () => {
+  const doc = readFileSync(new URL("../../docs/configuration.md", import.meta.url), "utf8");
+  for (const [key, meta] of Object.entries(CONFIG_KEYS)) {
+    const row = doc.split("\n").find((line) => line.startsWith(`| \`${key}\` |`));
+    expect(row, key).toBeDefined();
+    const maxCell = row!.split("|").map((s) => s.trim())[4];
+    if (meta.max === undefined) expect(maxCell, key).toBe("—");
+    else expect(maxCell, key).toContain(String(meta.max));
+  }
 });

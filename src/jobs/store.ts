@@ -44,14 +44,17 @@ export function createJobStore(dir: string) {
       jobs = new Map(list.map((j) => [j.id, j]));
       return { degraded: false };
     },
-    gc: (ttlMs: number, now: number) => {
+    gc: (ttlMs: number, now: number): number => {
+      let removed = 0;
       for (const j of [...jobs.values()]) {
         if (j.status === "running" || j.retryAt != null) continue;
         if (j.endedAt != null && now - j.endedAt >= ttlMs) {
           jobs.delete(j.id);
+          removed++;
           try { unlinkSync(j.logPath); } catch { /* 日志可能已被删 */ }
         }
       }
+      return removed;
     },
   };
 }

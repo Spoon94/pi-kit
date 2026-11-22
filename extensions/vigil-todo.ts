@@ -16,12 +16,14 @@ import { createBoardStore } from "../src/board/store.js";
 import type { BoardState } from "../src/board/types.js";
 import { chainJobs, chainTerminated, terminalJob } from "../src/jobs/chain.js";
 import { escalate, requestKill } from "../src/jobs/kill.js";
-import { createMonitor, recoverJobs } from "../src/jobs/monitor.js";
+import { createMonitor, recoverJobs, recoveredExit } from "../src/jobs/monitor.js";
 import { spawnJob, type SpawnRequest } from "../src/jobs/spawn.js";
 import { createJobStore, runDir, type JobStore } from "../src/jobs/store.js";
 import type { Job } from "../src/jobs/types.js";
 import { createConfigLoader } from "../src/lib/config.js";
 import { collectFingerprint } from "../src/lib/fingerprint.js";
+import { sanitizeTerminalText } from "../src/lib/sanitize.js";
+import { tailLines } from "../src/lib/tail.js";
 import {
   createBgKillTool, createBgListTool, createBgRunTool, createTodoTool, detectToolConflict,
   preflight, type ToolDef, type ToolDeps,
@@ -62,6 +64,8 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   let timer: NodeJS.Timeout | undefined;
   let mergeTimer: NodeJS.Timeout | undefined;
   let lastModelAdvanced = false;
+  let pendingKill: string | undefined;
+  const recovered = new Set<string>();
   let wired = false;
   let collapsed = false;
   let conflict = false;   // 加载期不得调用 action method；真正的判定在 session_start
@@ -272,9 +276,20 @@ export default function vigilTodo(pi: ExtensionAPI): void {
       refreshTimer();
       return;
     }
+    const now = Date.now();
+    for (const id of [...recovered]) {
+      const job = jobs.get(id);
+      if (!job || job.status !== "running") { recovered.delete(id); continue; }
+      const exited = recoveredExit(job, now);
+      if (!exited) continue;
+      recovered.delete(id);
+      jobs.put(exited);
+      jobs.save();
+      onJobExit(exited);
+    }
     runSweep();
-    jobs.gc(getCfg().completedTtlMs, Date.now());
-    jobs.save();
+    const removed = jobs.gc(getCfg().completedTtlMs, now);
+    if (removed > 0) jobs.save();
     refreshOverlay();
     refreshTimer();
   };
@@ -291,8 +306,9 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     if (loaded.degraded) notify(loaded.note ?? "sidecar 降级，已从空开始", "error");
     recoverJobs(jobs, Date.now());
     jobs.save();
+    recovered.clear();
     for (const job of jobs.all()) {
-      if (job.status === "running") monitor.watch(job, onJobExit);   // 进程仍在：pid 轮询接管
+      if (job.status === "running") recovered.add(job.id);   // 由单 timer 探活，不另起每作业 3s 轮询
     }
     boards.replace(sid, replayBranch(ctx.sessionManager.getBranch()));
     boards.setForeground(sid);
@@ -440,7 +456,8 @@ export default function vigilTodo(pi: ExtensionAPI): void {
           const retentionOverdue = retentionCandidates(board, getCfg().taskRetentionMs, now).length;
           const orphanJobs = jobs.all()
             .filter((j) => j.taskId === undefined || !board.tasks.some((t) => t.id === j.taskId)).length;
-          output(ctx, renderDoctor(board, jobs, conflict, degradedNote, { purgedRoots, retentionOverdue, orphanJobs }));
+          output(ctx, renderDoctor(board, jobs, conflict, degradedNote,
+            { purgedRoots, retentionOverdue, orphanJobs, maxTurns: getCfg().maxTurns }));
           return;
         }
         output(ctx, renderTodos(boards.get(sid), jobs));
@@ -453,12 +470,35 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     });
 
     pi.registerCommand("bg", {
-      description: "列出后台作业；/bg k <id> 中止链",
+      description: "列出后台作业；/bg k <id> 两步确认；/bg tail <id> 看日志尾",
       handler: commandHandler((arg, ctx) => {
         if (arg.startsWith("k ")) {
-          const id = arg.slice(2).trim();
+          const [id, confirm] = arg.slice(2).trim().split(/\s+/);
+          const target = id ? jobs.get(id) : undefined;
+          if (!target) { output(ctx, `${id ?? "(missing id)"} not found`); return; }
+          if (confirm !== "confirm") {
+            pendingKill = id;
+            const chain = jobs.all().filter((j) => j.rootId === target.rootId)
+              .map((j) => `${j.id} [${j.status}] exit ${j.exitCode ?? "?"} ${j.label}`);
+            output(ctx, `将中止链 ${target.rootId}:\n${chain.join("\n")}\n再次输入 /bg k ${id} confirm 确认`);
+            return;
+          }
+          if (pendingKill !== id) {
+            output(ctx, `先 /bg k ${id} 查看链信息，再 /bg k ${id} confirm`);
+            return;
+          }
+          pendingKill = undefined;
           killJob(id, "external");
-          output(ctx, `vigil-todo: 已中止 ${id} 的整条链`);
+          output(ctx, `vigil-todo: 已中止 ${target.rootId} 的整条链`);
+          return;
+        }
+        if (arg.startsWith("tail ")) {
+          const id = arg.slice(5).trim();
+          const target = jobs.get(id);
+          if (!target) { output(ctx, `${id} not found`); return; }
+          const cfg = getCfg();
+          const tail = tailLines(target.logPath, cfg.tailLines, cfg.maxTailBytes);
+          output(ctx, tail.length ? tail.map(sanitizeTerminalText).join("\n") : "(no log)");
           return;
         }
         const text = jobs.all()
@@ -572,6 +612,8 @@ export default function vigilTodo(pi: ExtensionAPI): void {
       if (mergeTimer) { clearTimeout(mergeTimer); mergeTimer = undefined; }
       if (!sid) return;
       boards.evict(sid);
+      recovered.clear();
+      pendingKill = undefined;
       monitor.clearAll();
       overlay.dispose();
       if (activeCtx === ctx) activeCtx = undefined;

@@ -83,7 +83,7 @@ export function autofillJob(jobId: string, d: AutofillDeps): { action: AutofillA
 
   // ok === true
   if (fp === "stale") {
-    if (canReverify(job, d.jobs, d.cfg.staleReverify)) {
+    if (canReverify(job, d.jobs, d.cfg.staleReverify, d.cfg.retries)) {
       const command = task.verify?.command ?? job.command;
       const r = d.respawn({
         command, cwd: job.cwd, taskId: job.taskId, sessionId: job.sessionId,

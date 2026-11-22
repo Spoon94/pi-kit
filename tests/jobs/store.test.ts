@@ -43,12 +43,12 @@ it("jobs 非数组或单条缺字段视为损坏（Review Focus 2）", () => {
   expect(createJobStore(d2).load().degraded).toBe(true);
 });
 
-it("GC 只清超 TTL 的终态作业，running 永不清", () => {
+it("GC 只清超 TTL 的终态作业，running 永不清，并返回删除数", () => {
   const d = dir(); const s = createJobStore(d);
   s.put(job("old", { endedAt: 1 }));
   s.put(job("run", { status: "running", endedAt: null }));
   s.save();
-  s.gc(1000, 10_000);
+  expect(s.gc(1000, 10_000)).toBe(1);
   expect(s.get("old")).toBeUndefined();
   expect(s.get("run")).toBeDefined();
 });

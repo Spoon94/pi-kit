@@ -132,3 +132,8 @@ it("retentionMs=0 关闭，不产生候选", () => {
   const s = b([t(1, { status: "completed", statusSince: 1 })]);
   expect(retentionCandidates(s, 0, 100_000)).toEqual([]);
 });
+
+it("statusSince 缺失或 0 视为极老，retention 可清（MAJOR）", () => {
+  const s = b([t(1, { status: "completed", statusSince: 0 }), t(2, { status: "deleted" })]);
+  expect(retentionCandidates(s, 1000, 100_000).sort()).toEqual([1, 2]);
+});

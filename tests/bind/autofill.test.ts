@@ -87,7 +87,7 @@ describe("失败与终结", () => {
     expect(r.action).toBe("retry");
     expect(boards.get("S").tasks[0].lastFailure?.exitCode).toBe(1);
   });
-  it("失败用尽 → parked 且有 chainFinal 证据（F72/F74）", () => {
+  it("失败用尽 → parked", () => {
     jobs.put(job({ status: "failed", exitCode: 1, attempt: 4 }));
     expect(autofillJob("A", deps).action).toBe("parked");
     expect(boards.get("S").tasks[0].status).toBe("parked");
@@ -158,5 +158,44 @@ describe("人工优先（R2-5）", () => {
     expect(autofillJob("A", deps).action).toBe("recorded");
     expect(calls).toBe(0);
     expect(boards.get("S").tasks[0].park?.reason).toBe("人工");
+  });
+});
+
+describe("重验分支有界性（§5.2.1 / BLOCKER）", () => {
+  const chain = (n: number, lastStale: boolean) => {
+    const ids = Array.from({ length: n }, (_, i) => `a${i + 1}`);
+    ids.forEach((id, i) => jobs.put(job({
+      id, rootId: "R", retryOf: i ? ids[i - 1] : undefined, attempt: i + 1,
+      status: i === n - 1 && lastStale ? "completed" : "failed",
+      exitCode: i === n - 1 && lastStale ? 0 : 1,
+      endedAt: 10 + i, fpStart: "X", fpEnd: i === n - 1 && lastStale ? "Y" : "Z",
+      fpVerdict: i === n - 1 && lastStale ? "stale" : "unknown",
+      taskId: 1, sessionId: "S",
+    })));
+    return ids;
+  };
+
+  it("a4 stale 不再触发无额度重验（BLOCKER）", () => {
+    chain(4, true);
+    let calls = 0;
+    deps.respawn = () => { calls++; return { ok: true }; };
+    const r = autofillJob("a4", deps);
+    expect(r.action).toBe("parked");
+    expect(calls).toBe(0);
+  });
+
+  it("a3 stale 触发重验；重验失败仍可重试（BLOCKER）", () => {
+    const ids = chain(3, true);
+    let calls = 0;
+    deps.respawn = () => { calls++; return { ok: true }; };
+    expect(autofillJob("a3", deps).action).toBe("reverify");
+    expect(calls).toBe(1);
+    jobs.put(job({
+      id: "RV", rootId: "R", retryOf: "a3", staleReverifyOf: "a3", attempt: 3,
+      status: "failed", exitCode: 1, endedAt: 20, taskId: 1, sessionId: "S",
+    }));
+    expect(ids).toHaveLength(3);
+    expect(autofillJob("RV", deps).action).toBe("retry");
+    expect(jobs.get("RV")?.retryAt).toBeDefined();
   });
 });

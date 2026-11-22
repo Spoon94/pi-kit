@@ -49,6 +49,22 @@ it("首次 stale 且额度未用可重验（F64）", () => {
   expect(canReverify(s.get("a1")!, s, 1)).toBe(true);
 });
 
+it("重验只为「重验 + 一次失败重试」留槽：4 job 链不再重验（BLOCKER）", () => {
+  const s = store();
+  for (let i = 1; i <= 4; i++) {
+    s.put(j(`a${i}`, { id: `a${i}`, rootId: "R", retryOf: i > 1 ? `a${i - 1}` : undefined,
+      attempt: i, status: i === 4 ? "completed" : "failed", exitCode: i === 4 ? 0 : 1 }));
+  }
+  expect(canReverify(s.get("a4")!, s, 1, 3)).toBe(false);
+
+  const s3 = store();
+  for (let i = 1; i <= 3; i++) {
+    s3.put(j(`a${i}`, { id: `a${i}`, rootId: "R", retryOf: i > 1 ? `a${i - 1}` : undefined,
+      attempt: i, status: i === 3 ? "completed" : "failed", exitCode: i === 3 ? 0 : 1 }));
+  }
+  expect(canReverify(s3.get("a3")!, s3, 1, 3)).toBe(true);
+});
+
 it("chainTerminated 是派生判定：running / retryAt / pendingReverify 任一存在即未终结", () => {
   const s = store();
   s.put(j("R", { status: "running", endedAt: null }));

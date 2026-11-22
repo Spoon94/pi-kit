@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import vigilTodo from "../../extensions/vigil-todo.js";
 import { emptyBoard, type BoardState } from "../../src/board/types.js";
 import { createJobStore, runDir } from "../../src/jobs/store.js";
+import { readStartStamp } from "../../src/jobs/spawn.js";
 import type { Job } from "../../src/jobs/types.js";
 
 type Handler = (event: any, ctx: any) => unknown;
@@ -33,18 +34,19 @@ const completedWithEvidence = (refs: string[], extra?: (b: BoardState) => void):
   return b;
 };
 
-function makeHarness(cwd: string, branch: unknown[], idle = true) {
+function makeHarness(cwd: string, branch: unknown[], idle = true, sessionId = "S") {
   const handlers = new Map<string, Handler[]>();
   const commands = new Map<string, (args: string, ctx: any) => unknown>();
   const toolDefs = new Map<string, any>();
   const sent: any[] = [];
+  const notifications: string[] = [];
   let isIdle = idle;
   const ctx = {
     cwd, hasUI: false, mode: "text",
-    ui: { notify: () => {}, setWidget: () => {} },
+    ui: { notify: (msg: string) => { notifications.push(msg); }, setWidget: () => {} },
     isIdle: () => isIdle,
     sessionManager: {
-      getSessionId: () => "S",
+      getSessionId: () => sessionId,
       getCwd: () => cwd,
       getBranch: () => branch,
       getSessionDir: () => join(cwd, ".sessions"),
@@ -82,7 +84,7 @@ function makeHarness(cwd: string, branch: unknown[], idle = true) {
     return def.execute(`call-${callSeq++}`, params, undefined, undefined, ctx);
   };
   const setIdle = (v: boolean) => { isIdle = v; };
-  return { api, emit, runCommand, runTool, sent, setIdle, ctx };
+  return { api, emit, runCommand, runTool, sent, notifications, setIdle, ctx };
 }
 
 const waitForFinalized = async (cwd: string, count: number): Promise<void> => {
@@ -296,4 +298,96 @@ it("F38：10 个真实作业在 250ms 窗口内合并为一条投递（MINOR #5�
   await vi.advanceTimersByTimeAsync(250);
   expect(h.sent).toHaveLength(1);
   expect(h.sent[0].message.details.jobs).toHaveLength(10);
+});
+
+it("F10：同 cwd 两会话的通知各回各家（MINOR #8）", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  setupJobs(cwd, [
+    job({ id: "A", rootId: "A", sessionId: "SA" }),
+    job({ id: "B", rootId: "B", sessionId: "SB" }),
+  ]);
+  const hA = makeHarness(cwd, [snapshot(completedWithEvidence(["A"]))], true, "SA");
+  const hB = makeHarness(cwd, [snapshot(completedWithEvidence(["B"]))], true, "SB");
+  vigilTodo(hA.api);
+  vigilTodo(hB.api);
+  await hA.emit("session_start", { type: "session_start", reason: "startup" });
+  await hB.emit("session_start", { type: "session_start", reason: "startup" });
+  expect(hA.sent).toHaveLength(1);
+  expect(hA.sent[0].message.details.jobs).toEqual(["A"]);
+  expect(hB.sent).toHaveLength(1);
+  expect(hB.sent[0].message.details.jobs).toEqual(["B"]);
+});
+
+it("F72/F74：4 次失败只投递一次，chainFinal 恰一条且带日志尾（MINOR #7）", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const log = join(cwd, "fail.log");
+  writeFileSync(log, "boom-tail");
+  const ids = ["R", "a2", "a3", "a4"];
+  setupJobs(cwd, ids.map((id, i) => job({
+    id, rootId: "R", retryOf: i ? ids[i - 1] : undefined, attempt: i + 1,
+    status: "failed", exitCode: 1, endedAt: 10 + i, logPath: log,
+    finalized: false, evidenceApplied: false, notifyState: "pending",
+    finalResult: undefined, taskId: 1, sessionId: "S",
+  })));
+  const b = emptyBoard();
+  b.tasks = [{
+    id: 1, subject: "跑", status: "in_progress", jobs: ["R"], inProgressSince: 0,
+    evidence: [100, 200, 300].map((at) => ({
+      ok: false, kind: "job" as const, origin: "async" as const, chainFinal: false,
+      at, known: true, fp: "unknown" as const, ref: "R",
+    })),
+  }];
+  b.nextId = 2;
+  const branch: unknown[] = [snapshot(b)];
+  const h = makeHarness(cwd, branch, true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+
+  expect(h.sent).toHaveLength(1);
+  expect(h.sent[0].message.details.jobs).toEqual(["R"]);
+  expect(h.sent[0].message.content).toContain("boom-tail");
+  const snaps = branch.filter((e: any) => e?.customType === "rpiv-todo-state") as any[];
+  const finals = (snaps.at(-1)?.data.tasks[0].evidence as any[]).filter((e) => e.chainFinal);
+  expect(finals).toHaveLength(1);
+});
+
+it("/bg k 需二次确认，/bg tail 可看日志尾（§8.4）", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const log = join(cwd, "r.log");
+  writeFileSync(log, "line1\nline2\nline3");
+  setupJobs(cwd, [job({ id: "R", status: "failed", exitCode: 1, endedAt: 2, logPath: log })]);
+  const h = makeHarness(cwd, [snapshot(emptyBoard())], true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+
+  await h.runCommand("bg", "k R");
+  let store = createJobStore(runDir(cwd));
+  store.load();
+  expect(store.get("R")?.kill).toBeUndefined();
+  expect(h.notifications.join("\n")).toContain("confirm");
+
+  await h.runCommand("bg", "k R confirm");
+  store = createJobStore(runDir(cwd));
+  store.load();
+  expect(store.get("R")?.kill?.requestedBy).toBe("external");
+
+  await h.runCommand("bg", "tail R");
+  expect(h.notifications.join("\n")).toContain("line3");
+});
+
+it("恢复作业并入单 timer，不产生每作业 3s 轮询（MAJOR #4）", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const stamp = readStartStamp(process.pid);
+  setupJobs(cwd, [job({
+    id: "R", pid: process.pid, startStamp: stamp, status: "running", endedAt: null,
+    exitCode: null, exitCodeKnown: false, finalized: false, finalResult: undefined,
+    taskId: 1, sessionId: "S",
+  })]);
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "跑", status: "in_progress", jobs: ["R"], inProgressSince: 0 }];
+  b.nextId = 2;
+  const h = makeHarness(cwd, [snapshot(b)], true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  expect(vi.getTimerCount()).toBe(1);   // 只有扩展的单 timer
 });

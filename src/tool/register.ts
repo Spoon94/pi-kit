@@ -101,6 +101,12 @@ export function createTodoTool(deps: ToolDeps): ToolDef {
         const result = buildResult(asRecord(p), board, { kind: "update", id: task.id, from: task.status, to: task.status, changed: true });
         deps.commit(board);
         deps.appendEntry("rpiv-todo-state", result.details);
+        if (r.exitCode === null) {
+          const message = `验证命令未能执行（无 bash 上下文或命令失败），已记为不可信证据 → todo({action:"verify", id:${task.id}}) 重试`;
+          result.isError = true;
+          result.content = [{ type: "text", text: `Error: ${message}` }];
+          (result.details as { error?: string }).error = message;
+        }
         return result;
       }
       const state = deps.board();

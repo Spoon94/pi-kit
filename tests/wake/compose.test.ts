@@ -69,3 +69,10 @@ it("消息读末次 job 而非 root（重试成功不显示 exit 1）（BLOCKER�
   expect(text).toContain("fp:fresh");
   expect(text).not.toContain("exit 1");
 });
+
+it("成功消息带作业耗时（§7.5）", () => {
+  const jobs = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_9q0d6s1e}}")));
+  jobs.put(j({ startedAt: 1_000, endedAt: 1_000 + 192_000 }));
+  const b = emptyBoard(); b.tasks = [{ id: 1, subject: "回归", status: "completed" }];
+  expect(composeWake(["R"], b, jobs, DEFAULTS, undefined)).toContain("3m12s");
+});

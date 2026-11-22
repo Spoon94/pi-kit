@@ -39,6 +39,14 @@ it("八方面矩阵文档存在且覆盖 8 行", () => {
   }
 });
 
+it("入口级 F 编号必须在 tests/integration/ 有事件顺序断言（G2）", () => {
+  const ENTRY_F = ["F6", "F7", "F8", "F10", "F38", "F61", "F71", "F72", "F74"];
+  const corpus = walk(join(ROOT, "tests/integration"))
+    .map((f) => readFileSync(f, "utf8")).join("\n");
+  const missing = ENTRY_F.filter((id) => !new RegExp(`\\b${id}\\b`).test(corpus));
+  expect(missing).toEqual([]);
+});
+
 it("规格文档无重复顶层章节（F102）", () => {
   const spec = readFileSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"), "utf8");
   const sections = [...spec.matchAll(/^## (\d+)\./gm)].map((m) => m[1]);

@@ -45,11 +45,8 @@ export function createMonitor() {
       if (proc) {
         stop = attach(job, proc);
       } else {
-        const timer = setInterval(() => {
-          try { process.kill(job.pid, 0); } catch { emit(job.id, null); }
-        }, 3000);
-        timer.unref?.();
-        stop = () => clearInterval(timer);
+        // 恢复作业的退出检测并入扩展的单 timer（recoveredExit），不另起 3s 轮询
+        stop = () => {};
       }
       stops.set(job.id, stop);
       return stop;
@@ -60,17 +57,20 @@ export function createMonitor() {
   };
 }
 
+/** 恢复作业探活：进程消失或 startStamp 变化 ⇒ 返回终态（退出码未知）。 */
+export function recoveredExit(job: Job, now: number, readStamp: (pid: number) => string | undefined = readStartStamp): Job | undefined {
+  if (job.status !== "running") return undefined;
+  let alive = false;
+  try { process.kill(job.pid, 0); alive = true; } catch { alive = false; }
+  if (alive && job.startStamp) alive = readStamp(job.pid) === job.startStamp;
+  if (alive) return undefined;
+  return { ...job, status: "failed", exitCode: null, exitCodeKnown: false, endedAt: now };
+}
+
 /** 重启恢复：进程已消失 ⇒ 不猜退出码（规格 §10.1）。 */
 export function recoverJobs(store: JobStore, now: number): void {
   for (const j of store.all()) {
-    if (j.status !== "running") continue;
-    let alive = false;
-    try { process.kill(j.pid, 0); alive = true; } catch { alive = false; }
-    if (alive && j.startStamp) {
-      // pid 复用防护：startStamp 不一致视为已消失
-      alive = readStartStamp(j.pid) === j.startStamp;
-    }
-    if (alive) continue;
-    store.put({ ...j, status: "failed", exitCode: null, exitCodeKnown: false, endedAt: now });
+    const exited = recoveredExit(j, now);
+    if (exited) store.put(exited);
   }
 }

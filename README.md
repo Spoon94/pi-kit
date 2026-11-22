@@ -43,7 +43,7 @@ park      todo({action:"update", id, status:"parked", reason:"…"})
 | `/vigil-todo resume` | 解除中断（不重置 turnsUsed） |
 | `/vigil-todo doctor` | 冲突 / sidecar 降级 / halted / purged / 超期 / 无作业 in_progress |
 | `/todos` | 逐条任务（exit code + fp 下钻） |
-| `/bg` | 作业列表；`/bg k <id>` 中止链 |
+| `/bg` | 作业列表；`/bg k <id>` 两步确认中止链；`/bg tail <id>` 看日志尾 |
 
 折叠快捷键默认 `ctrl+shift+t`（`off` 关闭）。
 

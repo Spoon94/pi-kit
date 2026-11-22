@@ -127,3 +127,18 @@ it("verify 期间任务被删除不得复活（BLOCKER）", async () => {
   expect(board.tasks).toHaveLength(0);
   expect(commits).toBe(0);
 });
+
+it("verify 无执行上下文返回 isError 并标记不可信证据（§6.4）", async () => {
+  let board = emptyBoard();
+  board.tasks = [{ id: 1, subject: "v", status: "in_progress", verify: { kind: "command", command: "true" } }];
+  board.nextId = 2;
+  const deps = toolDeps(board, {
+    board: () => board,
+    commit: (s) => { board = s; },
+    runVerify: async () => ({ ok: false, exitCode: null }),
+  });
+  const r = await createTodoTool(deps).execute({ action: "verify", id: 1 });
+  expect(r.isError).toBe(true);
+  expect(r.content[0].text).toContain("未能执行");
+  expect(board.tasks[0].evidence?.at(-1)).toMatchObject({ ok: false, known: false });
+});

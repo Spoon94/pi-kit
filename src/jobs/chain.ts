@@ -30,12 +30,16 @@ export const retryDelayMs = (attempt: number, delays: number[]): number =>
 export const canRetry = (job: Job, _store: JobStore, retries: number): boolean =>
   job.attempt < 1 + retries;
 
-/** 重验额度落链上；重验分支后代永不再触发。 */
-export function canReverify(job: Job, store: JobStore, staleReverify: number): boolean {
+/** 重验额度落链上；重验分支后代永不再触发。为「重验 + 至少一次失败重试」预留 job 槽。 */
+export function canReverify(job: Job, store: JobStore, staleReverify: number, retries = 0): boolean {
   if (staleReverify <= 0) return false;
   if (isReverifyBranch(job, store)) return false;
-  const used = chainJobs(store, job.rootId).filter((j) => j.staleReverifyOf != null).length;
-  return used < staleReverify;
+  const list = chainJobs(store, job.rootId);
+  const used = list.filter((j) => j.staleReverifyOf != null).length;
+  if (used >= staleReverify) return false;
+  const maxJobs = 1 + retries + staleReverify;
+  const guaranteedRetry = retries > 0 ? 1 : 0;   // 重验失败至少还能再重试一次
+  return list.length + 1 + guaranteedRetry <= maxJobs;
 }
 
 /** 派生终结判定（规格 §4.5）：无 running、无 retryAt、无待重验。 */

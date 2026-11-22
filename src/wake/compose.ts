@@ -1,6 +1,7 @@
 import type { BoardState, Task } from "../board/types.js";
 import type { JobStore } from "../jobs/store.js";
 import type { VigilConfig } from "../lib/config.js";
+import { formatElapsed } from "../lib/format.js";
 import { fpReason } from "../lib/fingerprint.js";
 import { sanitizeTerminalText } from "../lib/sanitize.js";
 import { tailLines } from "../lib/tail.js";
@@ -16,7 +17,8 @@ export function composeWake(roots: string[], board: BoardState, jobs: JobStore, 
     const task = board.tasks.find((t) => t.id === j.taskId);
     const label = sanitizeTerminalText(j.label);
     const tag = root.finalResult?.ok ? "✓" : "✗";
-    lines.push(`[vigil-todo] #${j.taskId ?? "?"} ${label} ${tag} exit ${j.exitCode ?? "?"} (${root.id}) ${fpReason(j)}`);
+    const elapsed = formatElapsed((j.endedAt ?? Date.now()) - j.startedAt);
+    lines.push(`[vigil-todo] #${j.taskId ?? "?"} ${label} ${tag} exit ${j.exitCode ?? "?"} · ${elapsed} (${root.id}) ${fpReason(j)}`);
     if (root.finalResult && !root.finalResult.ok) lines.push(`  ${sanitizeTerminalText(root.finalResult.note)}`);
     if (j.fpVerdict === "stale" && task?.status === "parked") {
       lines.push(`  → todo({action:"update", id:${j.taskId}, status:"completed", accept:"stale"})`);

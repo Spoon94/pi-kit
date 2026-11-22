@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { emptyBoard, type Evidence, type Task } from "../../src/board/types.js";
+import type { Job } from "../../src/jobs/types.js";
 import { createJobStore } from "../../src/jobs/store.js";
 import { DEFAULTS } from "../../src/lib/config.js";
 import { layoutRows, renderDoctor, renderPanel, renderTodos } from "../../src/ui/panel.js";
@@ -73,4 +74,28 @@ it("doctor 报 halted / purged / 超期 / 孤儿作业", () => {
   expect(text).toContain("2");
   expect(text).toContain("超期");
   expect(text).toContain("孤儿作业");
+});
+
+it("达轮数上限在面板首行与 doctor 标注（F24）", () => {
+  const s = b([{ id: 1, subject: "p", status: "pending" }]);
+  s.counters.turnsUsed = DEFAULTS.maxTurns;
+  expect(renderPanel(s, jobs(), DEFAULTS)[0]).toContain("达轮数上限");
+  expect(renderDoctor(s, jobs(), false)).toContain("达轮数上限");
+});
+
+it("in_progress 行显示 ✶ 耗时，retry 上限随配置（§8.1）", () => {
+  const now = 1_000_000;
+  const s = b([{ id: 1, subject: "补单测", status: "in_progress", activeForm: "writing tests" }]);
+  const jj = jobs();
+  const running: Job = {
+    id: "bg_x", label: "x", command: "true", logPath: "/tmp/x.log", cwd: "/tmp", pid: 1,
+    status: "running", exitCode: null, exitCodeKnown: false, startedAt: now - 130_000, endedAt: null,
+    fpVerdict: "unknown", interferers: [], rootId: "bg_x", attempt: 1, taskId: 1, sessionId: "S",
+    evidenceApplied: false, notifyState: "pending",
+  };
+  jj.put(running);
+  const { rows } = layoutRows(s, jj, 12, { ...DEFAULTS, retries: 5 }, now);
+  const line = rows.find((r) => r.includes("#1")) ?? "";
+  expect(line).toContain("✶ 2m10s");
+  expect(line).toContain("retry 1/6");
 });

@@ -71,6 +71,6 @@ export function retentionCandidates(state: BoardState, retentionMs: number, now:
   if (retentionMs <= 0) return [];
   return state.tasks
     .filter((t) => (t.status === "completed" || t.status === "deleted")
-      && (t.statusSince ?? 0) > 0 && now - (t.statusSince ?? 0) > retentionMs)
+      && now - (t.statusSince ?? 0) > retentionMs)   // 缺失/0 = epoch，视为最老，必须可清
     .map((t) => t.id);
 }

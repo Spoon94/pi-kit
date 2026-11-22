@@ -33,9 +33,14 @@ export function sweepRespawns(d: SweepDeps): number {
       dirty = true;
     }
     if (!dueBackoff && !dueReverify) continue;
+    // 恢复重验继承链上最大 attempt：后续失败重试只补到 1+retries，
+    // 保证总 job 数不超过 1+retries+staleReverify（链上界证明见 chain.ts）。
+    const lastAttempt = dueReverify
+      ? d.jobs.all().filter((j) => j.rootId === job.rootId).reduce((m, j) => Math.max(m, j.attempt), job.attempt)
+      : job.attempt;
     const req: SpawnRequest = dueReverify
       ? { command: job.command, cwd: job.cwd, taskId: job.taskId, sessionId: job.sessionId,
-          rootId: job.rootId, retryOf: job.id, attempt: job.attempt, staleReverifyOf: job.id }
+          rootId: job.rootId, retryOf: job.id, attempt: lastAttempt, staleReverifyOf: job.id }
       : { command: job.command, cwd: job.cwd, taskId: job.taskId, sessionId: job.sessionId,
           rootId: job.rootId, retryOf: job.id, attempt: job.attempt + 1 };
     const r = d.respawn(req);
@@ -47,8 +52,7 @@ export function sweepRespawns(d: SweepDeps): number {
       d.jobs.put(next);
       dirty = true;
       n++;
-    } else if (dueBackoff) {
-      // spawn_error：不重试、清退避、绑定任务 parked（F32）
+    } else if (dueBackoff) {      // spawn_error：不重试、清退避、绑定任务 parked（F32）
       const cur = d.jobs.get(job.id)!;
       const next = { ...cur };
       delete next.retryAt;

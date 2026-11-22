@@ -350,13 +350,13 @@ it("F10：同 cwd 两会话的通知各回各家（MINOR #8）", async () => {
   expect(hB.sent[0].message.details.jobs).toEqual(["B"]);
 });
 
-it("F72/F74：4 次失败只投递一次，chainFinal 恰一条且带日志尾（MINOR #7）", async () => {
+it("F72/F74：6 次失败只投递一次，chainFinal 恰一条且带日志尾（MINOR #7）", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const storeDir = runDir(cwd);
   mkdirSync(storeDir, { recursive: true });
   const log = join(storeDir, "fail.log");
   writeFileSync(log, "boom-tail");
-  const ids = ["R", "a2", "a3", "a4"];
+  const ids = ["R", "a2", "a3", "a4", "a5", "a6"];
   setupJobs(cwd, ids.map((id, i) => job({
     id, rootId: "R", retryOf: i ? ids[i - 1] : undefined, attempt: i + 1,
     status: "failed", exitCode: 1, endedAt: 10 + i, logPath: log,

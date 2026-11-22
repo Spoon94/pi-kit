@@ -37,6 +37,9 @@ export function canReverify(job: Job, store: JobStore, staleReverify: number, re
   const list = chainJobs(store, job.rootId);
   const used = list.filter((j) => j.staleReverifyOf != null).length;
   if (used >= staleReverify) return false;
+  // 界证明：重验 job 继承被重验 job 的 attempt（autofill/sweep 的 respawn），
+  // 失败重试只补到 attempt=1+retries ⇒ 总 job 数 ≤ list + (1+retries-attempt)
+  // ≤ 1+retries+staleReverify。预留槽保证重验后至少还有一次重试。
   const maxJobs = 1 + retries + staleReverify;
   const guaranteedRetry = retries > 0 ? 1 : 0;   // 重验失败至少还能再重试一次
   return list.length + 1 + guaranteedRetry <= maxJobs;

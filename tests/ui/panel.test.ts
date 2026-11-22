@@ -117,10 +117,12 @@ it("in_progress 行显示 ✶ 耗时，retry 上限随配置（§8.1）", () => 
     evidenceApplied: false, notifyState: "pending",
   };
   jj.put(running);
-  const { rows } = layoutRows(s, jj, 12, { ...DEFAULTS, retries: 5 }, now);
+  const { rows } = layoutRows(s, jj, 12, DEFAULTS, now);
   const line = rows.find((r) => r.includes("#1")) ?? "";
   expect(line).toContain("✶ 2m10s");
-  expect(line).toContain("retry 1/6");
+  expect(line).toContain("retry 1/6");                 // 默认总尝试 6
+  const custom = layoutRows(s, jj, 12, { ...DEFAULTS, retries: 1 }, now);
+  expect(custom.rows.find((r) => r.includes("#1")) ?? "").toContain("retry 1/2");
 });
 
 it("证据滚动时汇总不显示 all exit 0（MINOR #3）", () => {

@@ -6,11 +6,17 @@ describe("resolveConfig", () => {
   it("空来源全部走默认值", () => {
     expect(resolveConfig({})).toEqual(DEFAULTS);
     expect(DEFAULTS.wipLimit).toBe(1);
-    expect(DEFAULTS.retries).toBe(3);
-    expect(DEFAULTS.retryDelaysMs).toEqual([0, 30_000, 120_000]);
+    expect(DEFAULTS.retries).toBe(5);
+    expect(DEFAULTS.retryDelaysMs).toEqual([0, 30_000, 120_000, 300_000, 600_000]);
     expect(DEFAULTS.maxTurns).toBe(50);
     expect(DEFAULTS.staleReverify).toBe(1);
     expect(DEFAULTS.maxConcurrentJobs).toBe(10);
+  });
+
+  it("默认总尝试 6：retries=5，退避五档（避开 4）", () => {
+    expect(1 + DEFAULTS.retries).toBe(6);
+    expect(DEFAULTS.retryDelaysMs).toHaveLength(5);
+    expect(DEFAULTS.retryDelaysMs).toEqual([0, 30_000, 120_000, 300_000, 600_000]);
   });
 
   it("file > settings.vigilTodo > legacy.bgRun > 默认", () => {

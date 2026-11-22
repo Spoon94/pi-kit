@@ -13,7 +13,7 @@ let boards: ReturnType<typeof createBoardStore>;
 const j = (id: string, o: Partial<Job> = {}): Job => ({
   id, label: id, command: "true", logPath: `/tmp/${id}.log`, cwd: "/tmp", pid: 1,
   status: "failed", exitCode: 1, exitCodeKnown: true, startedAt: 1, endedAt: 2,
-  fpVerdict: "fresh", interferers: [], rootId: "R", attempt: 4,
+  fpVerdict: "fresh", interferers: [], rootId: "R", attempt: 6,
   taskId: 1, sessionId: "S", evidenceApplied: false, notifyState: "pending", ...o,
 });
 
@@ -32,9 +32,9 @@ it("链未终结时不 finalize", () => {
 
 it("终结后 finalize 幂等，重复调用仍恰一条（F82）", () => {
   jobs.put(j("R"));
-  expect(finalizeChain("R", jobs, 10, "4 次均失败", false)).toBe(true);
+  expect(finalizeChain("R", jobs, 10, "6 次均失败", false)).toBe(true);
   expect(finalizeChain("R", jobs, 20, "again", false)).toBe(false);
-  expect(jobs.get("R")?.finalResult?.note).toBe("4 次均失败");
+  expect(jobs.get("R")?.finalResult?.note).toBe("6 次均失败");
 });
 
 it("投影产生唯一 chainFinal 证据（F87）", () => {

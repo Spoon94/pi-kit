@@ -61,8 +61,8 @@ Tab 补全：`/vigil-todo`、`/vt` 补 `halt`/`resume`/`doctor`/`clear`（`clear
 | 键 | 默认 |
 |---|---|
 | `wipLimit` | 1（模型串行专注一个 todo） |
-| `retries` | 3（总尝试 4） |
-| `retryDelaysMs` | `[0, 30000, 120000]` |
+| `retries` | 5（总尝试 6） |
+| `retryDelaysMs` | `[0, 30000, 120000, 300000, 600000]`（5 档，最坏累计等待约 17.5 分钟） |
 | `staleReverify` | 1 |
 | `maxTurns` | 50 |
 | `maxConcurrentJobs` | 10 |

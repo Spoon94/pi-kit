@@ -32,7 +32,7 @@ it("失败消息附日志尾（F72）", () => {
   const log = join(d, "f.log");
   writeFileSync(log, Array.from({ length: 50 }, (_, i) => `L${i}`).join("\n"));
   const jobs = createJobStore(d);
-  jobs.put(j({ status: "failed", exitCode: 1, logPath: log, finalResult: { ok: false, note: "4 次均失败", trigger: "external", at: 2 } }));
+  jobs.put(j({ status: "failed", exitCode: 1, logPath: log, finalResult: { ok: false, note: "6 次均失败", trigger: "external", at: 2 } }));
   const b = emptyBoard(); b.tasks = [{ id: 1, subject: "回归", status: "parked" }];
   const text = composeWake(["R"], b, jobs, DEFAULTS, undefined);
   expect(text).toContain("L49");

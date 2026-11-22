@@ -87,8 +87,14 @@ describe("失败与终结", () => {
     expect(r.action).toBe("retry");
     expect(boards.get("S").tasks[0].lastFailure?.exitCode).toBe(1);
   });
-  it("失败用尽 → parked", () => {
-    jobs.put(job({ status: "failed", exitCode: 1, attempt: 4 }));
+  it("第 5 次失败仍 retry（总尝试 6）", () => {
+    jobs.put(job({ status: "failed", exitCode: 1, attempt: 5 }));
+    const r = autofillJob("A", deps);
+    expect(r.action).toBe("retry");
+    expect(jobs.get("A")?.retryAt).toBeGreaterThan(300);
+  });
+  it("第 6 次失败才 parked（用尽）", () => {
+    jobs.put(job({ status: "failed", exitCode: 1, attempt: 6 }));
     expect(autofillJob("A", deps).action).toBe("parked");
     expect(boards.get("S").tasks[0].status).toBe("parked");
   });
@@ -130,7 +136,7 @@ describe("人工优先（R2-5）", () => {
     const dir = mkdtempSync(join(tmpdir(), "{{SECRET_dzs7b2he}}"));
     const secret = join(dir, "secret.txt");
     writeFileSync(secret, "TOPSECRET");
-    jobs.put(job({ status: "failed", exitCode: 1, attempt: 4, logPath: secret }));
+    jobs.put(job({ status: "failed", exitCode: 1, attempt: 6, logPath: secret }));
     autofillJob("A", deps);
     expect(boards.get("S").tasks[0].lastFailure?.note).toBeUndefined();
     expect(boards.get("S").tasks[0].park?.reason ?? "").not.toContain("TOPSECRET");
@@ -184,26 +190,26 @@ describe("重验分支有界性（§5.2.1 / BLOCKER）", () => {
     return ids;
   };
 
-  it("a4 stale 不再触发无额度重验（BLOCKER）", () => {
-    chain(4, true);
+  it("a6 stale 不再触发无额度重验（BLOCKER）", () => {
+    chain(6, true);
     let calls = 0;
     deps.respawn = () => { calls++; return { ok: true }; };
-    const r = autofillJob("a4", deps);
+    const r = autofillJob("a6", deps);
     expect(r.action).toBe("parked");
     expect(calls).toBe(0);
   });
 
-  it("a3 stale 触发重验；重验失败仍可重试（BLOCKER）", () => {
-    const ids = chain(3, true);
+  it("a5 stale 触发重验；重验失败仍可重试（BLOCKER）", () => {
+    const ids = chain(5, true);
     let calls = 0;
     deps.respawn = () => { calls++; return { ok: true }; };
-    expect(autofillJob("a3", deps).action).toBe("reverify");
+    expect(autofillJob("a5", deps).action).toBe("reverify");
     expect(calls).toBe(1);
     jobs.put(job({
-      id: "RV", rootId: "R", retryOf: "a3", staleReverifyOf: "a3", attempt: 3,
+      id: "RV", rootId: "R", retryOf: "a5", staleReverifyOf: "a5", attempt: 5,
       status: "failed", exitCode: 1, endedAt: 20, taskId: 1, sessionId: "S",
     }));
-    expect(ids).toHaveLength(3);
+    expect(ids).toHaveLength(5);
     expect(autofillJob("RV", deps).action).toBe("retry");
     expect(jobs.get("RV")?.retryAt).toBeDefined();
   });

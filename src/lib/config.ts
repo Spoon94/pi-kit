@@ -9,7 +9,8 @@ export interface VigilConfig {
 }
 
 export const DEFAULTS: VigilConfig = {
-  wipLimit: 1, retries: 3, retryDelaysMs: [0, 30_000, 120_000], staleReverify: 1,
+  wipLimit: 1, retries: 5,
+  retryDelaysMs: [0, 30_000, 120_000, 300_000, 600_000], staleReverify: 1,
   maxTurns: 50, maxConcurrentJobs: 10, completedTtlMs: 7 * 24 * 3600_000,
   taskRetentionMs: 0,
   tailLines: 20, maxTailBytes: 8192, maxWidgetLines: 12, collapseKey: "ctrl+shift+t",

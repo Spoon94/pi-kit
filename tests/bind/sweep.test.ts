@@ -49,15 +49,29 @@ it("pendingReverify 且未终结 → 补一次 respawn（F85）", () => {
 });
 
 it("pendingReverify 额度已尽 → 判终结 parked，不悬置（F85）", () => {
-  jobs.put(j("R", { status: "completed", exitCode: 0, pendingReverify: true, attempt: 4 }));
+  jobs.put(j("R", { status: "completed", exitCode: 0, pendingReverify: true, attempt: 6 }));
   jobs.put(j("R2", { rootId: "R", retryOf: "R", staleReverifyOf: "R" }));
   d.respawn = () => ({ ok: false });
   sweepRespawns(d);
   expect(jobs.get("R")?.pendingReverify).toBe(false);
 });
 
+it("F85 恢复重验继承链上最大 attempt，不破 7 job 上界", () => {
+  jobs.put(j("R", { attempt: 1, status: "completed", exitCode: 0, pendingReverify: true, fpVerdict: "stale" }));
+  for (let i = 2; i <= 5; i++) {
+    jobs.put(j(`R${i}`, { rootId: "R", retryOf: i === 2 ? "R" : `R${i - 1}`,
+      attempt: i, status: "failed", exitCode: 1 }));
+  }
+  let req: { attempt?: number; staleReverifyOf?: string } | undefined;
+  d.respawn = (r) => { req = r; return { ok: true }; };
+  expect(sweepRespawns(d)).toBe(1);
+  expect(req?.attempt).toBe(5);                 // 不是 root.attempt=1
+  expect(req?.staleReverifyOf).toBe("R");
+  expect(jobs.get("R")?.pendingReverify).toBe(false);
+});
+
 it("catch-up 只扫 root 粒度：中间失败 job 不入扫描集（F89）", () => {
-  jobs.put(j("R", { attempt: 4, finalized: true, evidenceApplied: true, notifyState: "sent", notifySentAt: 0 }));
+  jobs.put(j("R", { attempt: 6, finalized: true, evidenceApplied: true, notifyState: "sent", notifySentAt: 0 }));
   jobs.put(j("M", { rootId: "R", attempt: 2, notifyState: "pending" }));
   expect(catchUpScan(d)).toEqual(["R"]);
 });
@@ -83,7 +97,7 @@ it("未投影的 finalized 链优先入扫描集（F84）", () => {
 });
 
 it("sweepAll 汇总 respawn / catch-up / retention", () => {
-  jobs.put(j("R", { attempt: 4, finalized: true, evidenceApplied: true, notifyState: "acked" }));
+  jobs.put(j("R", { attempt: 6, finalized: true, evidenceApplied: true, notifyState: "acked" }));
   const r = sweepAll(d);
   expect(r.respawned).toBe(0);
   expect(r.catchUp).toEqual([]);
@@ -152,7 +166,7 @@ const countSaves = (store: ReturnType<typeof createJobStore>): (() => number) =>
 };
 
 it("F123 空闲 sweepAll 零落盘（P1 性能回归）", () => {
-  jobs.put(j("R", { attempt: 4, finalized: true, evidenceApplied: true, notifyState: "acked" }));
+  jobs.put(j("R", { attempt: 6, finalized: true, evidenceApplied: true, notifyState: "acked" }));
   const saves = countSaves(jobs);
   expect(sweepAll(d)).toEqual({ respawned: 0, catchUp: [], retained: 0, boardDirty: false });
   expect(saves()).toBe(0);

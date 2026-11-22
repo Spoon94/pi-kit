@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { canRetry, canReverify, chainJobs, chainTerminated, isReverifyBranch, retryDelayMs, terminalJob } from "../../src/jobs/chain.js";
+import { canRetry, canReverify, chainJobs, chainTerminated, isReverifyBranch, nextAttempt, retryDelayMs, terminalJob } from "../../src/jobs/chain.js";
 import { createJobStore } from "../../src/jobs/store.js";
 import type { Job } from "../../src/jobs/types.js";
 
@@ -86,4 +86,5 @@ it("terminalJob 按写入顺序取最后一条，不依赖 endedAt（MAJOR #4）
   s.put(j("R", { endedAt: 2 }));
   s.put(j("R2", { rootId: "R", retryOf: "R", endedAt: 2 }));
   expect(terminalJob(s, "R")?.id).toBe("R2");
+  expect(nextAttempt(s.get("R2")!)).toBe(2);
 });

@@ -38,6 +38,21 @@
 
 超出最小值或最大值的键**逐项退回默认**，不影响其他键；上限用于防止 `maxTailBytes` 之类配置造成 TB 级缓冲/读盘自伤。
 
+## 工具指引覆盖（§19.2）
+
+配置层（文件 / `settings.vigilTodo` / `settings.bgRun`）可包含：
+
+```json
+{
+  "guidance": {
+    "promptSnippet": "一句工具摘要",
+    "promptGuidelines": ["要点 1", "要点 2"]
+  }
+}
+```
+
+优先级与主配置链相同（file > settings.vigilTodo > legacy.bgRun > 默认）；`promptSnippet` 与 `promptGuidelines` 分别逐项回退。工具在 `session_start` 按生效值注册/重注册：改了 guidance 后**下一次 session_start（或 `/reload`）生效**，不需要重启 pi。默认指引已覆盖 bg_run/bash 选择、WIP=1、park reason、证据完成、clear scope、唤醒后直接推进六条要点。
+
 ## `taskRetentionMs` 为什么默认 0
 
 自动删除任务是**不可逆的数据损失**。默认关闭，只有人显式设置一个正整数时才启用；sweep 会清理 `completed` / `deleted` 且 `statusSince` 早于 `now - taskRetentionMs` 的任务，走与手动 `clear` 相同的路径（含 sidecar 的 `purged` 标记）。

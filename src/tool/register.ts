@@ -9,6 +9,7 @@ import type { JobStore } from "../jobs/store.js";
 import type { VigilConfig } from "../lib/config.js";
 import { buildResult } from "./envelope.js";
 import { BgKillParamsSchema, BgListParamsSchema, BgRunParamsSchema, TodoParamsSchema, prepareTodoArguments } from "./schema.js";
+import { DEFAULT_GUIDANCE, type ToolGuidance } from "./guidance.js";
 import { sanitizeMultiline } from "../lib/sanitize.js";
 import type { TSchema } from "typebox";
 
@@ -43,6 +44,7 @@ export interface ToolResultLike {
 }
 export interface ToolDef {
   name: string; label: string; description: string;
+  promptSnippet?: string; promptGuidelines?: string[];
   parameters: TSchema;
   prepareArguments?: (args: unknown) => unknown;
   execute(params: Record<string, unknown>): Promise<ToolResultLike>;
@@ -70,11 +72,13 @@ const errResult = (message: string): ToolResultLike => ({
 const asParams = (v: unknown): MutationParams => v as MutationParams;
 const asRecord = (v: unknown): Record<string, unknown> => v as Record<string, unknown>;
 
-export function createTodoTool(deps: ToolDeps): ToolDef {
+export function createTodoTool(deps: ToolDeps, guidance: ToolGuidance = DEFAULT_GUIDANCE): ToolDef {
   return {
     name: "todo",
     label: "Todo",
-    description: "Manage the session task board (create/update/list/get/delete/clear/verify).",
+    description: "Session task board for multi-step work (create/update/list/get/delete/clear/verify). Long-running commands belong in bg_run; keep exactly one task in_progress and complete only with evidence.",
+    promptSnippet: guidance.promptSnippet,
+    promptGuidelines: guidance.promptGuidelines,
     parameters: TodoParamsSchema,
     prepareArguments: prepareTodoArguments,
     async execute(raw) {
@@ -143,11 +147,13 @@ export function createTodoTool(deps: ToolDeps): ToolDef {
   };
 }
 
-export function createBgRunTool(deps: ToolDeps): ToolDef {
+export function createBgRunTool(deps: ToolDeps, guidance: ToolGuidance = DEFAULT_GUIDANCE): ToolDef {
   return {
     name: "bg_run",
     label: "Background run",
-    description: "Start a background shell job bound to a task.",
+    description: "Start a long-running shell command as a background job bound to a task and return immediately. Use this instead of bash for training/builds/full suites; completion is delivered by a wake message.",
+    promptSnippet: guidance.promptSnippet,
+    promptGuidelines: guidance.promptGuidelines,
     parameters: BgRunParamsSchema,
     async execute(raw) {
       const command = raw.command;
@@ -203,11 +209,13 @@ export function createBgRunTool(deps: ToolDeps): ToolDef {
   };
 }
 
-export function createBgListTool(deps: ToolDeps): ToolDef {
+export function createBgListTool(deps: ToolDeps, guidance: ToolGuidance = DEFAULT_GUIDANCE): ToolDef {
   return {
     name: "bg_list",
     label: "Background jobs",
-    description: "List background jobs with status and exit codes.",
+    description: "List background jobs with id, status, exit code, label, and command so you can inspect progress or decide what to unblock.",
+    promptSnippet: guidance.promptSnippet,
+    promptGuidelines: guidance.promptGuidelines,
     parameters: BgListParamsSchema,
     async execute() {
       const jobs = deps.jobs.all();
@@ -219,11 +227,13 @@ export function createBgListTool(deps: ToolDeps): ToolDef {
   };
 }
 
-export function createBgKillTool(deps: ToolDeps): ToolDef {
+export function createBgKillTool(deps: ToolDeps, guidance: ToolGuidance = DEFAULT_GUIDANCE): ToolDef {
   return {
     name: "bg_kill",
     label: "Kill background chain",
-    description: "Kill a running job and cancel its whole retry chain (accepts any job id or root id).",
+    description: "Cancel a whole job chain (the running job plus any retries or backoff). Use only when stopping is intended; otherwise let the job finish.",
+    promptSnippet: guidance.promptSnippet,
+    promptGuidelines: guidance.promptGuidelines,
     parameters: BgKillParamsSchema,
     async execute(raw) {
       const id = raw.job_id;

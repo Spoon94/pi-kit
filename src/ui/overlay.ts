@@ -4,7 +4,6 @@ import { WIDGET_KEY } from "./panel.js";
 export interface OverlayHost {
   hasUI(): boolean;
   setWidget(key: string | undefined): void;
-  render(): string[];
 }
 
 export function createOverlayController(host: OverlayHost) {

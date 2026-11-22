@@ -91,3 +91,41 @@ it("同批两个 →in_progress，limit 1 时只一个成功（F2）", () => {
   expect(b.op.kind).toBe("error");
   expect(b.state.tasks.filter((t) => t.status === "in_progress")).toHaveLength(1);
 });
+
+describe("完成门与字段副作用（覆盖补强）", () => {
+  it("completed 需证据：无证据拒，有通过证据放行", () => {
+    let s = applyMutation(emptyBoard(), { action: "create", subject: "a" }, ctx()).state;
+    s = applyMutation(s, { action: "update", id: 1, status: "in_progress" }, ctx()).state;
+    s.tasks[0].jobs = ["bg_a"];
+    expect(applyMutation(s, { action: "update", id: 1, status: "completed" }, ctx()).op.kind).toBe("error");
+    s.tasks[0].inProgressSince = 0;
+    s.tasks[0].evidence = [{
+      ok: true, kind: "job", origin: "async", chainFinal: false, at: 1,
+      known: true, fp: "fresh", ref: "bg_a", exitCode: 0,
+    }];
+    expect(applyMutation(s, { action: "update", id: 1, status: "completed" }, ctx()).op.kind).toBe("update");
+  });
+
+  it("metadata 合并、null 删除、非对象拒绝", () => {
+    let s = applyMutation(emptyBoard(), { action: "create", subject: "a" }, ctx()).state;
+    s = applyMutation(s, { action: "update", id: 1, metadata: { a: 1 } }, ctx()).state;
+    expect(s.tasks[0].metadata).toEqual({ a: 1 });
+    s = applyMutation(s, { action: "update", id: 1, metadata: { a: null, b: 2 } }, ctx()).state;
+    expect(s.tasks[0].metadata).toEqual({ b: 2 });
+    expect(applyMutation(s, { action: "update", id: 1, metadata: "x" as never }, ctx()).op.kind).toBe("error");
+  });
+
+  it("accept:stale 标记证据 accepted", () => {
+    let s = applyMutation(emptyBoard(), { action: "create", subject: "a" }, ctx()).state;
+    s = applyMutation(s, { action: "update", id: 1, status: "in_progress" }, ctx()).state;
+    s.tasks[0].jobs = ["bg_a"];
+    s.tasks[0].inProgressSince = 0;
+    s.tasks[0].evidence = [{
+      ok: true, kind: "job", origin: "async", chainFinal: false, at: 1,
+      known: true, fp: "stale", ref: "bg_a", exitCode: 0,
+    }];
+    const r = applyMutation(s, { action: "update", id: 1, status: "completed", accept: "stale" }, ctx());
+    expect(r.op.kind).toBe("update");
+    expect(r.state.tasks[0].evidence?.[0].accepted).toBe(true);
+  });
+});

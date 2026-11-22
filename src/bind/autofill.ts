@@ -2,6 +2,7 @@ import { appendEvidence, completionGate, recordFailure } from "../board/evidence
 import type { BoardStore } from "../board/store.js";
 import type { Evidence, Task } from "../board/types.js";
 import { canRetry, canReverify, retryDelayMs } from "../jobs/chain.js";
+import { jobFactsOf } from "../jobs/facts.js";
 import type { SpawnRequest } from "../jobs/spawn.js";
 import type { JobStore } from "../jobs/store.js";
 import type { VigilConfig } from "../lib/config.js";
@@ -15,13 +16,6 @@ export interface AutofillDeps {
   notify(note: string): void;
 }
 export type AutofillAction = "completed" | "parked" | "retry" | "reverify" | "recorded";
-
-const factsOf = (jobs: JobStore) => ({
-  hasRunning: (taskId: number) => jobs.all().some((j) => j.taskId === taskId && j.status === "running"),
-  hasBackoff: (taskId: number) => jobs.all().some((j) => j.taskId === taskId && j.retryAt != null),
-  startedAt: (ref: string) => jobs.get(ref)?.startedAt,
-  exists: (id: string) => jobs.get(id) !== undefined,
-});
 
 export function autofillJob(jobId: string, d: AutofillDeps): { action: AutofillAction; reason?: string } {
   const job = d.jobs.get(jobId);
@@ -109,6 +103,6 @@ export function autofillJob(jobId: string, d: AutofillDeps): { action: AutofillA
   if (task.verifyChanged) return commit(() => {}, "recorded");
   const withEv: Task = { ...task };
   appendEvidence(withEv, ev);
-  if (completionGate(withEv, factsOf(d.jobs))) return commit(() => {}, "recorded");
+  if (completionGate(withEv, jobFactsOf(d.jobs))) return commit(() => {}, "recorded");
   return commit((t) => { t.status = "completed"; t.statusSince = d.now; }, "completed");
 }

@@ -109,6 +109,32 @@ it("purged 链不被 respawn（BLOCKER）", () => {
   expect(calls).toBe(0);
 });
 
+it("F117 sweepAll retention 清旧留新并 purged", () => {
+  const b = boards.get("S");
+  b.tasks = [
+    { id: 1, subject: "old", status: "completed", statusSince: 1, jobs: ["R"] },
+    { id: 2, subject: "new", status: "completed", statusSince: 99_000 },
+    { id: 3, subject: "deleted", status: "deleted", statusSince: 1 },
+  ];
+  b.nextId = 4;
+  boards.commit("S", b);
+  jobs.put(j("R", { taskId: 1, status: "completed", exitCode: 0, endedAt: 2 }));
+  const r = sweepAll({ ...d, cfg: { ...DEFAULTS, taskRetentionMs: 1000 }, now: 100_000 });
+  expect(r.retained).toBe(2);
+  expect(boards.get("S").tasks.map((t) => t.id)).toEqual([2]);
+  expect(jobs.get("R")?.purged).toBe(true);
+});
+
+it("F118 重验 respawn 失败 ⇒ 任务 parked「无空闲槽位重验」", () => {
+  jobs.put(j("R", { status: "completed", exitCode: 0, pendingReverify: true, taskId: 1 }));
+  d.respawn = () => ({ ok: false });
+  expect(sweepRespawns(d)).toBe(0);
+  expect(jobs.get("R")?.pendingReverify).toBe(false);
+  const task = boards.get("S").tasks[0];
+  expect(task.status).toBe("parked");
+  expect(task.park?.reason).toContain("无空闲槽位重验");
+});
+
 it("respawn 抛错 → 不重试、清退避、任务 parked(spawn failed)（F32）", () => {
   jobs.put(j("R", { retryAt: 500 }));
   d.respawn = () => ({ ok: false });

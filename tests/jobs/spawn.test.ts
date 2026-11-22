@@ -1,8 +1,8 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { spawnJob } from "../../src/jobs/spawn.js";
+import { spawnJob, readStartStamp } from "../../src/jobs/spawn.js";
 import { createMonitor } from "../../src/jobs/monitor.js";
 
 const dir = () => mkdtempSync(join(tmpdir(), "vigil-spawn-"));
@@ -51,4 +51,24 @@ it("无效 cwd 只返回错误，不产生未处理 error 事件（BLOCKER）", 
   const r = spawnJob({ command: "true", cwd: "/nonexistent-vigil-cwd" }, d, 1);
   expect(r.ok).toBe(false);
   await new Promise((res) => setTimeout(res, 50));
+});
+
+it("readStartStamp 对无效 pid 返回 undefined", () => {
+  expect(readStartStamp(999_999)).toBeUndefined();
+});
+
+it("缺省 label 用命令前缀；日志目录不可写时返回错误", () => {
+  const d = dir();
+  const r = spawnJob({ command: "echo hi", cwd: d }, d, 1);
+  if (!r.ok) throw new Error(r.error);
+  expect(r.job.label).toBe("echo hi");
+
+  const locked = dir();
+  chmodSync(locked, 0o500);
+  try {
+    const w = spawnJob({ command: "true", cwd: locked }, locked, 1);
+    expect(w.ok).toBe(false);
+  } finally {
+    chmodSync(locked, 0o700);
+  }
 });

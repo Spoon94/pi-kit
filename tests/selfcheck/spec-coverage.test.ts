@@ -49,9 +49,21 @@ it("入口级 F 编号必须在 tests/integration/ 有事件顺序断言（G2）
 
 it("§18 的 F106-F111 都在测试文本中出现（R21 / 死锁可见性）", () => {
   const spec = readFileSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"), "utf8");
-  const section = spec.slice(spec.indexOf("### 18.4"));
+  const start = spec.indexOf("### 18.4");
+  const end = spec.indexOf("## 19.");
+  const section = spec.slice(start, end > start ? end : undefined);
   const ids = [...new Set([...section.matchAll(/\bF(\d+)\b/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
   expect(ids).toEqual([106, 107, 108, 109, 110, 111]);
+  const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
+  const missing = ids.filter((n) => !new RegExp(`\\bF${n}\\b`).test(corpus));
+  expect(missing).toEqual([]);
+});
+
+it("§19 的 F112-F121 都在测试文本中出现（功能完备性/指引/截断/覆盖门禁）", () => {
+  const spec = readFileSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"), "utf8");
+  const section = spec.slice(spec.indexOf("### 19.6"));
+  const ids = [...new Set([...section.matchAll(/\bF(\d+)\b/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
+  expect(ids).toEqual([112, 113, 114, 115, 116, 117, 118, 119, 120, 121]);
   const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
   const missing = ids.filter((n) => !new RegExp(`\\bF${n}\\b`).test(corpus));
   expect(missing).toEqual([]);

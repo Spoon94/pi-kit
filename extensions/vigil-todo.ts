@@ -16,6 +16,7 @@ import { createBoardStore } from "../src/board/store.js";
 import type { BoardState } from "../src/board/types.js";
 import { chainJobs, chainTerminated, terminalJob } from "../src/jobs/chain.js";
 import { escalate, requestKill } from "../src/jobs/kill.js";
+import { jobFactsOf } from "../src/jobs/facts.js";
 import { createMonitor, recoverJobs, recoveredExit } from "../src/jobs/monitor.js";
 import { spawnJob, type SpawnRequest } from "../src/jobs/spawn.js";
 import { createJobStore, runDir, type JobStore } from "../src/jobs/store.js";
@@ -28,6 +29,7 @@ import {
   createBgKillTool, createBgListTool, createBgRunTool, createTodoTool, detectToolConflict,
   preflight, type ToolDef, type ToolDeps,
 } from "../src/tool/register.js";
+import { createGuidanceLoader, DEFAULT_GUIDANCE, type ToolGuidance } from "../src/tool/guidance.js";
 import { createOverlayController } from "../src/ui/overlay.js";
 import { WIDGET_KEY, renderDoctor, renderPanel, renderTodos } from "../src/ui/panel.js";
 import { clearRenudgeOnSettled, createAckTracker, markSent, resetOnUserInput } from "../src/wake/ack.js";
@@ -71,35 +73,29 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   let conflict = false;   // 加载期不得调用 action method；真正的判定在 session_start
   let wakeSeq = 0;
 
-  const getCfg = createConfigLoader({
-    stat: () => {
-      let mtimeMs = 0;
-      try { mtimeMs = statSync(configPath()).mtimeMs; } catch { /* 缺失视为 0 */ }
-      return { mtimeMs, settingsKey: settingsKey(pi) };
-    },
-    read: () => {
-      let file: unknown;
-      try { file = JSON.parse(readFileSync(configPath(), "utf8")); } catch { /* 缺失/损坏 */ }
-      return { file, ...settingsSources(pi) };
-    },
-  });
+  const configStat = () => {
+    let mtimeMs = 0;
+    try { mtimeMs = statSync(configPath()).mtimeMs; } catch { /* 缺失视为 0 */ }
+    return { mtimeMs, settingsKey: settingsKey(pi) };
+  };
+  const configRead = () => {
+    let file: unknown;
+    try { file = JSON.parse(readFileSync(configPath(), "utf8")); } catch { /* 缺失/损坏 */ }
+    return { file, ...settingsSources(pi) };
+  };
+  const getCfg = createConfigLoader({ stat: configStat, read: configRead });
+  const getGuidance = createGuidanceLoader({ stat: configStat, read: configRead });
 
   const overlay = createOverlayController({
     hasUI: () => activeCtx?.hasUI ?? false,
     setWidget: (key) => { if (!key) activeCtx?.ui.setWidget(WIDGET_KEY, undefined); },
-    render: () => renderPanel(boards.get(sid), jobs, getCfg()),
   });
 
   const notify = (message: string, level: "info" | "warning" | "error" = "warning"): void => {
     if (activeCtx?.hasUI) activeCtx.ui.notify(sanitizeMultiline(message), level);
   };
 
-  const jobFacts = () => ({
-    hasRunning: (taskId: number) => jobs.all().some((j) => j.taskId === taskId && j.status === "running"),
-    hasBackoff: (taskId: number) => jobs.all().some((j) => j.taskId === taskId && j.retryAt != null),
-    startedAt: (ref: string) => jobs.get(ref)?.startedAt,
-    exists: (id: string) => jobs.get(id) !== undefined,
-  });
+  const jobFacts = () => jobFactsOf(jobs);
 
   const ruleCtx = () => ({ wipLimit: getCfg().wipLimit, facts: jobFacts(), now: Date.now() });
 
@@ -389,6 +385,8 @@ export default function vigilTodo(pi: ExtensionAPI): void {
       name: def.name,
       label: def.label,
       description: def.description,
+      promptSnippet: def.promptSnippet,
+      promptGuidelines: def.promptGuidelines,
       parameters: def.parameters,
       prepareArguments: def.prepareArguments as ((args: unknown) => never) | undefined,
       execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
@@ -405,6 +403,17 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     } as ToolDefinition);
   };
 
+  let registeredGuidance = "";
+  const registerTools = (guidance: ToolGuidance): void => {
+    const key = JSON.stringify(guidance);
+    if (key === registeredGuidance) return;
+    for (const def of [
+      createTodoTool(toolDeps, guidance), createBgRunTool(toolDeps, guidance),
+      createBgListTool(toolDeps, guidance), createBgKillTool(toolDeps, guidance),
+    ]) registerToolDef(def);
+    registeredGuidance = key;
+  };
+
   const output = (ctx: ExtensionContext, text: string): void => {
     ctx.ui.notify(sanitizeMultiline(text), "info");
   };
@@ -417,9 +426,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     };
 
   if (!conflict) {
-    for (const def of [createTodoTool(toolDeps), createBgRunTool(toolDeps), createBgListTool(toolDeps), createBgKillTool(toolDeps)]) {
-      registerToolDef(def);
-    }
+    registerTools(DEFAULT_GUIDANCE);
 
     pi.registerCommand("vigil-todo", {
       description: "vigil-todo 面板 / halt / resume / doctor",
@@ -636,6 +643,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
       return;
     }
     initSession(ctx);
+    registerTools(getGuidance());           // 配置覆盖的指引（与加载期默认不同才重注册）
     wire();
     registerCollapseShortcut();
     refreshOverlay();

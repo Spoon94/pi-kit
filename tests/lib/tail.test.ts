@@ -21,3 +21,13 @@ it("大文件不整读：maxBytes 限制生效（Review Focus 4）", () => {
 it("文件不存在返回空数组，不抛（Review Focus 4）", () => {
   expect(tailLines("/nonexistent/vigil.log", 20, 8192)).toEqual([]);
 });
+
+it("尾随换行与空文件的边界", () => {
+  const d = mkdtempSync(join(tmpdir(), "vigil-tail-"));
+  const p = join(d, "trailing.log");
+  writeFileSync(p, "a\nb\n");
+  expect(tailLines(p, 5, 8192)).toEqual(["a", "b"]);
+  const empty = join(d, "empty.log");
+  writeFileSync(empty, "");
+  expect(tailLines(empty, 5, 8192)).toEqual([]);
+});

@@ -1,5 +1,6 @@
 import type { BoardStore } from "../board/store.js";
 import { applyCleanup, markPurged, planCleanup, retentionCandidates } from "../board/cleanup.js";
+import { jobFactsOf } from "../jobs/facts.js";
 import type { SpawnRequest } from "../jobs/spawn.js";
 import type { JobStore } from "../jobs/store.js";
 import type { VigilConfig } from "../lib/config.js";
@@ -105,12 +106,7 @@ function applyRetention(d: SweepDeps): number {
   const board = d.boards.get(d.sessionId);
   const candidates = retentionCandidates(board, d.cfg.taskRetentionMs, d.now);
   if (!candidates.length) return 0;
-  const facts = {
-    hasRunning: (taskId: number) => d.jobs.all().some((j) => j.taskId === taskId && j.status === "running"),
-    hasBackoff: (taskId: number) => d.jobs.all().some((j) => j.taskId === taskId && j.retryAt != null),
-    startedAt: () => undefined,
-    exists: () => true,
-  };
+  const facts = jobFactsOf(d.jobs);
   const subset = { ...board, tasks: board.tasks.filter((t) => candidates.includes(t.id)) };
   const plan = planCleanup(subset, "settled", undefined, facts);
   if (!plan.remove.length) return 0;

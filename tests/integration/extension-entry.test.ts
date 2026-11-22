@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +8,8 @@ import { emptyBoard, type BoardState } from "../../src/board/types.js";
 import { createJobStore, runDir } from "../../src/jobs/store.js";
 import { readStartStamp } from "../../src/jobs/spawn.js";
 import type { Job } from "../../src/jobs/types.js";
+import { DEFAULTS } from "../../src/lib/config.js";
+import { WAKE_CUSTOM_TYPE } from "../../src/wake/compose.js";
 
 type Handler = (event: any, ctx: any) => unknown;
 
@@ -35,17 +37,30 @@ const completedWithEvidence = (refs: string[], extra?: (b: BoardState) => void):
   return b;
 };
 
-function makeHarness(cwd: string, branch: unknown[], idle = true, sessionId = "S") {
+function makeHarness(
+  cwd: string, branch: unknown[], idle = true, sessionId = "S",
+  opts: {
+    hasUI?: boolean; allTools?: any[]; executeTool?: (name: string, args: unknown) => Promise<any>;
+    getSettings?: () => any; sendMessageThrows?: boolean; shortcutThrows?: boolean;
+  } = {},
+) {
   const handlers = new Map<string, Handler[]>();
   const commands = new Map<string, (args: string, ctx: any) => unknown>();
   const toolDefs = new Map<string, any>();
+  const shortcuts = new Map<string, (ctx: any) => unknown>();
+  const widgets: (string | undefined)[] = [];
   const sent: any[] = [];
   const notifications: string[] = [];
   let isIdle = idle;
+  const hasUI = opts.hasUI ?? false;
   const ctx = {
-    cwd, hasUI: false, mode: "text",
-    ui: { notify: (msg: string) => { notifications.push(msg); }, setWidget: () => {} },
+    cwd, hasUI, mode: "text",
+    ui: { notify: (msg: string) => { notifications.push(msg); }, setWidget: (key?: string) => { widgets.push(key); } },
     isIdle: () => isIdle,
+    executeTool: opts.executeTool ?? (async () => ({
+      isError: false,
+      result: { content: [{ type: "text", text: "ok" }], details: {}, structuredContent: { exit_code: 0 } },
+    })),
     sessionManager: {
       getSessionId: () => sessionId,
       getCwd: () => cwd,
@@ -62,11 +77,18 @@ function makeHarness(cwd: string, branch: unknown[], idle = true, sessionId = "S
     },
     registerTool: (def: any) => { toolDefs.set(def.name, def); },
     registerCommand: (name: string, opts: any) => { commands.set(name, opts.handler); },
-    registerShortcut: () => {},
-    getAllTools: () => [{ name: "todo", sourceInfo: { source: "pi-kit" } }],
-    getSettings: () => ({}),
+    registerShortcut: (key: string, options: any) => {
+      if (opts.shortcutThrows) throw new Error("invalid key");
+      shortcuts.set(key, options.handler);
+    },
+    getAllTools: () => opts.allTools ?? [{ name: "todo", sourceInfo: { source: "pi-kit" } }],
+    getSettings: () => opts.getSettings ? opts.getSettings() : {},
     appendEntry: (customType: string, data: unknown) => { branch.push({ type: "custom", customType, data }); },
-    sendMessage: (message: any, options: any) => { sent.push({ message, options }); return Promise.resolve(); },
+    sendMessage: (message: any, options: any) => {
+      if (opts.sendMessageThrows) throw new Error("send boom");
+      sent.push({ message, options });
+      return Promise.resolve();
+    },
   };
   const emit = async (name: string, event: any = { type: name }): Promise<any> => {
     let result: any;
@@ -85,7 +107,9 @@ function makeHarness(cwd: string, branch: unknown[], idle = true, sessionId = "S
     return def.execute(`call-${callSeq++}`, params, undefined, undefined, ctx);
   };
   const setIdle = (v: boolean) => { isIdle = v; };
-  return { api, emit, runCommand, runTool, sent, notifications, setIdle, ctx };
+  return {
+    api, emit, runCommand, runTool, sent, notifications, toolDefs, shortcuts, widgets, setIdle, ctx,
+  };
 }
 
 const waitForFinalized = async (cwd: string, count: number): Promise<void> => {
@@ -473,4 +497,312 @@ it("/bg tail 拒绝 runDir 外的 logPath（MINOR #2）", async () => {
   const out = h.notifications.join("\n");
   expect(out).toContain("sidecar 可疑");
   expect(out).not.toContain("TOPSECRET");
+});
+
+it("F119：/vigil-todo halt 与 resume 命令入口真实生效", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  setupJobs(cwd, [job({
+    id: "R", status: "failed", exitCode: 1, endedAt: 2, taskId: 1, sessionId: "S",
+    retryAt: Date.now() + 60_000, finalized: false, evidenceApplied: true, finalResult: undefined,
+  })]);
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "训练", status: "in_progress", jobs: ["R"], inProgressSince: 0 }];
+  b.nextId = 2;
+  const branch: unknown[] = [snapshot(b)];
+  const h = makeHarness(cwd, branch, true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+
+  const lastSnap = () => (branch.filter((e: any) => e?.customType === "rpiv-todo-state") as any[]).at(-1)?.data;
+  await h.runCommand("vigil-todo", "halt");
+  let store = createJobStore(runDir(cwd));
+  store.load();
+  expect(store.get("R")?.kill?.requestedBy).toBe("self");
+  expect(store.get("R")?.retryAt).toBeUndefined();
+  expect(lastSnap().counters.halted).toBe(true);
+  expect(lastSnap().tasks[0].status).toBe("parked");
+  expect(lastSnap().tasks[0].park?.reason).toContain("强制中断");
+
+  await h.runCommand("vigil-todo", "resume");
+  expect(lastSnap().counters.halted).toBeUndefined();
+  expect(h.notifications.join("\n")).toContain("已恢复自主推进");
+});
+
+it("F120：配置文件的 guidance 覆盖工具 promptSnippet/promptGuidelines", async () => {
+  const home = mkdtempSync(join(tmpdir(), "vigil-ext-cfg-"));
+  mkdirSync(join(home, "pi-kit"), { recursive: true });
+  writeFileSync(join(home, "pi-kit", "config.json"), JSON.stringify({
+    guidance: { promptSnippet: "CUSTOM SNIPPET", promptGuidelines: ["CUSTOM LINE"] },
+  }));
+  process.env.XDG_CONFIG_HOME = home;
+
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const h = makeHarness(cwd, [snapshot(emptyBoard())], true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  expect(h.toolDefs.get("todo")?.promptSnippet).toBe("CUSTOM SNIPPET");
+  expect(h.toolDefs.get("todo")?.promptGuidelines).toEqual(["CUSTOM LINE"]);
+});
+
+it("扩展全事件与命令路径（覆盖率补强）", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const storeDir = runDir(cwd);
+  mkdirSync(storeDir, { recursive: true });
+  const log = join(storeDir, "r.log");
+  const emptyLog = join(storeDir, "empty.log");
+  writeFileSync(log, "line-ok");
+  writeFileSync(emptyLog, "");
+  setupJobs(cwd, [
+    job({
+      id: "R", label: "训练", command: "train", logPath: log, status: "failed", exitCode: 1, endedAt: 2,
+      finalized: true, evidenceApplied: true, notifyState: "acked", taskId: 1, sessionId: "S",
+    }),
+    job({
+      id: "E", rootId: "E", label: "empty", command: "true", logPath: emptyLog, status: "failed", exitCode: 1,
+      endedAt: 2, finalized: true, evidenceApplied: true, notifyState: "acked", taskId: 2, sessionId: "S",
+    }),
+    job({
+      id: "R2", rootId: "R2", label: "backoff", command: "true", logPath: log, status: "failed", exitCode: 1,
+      endedAt: 2, retryAt: Date.now() + 60_000, finalized: false, evidenceApplied: true,
+      finalResult: undefined, taskId: 2, sessionId: "S",
+    }),
+  ]);
+  const b = emptyBoard();
+  b.tasks = [
+    { id: 1, subject: "a", status: "in_progress", inProgressSince: 0, jobs: ["R"], verify: { kind: "command", command: "true" } },
+    { id: 2, subject: "b", status: "pending" },
+  ];
+  b.nextId = 3;
+  b.counters = { turnsUsed: 5, wakeWatermark: 0, renudgeBudget: 1 };
+  const branch: unknown[] = [snapshot(b)];
+  const h = makeHarness(cwd, branch, true, "S", { hasUI: true });
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+
+  const blocked = await h.emit("tool_call", {
+    type: "tool_call", toolName: "todo", input: { action: "update", id: 2, status: "in_progress" }, toolCallId: "t1",
+  });
+  expect(blocked?.block).toBe(true);
+  expect(await h.emit("tool_call", {
+    type: "tool_call", toolName: "todo", parentToolCallId: "p",
+    input: { action: "update", id: 2, status: "in_progress" }, toolCallId: "t2",
+  })).toBeUndefined();
+  expect(await h.emit("tool_call", { type: "tool_call", toolName: "read", input: {}, toolCallId: "t3" })).toBeUndefined();
+
+  await h.emit("message_start", { type: "message_start", message: { customType: WAKE_CUSTOM_TYPE, details: { wakeId: "w1" } } });
+  await h.emit("message_end", { type: "message_end", message: { customType: WAKE_CUSTOM_TYPE, details: { wakeId: "w1" } } });
+  await h.emit("message_start", { type: "message_start", message: { role: "user" } });
+  await h.emit("agent_start", { type: "agent_start" });
+  await h.emit("agent_settled", { type: "agent_settled" });
+  await h.emit("tool_execution_start", { type: "tool_execution_start", toolName: "bg_run", args: {}, toolCallId: "t4" });
+  await h.emit("tool_execution_start", { type: "tool_execution_start", toolName: "todo", args: { action: "update", status: "parked" }, toolCallId: "t5" });
+  await h.emit("tool_execution_start", { type: "tool_execution_start", toolName: "read", parentToolCallId: "p", args: {}, toolCallId: "t6" });
+  await h.emit("tool_execution_start", { type: "tool_execution_start", toolName: "todo", toolCallId: "t7" });
+  await h.emit("tool_execution_end", { type: "tool_execution_end", toolName: "todo", toolCallId: "t5" });
+
+  await h.emit("input", { type: "input", text: "hi", source: "extension" });
+  await h.emit("input", { type: "input", text: "hi", source: "rpc" });
+  await h.emit("input", { type: "input", text: "hi", source: "interactive" });
+
+  await h.runCommand("vigil-todo", "");
+  await h.runCommand("vigil-todo", "doctor");
+  await h.runCommand("vigil-todo", "resume");
+  await h.runCommand("todos", "");
+  await h.runCommand("bg", "");
+  await h.runCommand("bg", "k");
+  await h.runCommand("bg", "k NOPE");
+  await h.runCommand("bg", "k R");
+  await h.runCommand("bg", "k R confirm");
+  await h.runCommand("bg", "k R confirm");
+  await h.runCommand("bg", "tail R");
+  await h.runCommand("bg", "tail NOPE");
+  await h.runCommand("bg", "tail E");
+
+  const vr = await h.runTool("todo", { action: "verify", id: 1 });
+  expect(vr.isError).toBeFalsy();
+
+  for (const handler of h.shortcuts.values()) await handler(h.ctx);
+  expect(h.widgets.length).toBeGreaterThan(0);
+
+  await h.emit("session_start", { type: "session_start", reason: "reload" });
+  await h.emit("session_compact", { type: "session_compact" });
+  await h.emit("session_tree", { type: "session_tree" });
+  await h.emit("session_shutdown", { type: "session_shutdown" });
+  expect(h.notifications.length).toBeGreaterThan(0);
+});
+
+it("启动冲突自检：旧包占位时 notify error 且不 wire", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const h = makeHarness(cwd, [snapshot(emptyBoard())], true, "S", {
+    hasUI: true,
+    allTools: [{ name: "todo", sourceInfo: { source: "old-package" } }],
+  });
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  expect(h.notifications.join("\n")).toContain("其他扩展");
+  expect(h.notifications.join("\n")).toContain("不注册事件处理器");
+});
+
+it("collapseKey=off 时不注册快捷键", async () => {
+  const home = mkdtempSync(join(tmpdir(), "vigil-ext-cfg-"));
+  mkdirSync(join(home, "pi-kit"), { recursive: true });
+  writeFileSync(join(home, "pi-kit", "config.json"), JSON.stringify({ collapseKey: "off" }));
+  process.env.XDG_CONFIG_HOME = home;
+
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const h = makeHarness(cwd, [snapshot(emptyBoard())], true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  expect(h.shortcuts.size).toBe(0);
+});
+
+it("配置缺失/损坏/不可序列化 settings 时仍能启动", async () => {
+  const broken = mkdtempSync(join(tmpdir(), "vigil-ext-cfg-"));
+  mkdirSync(join(broken, "pi-kit"), { recursive: true });
+  writeFileSync(join(broken, "pi-kit", "config.json"), "{broken");
+  process.env.XDG_CONFIG_HOME = broken;
+  const h = makeHarness(mkdtempSync(join(tmpdir(), "vigil-ext-")), [snapshot(emptyBoard())], true, "S", {
+    getSettings: () => { const o: any = {}; o.vigilTodo = o; return o; },
+  });
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  expect(h.toolDefs.size).toBe(4);
+
+  process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "vigil-ext-cfg-"));
+  const h2 = makeHarness(mkdtempSync(join(tmpdir(), "vigil-ext-")), [snapshot(emptyBoard())], true);
+  vigilTodo(h2.api);
+  await h2.emit("session_start", { type: "session_start", reason: "startup" });
+  expect(h2.toolDefs.size).toBe(4);
+});
+
+it("XDG 未设置时回退 HOME/.config", async () => {
+  const oldHome = process.env.HOME;
+  const oldXdg = process.env.XDG_CONFIG_HOME;
+  const home = mkdtempSync(join(tmpdir(), "vigil-ext-home-"));
+  mkdirSync(join(home, ".config", "pi-kit"), { recursive: true });
+  writeFileSync(join(home, ".config", "pi-kit", "config.json"), "{}");
+  process.env.HOME = home;
+  delete process.env.XDG_CONFIG_HOME;
+  try {
+    const h = makeHarness(mkdtempSync(join(tmpdir(), "vigil-ext-")), [snapshot(emptyBoard())], true);
+    vigilTodo(h.api);
+    await h.emit("session_start", { type: "session_start", reason: "startup" });
+    expect(h.toolDefs.size).toBe(4);
+  } finally {
+    process.env.HOME = oldHome;
+    if (oldXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = oldXdg;
+  }
+});
+
+it("非法 collapseKey 注册失败不致命", async () => {
+  const home = mkdtempSync(join(tmpdir(), "vigil-ext-cfg-"));
+  mkdirSync(join(home, "pi-kit"), { recursive: true });
+  writeFileSync(join(home, "pi-kit", "config.json"), JSON.stringify({ collapseKey: "!bad" }));
+  process.env.XDG_CONFIG_HOME = home;
+  const h = makeHarness(mkdtempSync(join(tmpdir(), "vigil-ext-")), [snapshot(emptyBoard())], true, "S", {
+    shortcutThrows: true,
+  });
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  expect(h.shortcuts.size).toBe(0);
+});
+
+it("sendMessage 抛错时 notify 并等待 catch-up", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  setupJobs(cwd, [job({ id: "R", notifyState: "pending" })]);
+  const b = emptyBoard();
+  b.tasks = [{
+    id: 1, subject: "a", status: "completed",
+    evidence: [{ ok: true, kind: "job", origin: "async", chainFinal: true, at: 500, known: true, fp: "fresh", ref: "R", exitCode: 0 }],
+  }];
+  b.nextId = 2;
+  const h = makeHarness(cwd, [snapshot(b)], true, "S", { hasUI: true, sendMessageThrows: true });
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  expect(h.sent).toHaveLength(0);
+  expect(h.notifications.join("\n")).toContain("唤醒发送失败");
+});
+
+it("catch-up 达 maxTurns 不发；halted boundary 不续跑", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  setupJobs(cwd, [job({ id: "R", notifyState: "pending" })]);
+  const b = emptyBoard();
+  b.tasks = [{
+    id: 1, subject: "a", status: "completed",
+    evidence: [{ ok: true, kind: "job", origin: "async", chainFinal: true, at: 500, known: true, fp: "fresh", ref: "R", exitCode: 0 }],
+  }];
+  b.nextId = 2;
+  b.counters.turnsUsed = DEFAULTS.maxTurns;
+  const h = makeHarness(cwd, [snapshot(b)], true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  expect(h.sent).toHaveLength(0);
+
+  const b2 = emptyBoard();
+  b2.tasks = [{ id: 1, subject: "x", status: "pending" }];
+  b2.nextId = 2;
+  b2.counters.halted = true;
+  b2.counters.haltedAt = 1;
+  const h2 = makeHarness(mkdtempSync(join(tmpdir(), "vigil-ext-")), [snapshot(b2)], false);
+  vigilTodo(h2.api);
+  await h2.emit("session_start", { type: "session_start", reason: "startup" });
+  expect(await h2.emit("agent_before_settle", { type: "agent_before_settle" })).toBeUndefined();
+});
+
+it("spawn 失败时 bg_run 返回 isError", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "a", status: "pending" }];
+  b.nextId = 2;
+  const h = makeHarness(cwd, [snapshot(b)], true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  rmSync(cwd, { recursive: true, force: true });
+  const r = await h.runTool("bg_run", { command: "true", task_id: 1 });
+  expect(r.isError).toBe(true);
+});
+
+it("halt 杀 running 作业（escalate 路径）", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const child = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+  const pid = child.pid!;
+  try {
+    const stamp = readStartStamp(pid);
+    setupJobs(cwd, [job({
+      id: "R", pid, startStamp: stamp, status: "running", endedAt: null,
+      exitCode: null, exitCodeKnown: false, finalized: false, finalResult: undefined,
+      taskId: 1, sessionId: "S",
+    })]);
+    const b = emptyBoard();
+    b.tasks = [{ id: 1, subject: "t", status: "in_progress", jobs: ["R"], inProgressSince: 0 }];
+    b.nextId = 2;
+    const h = makeHarness(cwd, [snapshot(b)], true);
+    vigilTodo(h.api);
+    await h.emit("session_start", { type: "session_start", reason: "startup" });
+    const exited = new Promise<void>((res) => child.once("exit", () => res()));
+    await h.runCommand("vigil-todo", "halt");
+    await exited;
+    const store = createJobStore(runDir(cwd));
+    store.load();
+    expect(store.get("R")?.kill?.requestedBy).toBe("self");
+  } finally {
+    if (child.exitCode === null) child.kill("SIGKILL");
+  }
+});
+
+it("shutdown 清理单 timer 与合并 timer", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  setupJobs(cwd, []);
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "a", status: "pending" }];
+  b.nextId = 2;
+  const h = makeHarness(cwd, [snapshot(b)], true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  const r = await h.runTool("bg_run", { command: "true", task_id: 1 });
+  expect(r.isError).toBeFalsy();
+  await waitForFinalized(cwd, 1);
+  await h.emit("session_shutdown", { type: "session_shutdown" });
+  expect(vi.getTimerCount()).toBe(0);
 });

@@ -8,9 +8,16 @@ import { sanitizeMultiline, sanitizeTerminalText } from "../lib/sanitize.js";
 
 export const WIDGET_KEY = "vigil-todo";
 
+/** 面板行按显示宽度（保守按字符数）截断，加省略号；/todos 全量视图不截断。 */
+export function truncateToWidth(value: string, width: number): string {
+  const chars = Array.from(value);
+  if (chars.length <= width) return value;
+  return chars.slice(0, Math.max(0, width - 1)).join("") + "…";
+}
+
 export function layoutRows(
   state: BoardState, jobs: JobStore, budget: number,
-  cfg: VigilConfig = DEFAULTS, now = Date.now(),
+  cfg: VigilConfig = DEFAULTS, now = Date.now(), width = 100,
 ) {
   const sum = completedSummary(state);
   const parked = state.tasks.filter((t) => t.status === "parked");
@@ -60,12 +67,12 @@ export function layoutRows(
   }
   if (hiddenParked) rows.push(`└─ +${hiddenParked} more parked`);
   else if (rows.length > 1) rows[rows.length - 1] = rows[rows.length - 1].replace("├─", "└─");
-  return { rows: rows.map(sanitizeTerminalText), hiddenParked };
+  return { rows: rows.map((r) => truncateToWidth(sanitizeTerminalText(r), width)), hiddenParked };
 }
 
-export function renderPanel(state: BoardState, jobs: JobStore, cfg: VigilConfig): string[] {
+export function renderPanel(state: BoardState, jobs: JobStore, cfg: VigilConfig, width = 100): string[] {
   if (state.tasks.every((t) => t.status === "deleted")) return [];
-  return [...layoutRows(state, jobs, cfg.maxWidgetLines, cfg).rows, ""];
+  return [...layoutRows(state, jobs, cfg.maxWidgetLines, cfg, Date.now(), width).rows, ""];
 }
 
 export function renderTodos(state: BoardState, _jobs: JobStore): string {

@@ -91,3 +91,12 @@ it("logPath 越界时不读日志，避免 sidecar 篡改泄密（MINOR #2）", 
   expect(text).not.toContain("TOPSECRET");
   expect(text).not.toContain("log tail");
 });
+
+it("缺失 root 与缺省字段的容错", () => {
+  const jobs = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_9q0d6s1e}}")));
+  jobs.put(j({ taskId: undefined, exitCode: null, endedAt: null, finalResult: undefined }));
+  const text = composeWake(["R", "missing"], emptyBoard(), jobs, DEFAULTS, undefined);
+  expect(text).toContain("#?");
+  expect(text).toContain("exit ?");
+  expect(text).toContain("无可推进任务");
+});

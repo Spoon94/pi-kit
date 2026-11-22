@@ -125,3 +125,46 @@ it("WIP 超卖在面板与 doctor 可见（MINOR #5）", () => {
   expect(doc).toContain("超过 wipLimit=1");
   expect(doc).not.toContain("无可推进");
 });
+
+it("面板按宽度截断加省略号，/todos 全量不截断（F115）", () => {
+  const long = "x".repeat(300);
+  const s = b([
+    { id: 1, subject: long, status: "pending" },
+    { id: 2, subject: "p", status: "parked", park: { reason: long, at: 1, from: "pending" } },
+  ]);
+  const rows = renderPanel(s, jobs(), DEFAULTS).filter((r) => r !== "");
+  for (const r of rows) expect(Array.from(r).length).toBeLessThanOrEqual(100);
+  expect(rows.join("\n")).toContain("…");
+
+  const narrow = layoutRows(s, jobs(), 12, DEFAULTS, 1, 60).rows;
+  for (const r of narrow) expect(Array.from(r).length).toBeLessThanOrEqual(60);
+
+  expect(renderTodos(s, jobs())).toContain(long);
+});
+
+it("汇总行覆盖非零退出 / reverified / verify changed 分支", () => {
+  const s = b([
+    { id: 1, subject: "a", status: "completed", verifyChanged: true, evidence: [ev({ ok: false, exitCode: 1 })] },
+    { id: 2, subject: "b", status: "completed", evidence: [ev({ note: "reverified" })] },
+  ]);
+  const summary = renderPanel(s, jobs(), DEFAULTS).find((r) => r.includes("done ·")) ?? "";
+  expect(summary).toContain("有非零退出");
+  expect(summary).toContain("reverified");
+  expect(summary).toContain("verify changed");
+});
+
+it("parked 缺 reason、预算截断与 renderTodos 空证据分支", () => {
+  const parked = b([{ id: 1, subject: "p", status: "parked" }]);
+  expect(renderPanel(parked, jobs(), DEFAULTS).some((r) => r.includes("└─"))).toBe(true);
+
+  const many: Task[] = [
+    ...Array.from({ length: 4 }, (_, i) => ({ id: i + 1, subject: `i${i}`, status: "in_progress" as const })),
+    ...Array.from({ length: 4 }, (_, i) => ({ id: i + 5, subject: `p${i}`, status: "pending" as const })),
+  ];
+  const { rows } = layoutRows(b(many), jobs(), 3);
+  expect(rows).toHaveLength(3);
+
+  const doneNoFin = b([{ id: 1, subject: "a", status: "completed" }]);
+  expect(renderTodos(doneNoFin, jobs())).toContain("[completed] #1 a");
+  expect(renderTodos(emptyBoard(), jobs())).toBe("No tasks");
+});

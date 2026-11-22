@@ -5,7 +5,7 @@ import { expect, it } from "vitest";
 import { emptyBoard } from "../../src/board/types.js";
 import { createJobStore } from "../../src/jobs/store.js";
 import type { Job } from "../../src/jobs/types.js";
-import { ackByWakeId, clearRenudgeOnSettled, createAckTracker, markSent, resetOnUserInput } from "../../src/wake/ack.js";
+import { ackByWakeId, ackPendingBoundary, clearRenudgeOnSettled, createAckTracker, markSent, resetOnUserInput } from "../../src/wake/ack.js";
 import { WAKE_CUSTOM_TYPE } from "../../src/wake/compose.js";
 
 const store = () => createJobStore(mkdtempSync(join(tmpdir(), "vigil-ack-")));
@@ -84,4 +84,13 @@ it("agent_settled 清零 renudgeBudget（F70）", () => {
   const b = emptyBoard();
   b.counters = { turnsUsed: 3, wakeWatermark: 500, renudgeBudget: 1 };
   expect(clearRenudgeOnSettled(b.counters).renudgeBudget).toBe(0);
+});
+
+it("ackPendingBoundary 只 ack 本会话 sent 的 root", () => {
+  const s = store();
+  s.put(j("R", { notifyState: "sent", sessionId: "S" }));
+  s.put(j("OTHER", { notifyState: "sent", sessionId: "OTHER" }));
+  expect(ackPendingBoundary(s, "S")).toBe(1);
+  expect(s.get("R")?.notifyState).toBe("acked");
+  expect(s.get("OTHER")?.notifyState).toBe("sent");
 });

@@ -72,6 +72,7 @@ park      todo({action:"update", id, status:"parked", reason:"…"})
 npm install
 npm test        # vitest
 npm run typecheck
+npm run coverage:check   # 行≥95% / 分支≥90% / 函数≥95%
 ```
 
 架构：`src/board` 纯状态机（不 import pi）→ `src/jobs` 进程子系统 → `src/bind` 唯一跨界写入层 → `src/wake` 投递 → `src/ui` 只读面板。作业事实只由 sidecar（`/tmp/bg-run/<hash(cwd)>/jobs.json`）说，任务可见性只由会话快照说。

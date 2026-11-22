@@ -29,7 +29,7 @@ export interface Task {
   lastFailure?: LastFailure;
   statusSince?: number;
   inProgressSince?: number;
-  park?: { reason: string; at: number; from: Status };
+  park?: { reason: string; at: number; from: Status; by?: "halt" };
 }
 
 export interface BoardCounters {

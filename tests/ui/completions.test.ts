@@ -29,17 +29,18 @@ it("T1 面板子命令：空前缀全出，h/r/d 前缀过滤，未知返回 nul
   expect(PANEL_SUBCOMMANDS.find((c) => c.value === "halt")?.description).toContain("park");
 });
 
-it("F131 补全：一级含 clear，clear 前缀出四个范围候选", () => {
+it("F131 补全：一级含 clear，clear 前缀只出三个范围候选（无 all）", () => {
   expect(panelCompletions("")!.map((c) => c.value)).toContain("clear");
   expect(panelCompletions("clear ")!.map((c) => c.value))
-    .toEqual(["clear completed", "clear deleted", "clear settled", "clear all"]);
+    .toEqual(["clear completed", "clear deleted", "clear settled"]);
+  expect(panelCompletions("clear ")!.map((c) => c.value)).not.toContain("clear all");
   expect(panelCompletions("clear c")!.map((c) => c.value)).toEqual(["clear completed"]);
   expect(panelCompletions("clear d")!.map((c) => c.value)).toEqual(["clear deleted"]);
   expect(panelCompletions("clear s")!.map((c) => c.value)).toEqual(["clear settled"]);
-  expect(panelCompletions("clear a")!.map((c) => c.value)).toEqual(["clear all"]);
+  expect(panelCompletions("clear a")).toBeNull();
   expect(panelCompletions("clear z")).toBeNull();
   expect(panelCompletions("clear ")![0].description).toContain("已完成");
-  expect(panelCompletions("clear ")![3].description).toContain("confirm");
+  expect(panelCompletions("clear ")![2].description).toContain("默认");
 });
 
 it("T2 /bg 子命令与动态 id：k 只列 running/退避，tail 列全部", () => {
@@ -92,6 +93,7 @@ it("补全纯读、永不抛：不 save、不改 store、坏 store 返回 null",
   expect(existsSync(join(dir, "jobs.json"))).toBe(false);
 
   expect(bgCompletions("k ", undefined)).toBeNull();
+  expect(bgCompletions("tail ", undefined)).toBeNull();
   const broken = { all: () => { throw new Error("boom"); } } as never;
   expect(bgCompletions("k ", broken)).toBeNull();
   expect(bgCompletions(undefined as never, s)).not.toBeNull();

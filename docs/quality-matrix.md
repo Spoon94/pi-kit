@@ -25,7 +25,7 @@
 
 - 测量命令：`npm run coverage`（v8 provider；排除纯类型文件 `src/jobs/types.ts`）
 - 门禁命令：`npm run coverage:check`，阈值 **行 ≥95% / 分支 ≥90% / 函数 ≥95%**，未达即非零退出
-- 本轮基线（2026-11-22）：**行 99.49% / 分支 93.44% / 函数 98.81%**（431 用例）
+- 本轮基线（2026-11-22）：**行 99.49% / 分支 93.49% / 函数 98.81%**（434 用例）
 - 交付前必跑：`npm test && npm run typecheck && npm run coverage:check`，或一次运行 `npm run verify`
 - perf 稳定性：`fileParallelism:false`（文件串行，避免 perf 与其他测试争 CPU）+ JIT 预热丢弃前两批 + 5 批 p95 取中位数；4 个 CPU burner 负载下连续 5 次全量套件全部通过
 - 门禁实测：正常全量通过；临时移除大量测试后覆盖率下降（本次实验 98.92→97.33 行、92.13→91.71 分支），把阈值人为提高即出现 `ERROR: Coverage for ... does not meet ...` 非零退出；删除 tool/ui 测试会使 `coverage:check` 因自检/阈值一起失败。

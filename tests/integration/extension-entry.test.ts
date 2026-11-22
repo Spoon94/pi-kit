@@ -534,7 +534,10 @@ it("F119：/vigil-todo halt 与 resume 命令入口真实生效", async () => {
 
   await h.runCommand("vigil-todo", "resume");
   expect(lastSnap().counters.halted).toBeUndefined();
+  expect(lastSnap().tasks[0].status).toBe("pending");
+  expect(lastSnap().tasks[0].park).toBeUndefined();
   expect(h.notifications.join("\n")).toContain("已恢复自主推进");
+  expect(h.notifications.join("\n")).toContain("1 个中断任务回到 pending");
 });
 
 it("F120：配置文件的 guidance 覆盖工具 promptSnippet/promptGuidelines", async () => {
@@ -690,7 +693,7 @@ it("T1 /vt 与 /vigil-todo 共用同一份补全定义", async () => {
   expect(a("r").map((c: any) => c.value)).toEqual(["resume"]);
   expect(a("d").map((c: any) => c.value)).toEqual(["doctor"]);
   expect(a("clear ").map((c: any) => c.value))
-    .toEqual(["clear completed", "clear deleted", "clear settled", "clear all"]);
+    .toEqual(["clear completed", "clear deleted", "clear settled"]);
   expect(a("x")).toBeNull();
   for (const p of ["", "h", "r", "d", "x"]) expect(a(p)).toEqual(b(p));
 });
@@ -799,15 +802,14 @@ it("F124 /vt clear completed / deleted 各自只清一类", async () => {
   expect(deleted.replay.tasks.map((t) => t.id)).toEqual([1]);
 });
 
-it("F125 /vt clear all 无 confirm：不删除，回显含 pending/in_progress 的清单", async () => {
+it("F125 /vt clear all 被拒：列出允许的三个范围，不删除", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const b = emptyBoard();
   b.tasks = [
-    { id: 1, subject: "待办", status: "pending" },
-    { id: 2, subject: "在跑", status: "in_progress", inProgressSince: 0 },
-    { id: 3, subject: "等人", status: "parked", park: { reason: "等", at: 1, from: "pending" } },
+    { id: 1, subject: "done", status: "completed", statusSince: 1 },
+    { id: 2, subject: "待办", status: "pending" },
   ];
-  b.nextId = 4;
+  b.nextId = 3;
   const branch: unknown[] = [snapshot(b)];
   const h = makeHarness(cwd, branch, true);
   vigilTodo(h.api);
@@ -816,15 +818,13 @@ it("F125 /vt clear all 无 confirm：不删除，回显含 pending/in_progress �
 
   await h.runCommand("vt", "clear all");
   const out = h.notifications.at(-1)!;
-  expect(out).toContain("clear all confirm");
-  expect(out).toContain("#1 [pending] 待办");
-  expect(out).toContain("#2 [in_progress] 在跑");
-  expect(out).toContain("#3 [parked] 等人");
-  expect(replayBranch(branch as never[]).tasks).toHaveLength(3);
+  expect(out).toContain("clear all 不支持");
+  expect(out).toContain("completed / deleted / settled");
+  expect(replayBranch(branch as never[]).tasks).toHaveLength(2);
   expect(branch.filter((e: any) => e?.customType === "rpiv-todo-state").length).toBe(before);
 });
 
-it("F125 未先看清单直接 clear all confirm：拒绝且不删除", async () => {
+it("F126 /vt clear all confirm 同样被拒，confirm 也不提供", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const b = emptyBoard();
   b.tasks = [{ id: 1, subject: "done", status: "completed", statusSince: 1 }];
@@ -833,58 +833,79 @@ it("F125 未先看清单直接 clear all confirm：拒绝且不删除", async ()
   const h = makeHarness(cwd, branch, true);
   vigilTodo(h.api);
   await h.emit("session_start", { type: "session_start", reason: "startup" });
+
   await h.runCommand("vt", "clear all confirm");
-  expect(h.notifications.at(-1)).toContain("先 /vt clear all");
+  const out = h.notifications.at(-1)!;
+  expect(out).toContain("clear all 不支持");
+  expect(out).toContain("completed / deleted / settled");
   expect(replayBranch(branch as never[]).tasks).toHaveLength(1);
 });
 
-it("F126 /vt clear all confirm 有 running/退避链时拒绝并指向 bg_kill / halt", async () => {
+it("F127 board 含 pending/in_progress/parked 时 /vt clear 三者全保留，只清 completed+deleted", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
-  const stamp = readStartStamp(process.pid);
-  setupJobs(cwd, [job({
-    id: "R", pid: process.pid, startStamp: stamp, status: "running", endedAt: null,
-    exitCode: null, exitCodeKnown: false, finalized: false, finalResult: undefined,
-    taskId: 1, sessionId: "S",
-  })]);
   const b = emptyBoard();
   b.tasks = [
-    { id: 1, subject: "在跑", status: "in_progress", jobs: ["R"], inProgressSince: 0 },
-    { id: 2, subject: "待办", status: "pending" },
+    { id: 1, subject: "done", status: "completed", statusSince: 1 },
+    { id: 2, subject: "gone", status: "deleted", statusSince: 1 },
+    { id: 3, subject: "待办", status: "pending" },
+    { id: 4, subject: "在跑", status: "in_progress", inProgressSince: 0 },
+    { id: 5, subject: "等人", status: "parked", park: { reason: "等拍板", at: 1, from: "pending" } },
   ];
-  b.nextId = 3;
+  b.nextId = 6;
   const branch: unknown[] = [snapshot(b)];
   const h = makeHarness(cwd, branch, true);
   vigilTodo(h.api);
   await h.emit("session_start", { type: "session_start", reason: "startup" });
 
-  await h.runCommand("vt", "clear all");
-  await h.runCommand("vt", "clear all confirm");
-  const out = h.notifications.at(-1)!;
-  expect(out).toContain("bg_kill");
-  expect(out).toContain("/vigil-todo halt");
-  expect(replayBranch(branch as never[]).tasks).toHaveLength(2);
+  await h.runCommand("vt", "clear");
+  expect(h.notifications.at(-1)).toContain("已清理 2");
+  const replayed = replayBranch(branch as never[]).tasks;
+  expect(replayed.map((t) => [t.id, t.status])).toEqual([
+    [3, "pending"], [4, "in_progress"], [5, "parked"],
+  ]);
+  const last = (branch.filter((e: any) => e?.customType === "rpiv-todo-state") as any[]).at(-1)?.data;
+  expect(last.tasks.map((t: any) => t.id)).toEqual([3, 4, 5]);
 });
 
-it("F127 /vt clear all confirm 无作业：全清并落快照", async () => {
+it("parked / pending 在任何允许范围下都不被清", async () => {
+  const run = async (scope: string) => {
+    const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+    const b = emptyBoard();
+    b.tasks = [
+      { id: 1, subject: "done", status: "completed", statusSince: 1 },
+      { id: 2, subject: "gone", status: "deleted", statusSince: 1 },
+      { id: 3, subject: "待办", status: "pending" },
+      { id: 4, subject: "等人", status: "parked", park: { reason: "等拍板", at: 1, from: "pending" } },
+    ];
+    b.nextId = 5;
+    const branch: unknown[] = [snapshot(b)];
+    const h = makeHarness(cwd, branch, true);
+    vigilTodo(h.api);
+    await h.emit("session_start", { type: "session_start", reason: "startup" });
+    await h.runCommand("vt", scope ? `clear ${scope}` : "clear");
+    return replayBranch(branch as never[]).tasks.map((t) => [t.id, t.status]);
+  };
+  for (const scope of ["", "completed", "deleted", "settled"]) {
+    const tasks = await run(scope);
+    expect(tasks, scope || "default").toContainEqual([3, "pending"]);
+    expect(tasks, scope || "default").toContainEqual([4, "parked"]);
+  }
+});
+
+it("未知范围被拒并列出允许范围", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const b = emptyBoard();
-  b.tasks = [
-    { id: 1, subject: "a", status: "completed", statusSince: 1 },
-    { id: 2, subject: "b", status: "pending" },
-    { id: 3, subject: "c", status: "parked", park: { reason: "等", at: 1, from: "pending" } },
-  ];
-  b.nextId = 4;
+  b.tasks = [{ id: 1, subject: "done", status: "completed", statusSince: 1 }];
+  b.nextId = 2;
   const branch: unknown[] = [snapshot(b)];
   const h = makeHarness(cwd, branch, true);
   vigilTodo(h.api);
   await h.emit("session_start", { type: "session_start", reason: "startup" });
-
-  await h.runCommand("vt", "clear all");
-  await h.runCommand("vt", "clear all confirm");
-  expect(h.notifications.at(-1)).toContain("已清理 3");
-  expect(replayBranch(branch as never[]).tasks).toEqual([]);
-  const last = (branch.filter((e: any) => e?.customType === "rpiv-todo-state") as any[]).at(-1)?.data;
-  expect(last.tasks).toEqual([]);
+  await h.runCommand("vt", "clear weird");
+  const out = h.notifications.at(-1)!;
+  expect(out).toContain("clear weird 不支持");
+  expect(out).toContain("completed / deleted / settled");
+  expect(replayBranch(branch as never[]).tasks).toHaveLength(1);
 });
 
 it("F128 清理后 catch-up 不再投影/补发已 purge 的链", async () => {

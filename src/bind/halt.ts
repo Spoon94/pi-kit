@@ -37,7 +37,7 @@ export function halt(d: HaltDeps) {
     if (!affected.has(t.id) || t.status !== "in_progress") return t;
     parked++;
     return { ...t, status: "parked" as const, statusSince: d.now,
-      park: { reason: "用户强制中断", at: d.now, from: "in_progress" as const } };
+      park: { reason: "用户强制中断", at: d.now, from: "in_progress" as const, by: "halt" as const } };
   });
   d.boards.commit(d.sessionId, { ...board, tasks,
     counters: { ...board.counters, halted: true, haltedAt: d.now } });
@@ -50,12 +50,25 @@ export function resume(d: HaltDeps): boolean {
   if (!isHalted(board)) return false;
   const counters = { ...board.counters };
   delete counters.halted; delete counters.haltedAt;
-  d.boards.commit(d.sessionId, { ...board, counters });   // turnsUsed 不重置
+  // 只恢复 halt 自己造成的 parked（显式标记，不按 reason 文案匹配）；
+  // 回到 pending 交还 next/WIP 机制，绝不碰模型/用户真实决策的 park。
+  let restored = 0;
+  const tasks = board.tasks.map((t) => {
+    if (t.status !== "parked" || t.park?.by !== "halt") return t;
+    restored++;
+    const next = { ...t, status: "pending" as const, statusSince: d.now };
+    delete next.park;
+    delete next.inProgressSince;
+    return next;
+  });
+  d.boards.commit(d.sessionId, { ...board, tasks, counters });   // turnsUsed 不重置
   const maxTurns = d.maxTurns ?? DEFAULTS.maxTurns;
   if (board.counters.turnsUsed >= maxTurns) {
     d.notify(`已达轮数上限 (${board.counters.turnsUsed}/${maxTurns})：发任意消息归零后再继续`);
   } else {
-    d.notify("已恢复自主推进");
+    d.notify(restored > 0
+      ? `已恢复自主推进（${restored} 个中断任务回到 pending）`
+      : "已恢复自主推进");
   }
   return true;
 }

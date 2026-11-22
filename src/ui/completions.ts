@@ -12,14 +12,13 @@ export const PANEL_SUBCOMMANDS: readonly ArgCandidate[] = [
   { value: "halt", label: "halt", description: "立即停止全部后台工作并 park 受影响任务（一键刹车，也可 alt+h）" },
   { value: "resume", label: "resume", description: "恢复自主推进（达轮数上限时会提示发消息归零）" },
   { value: "doctor", label: "doctor", description: "自检：冲突/孤儿/超期/环/WIP 超卖/轮数上限" },
-  { value: "clear", label: "clear", description: "清理历史任务：默认 completed+deleted；all 需两步确认" },
+  { value: "clear", label: "clear", description: "清理历史任务：默认 completed+deleted；pending/in_progress/parked 永不清" },
 ];
 
 export const CLEAR_SCOPES: readonly ArgCandidate[] = [
   { value: "clear completed", label: "completed", description: "只清已完成任务" },
   { value: "clear deleted", label: "deleted", description: "只清已删除（tombstone）任务" },
   { value: "clear settled", label: "settled", description: "清 completed + deleted（默认范围）" },
-  { value: "clear all", label: "all", description: "清全部任务；需再次 confirm，running/退避链会拒绝" },
 ];
 
 export const BG_SUBCOMMANDS: readonly ArgCandidate[] = [

@@ -6,6 +6,7 @@ import { halt, isHalted, reapHaltedLeftovers, resume, type HaltDeps } from "../.
 import { createBoardStore } from "../../src/board/store.js";
 import { emptyBoard } from "../../src/board/types.js";
 import { replayBranch } from "../../src/board/replay.js";
+import { selectNext } from "../../src/board/selectors.js";
 import { createJobStore } from "../../src/jobs/store.js";
 import type { Job } from "../../src/jobs/types.js";
 import { DEFAULTS } from "../../src/lib/config.js";
@@ -61,6 +62,7 @@ it("受影响任务 parked 且不写 lastFailure", () => {
   const t = boards.get("S").tasks[0];
   expect(t.status).toBe("parked");
   expect(t.park?.reason).toContain("强制中断");
+  expect(t.park?.by).toBe("halt");
   expect(t.lastFailure).toBeUndefined();
 });
 
@@ -105,6 +107,62 @@ it("resume 解除 halted 但不重置 turnsUsed（不得绕过保险丝）", () 
 
 it("未 halted 时 resume 返回 false", () => {
   expect(resume(d)).toBe(false);
+});
+
+it("resume 把 halt parked 恢复为 pending，模型 park 的任务不动", () => {
+  jobs.put(j("A"));
+  const b = boards.get("S");
+  b.tasks[1] = {
+    id: 2, subject: "模型决定", status: "parked",
+    park: { reason: "需要人拍板", at: 5, from: "pending" },
+  };
+  b.tasks[0] = { ...b.tasks[0], inProgressSince: 0 };
+  boards.commit("S", b);
+
+  halt(d);
+  expect(boards.get("S").tasks[0].park?.by).toBe("halt");
+  let note = "";
+  d.notify = (n) => { note = n; };
+  expect(resume(d)).toBe(true);
+  const tasks = boards.get("S").tasks;
+  expect(tasks[0].status).toBe("pending");
+  expect(tasks[0].park).toBeUndefined();
+  expect(tasks[0].inProgressSince).toBeUndefined();
+  expect(tasks[0].statusSince).toBe(1000);
+  expect(tasks[1].status).toBe("parked");
+  expect(tasks[1].park?.reason).toBe("需要人拍板");
+  expect(note).toContain("1 个中断任务回到 pending");
+});
+
+it("多个 halt 任务全回 pending；resume 幂等；WIP 仍受约束；halt 快照可重放", () => {
+  const b = boards.get("S");
+  b.tasks = [
+    { id: 1, subject: "a", status: "in_progress", inProgressSince: 0, jobs: ["A"] },
+    { id: 2, subject: "b", status: "in_progress", inProgressSince: 0, jobs: ["B"] },
+  ];
+  boards.commit("S", b);
+  jobs.put(j("A"));
+  jobs.put(j("B", { taskId: 2 }));
+
+  halt(d);
+  expect(boards.get("S").tasks.every((t) => t.status === "parked")).toBe(true);
+  const haltedSnapshot = {
+    action: "update", params: {},
+    tasks: boards.get("S").tasks, nextId: 3, counters: boards.get("S").counters,
+  };
+  const replayed = replayBranch([{ type: "custom", customType: "rpiv-todo-state", data: haltedSnapshot }]);
+  expect(replayed.tasks.every((t) => t.status === "parked")).toBe(true);
+
+  expect(resume(d)).toBe(true);
+  const after = boards.get("S");
+  expect(after.tasks.every((t) => t.status === "pending")).toBe(true);
+  expect(after.tasks.filter((t) => t.status === "in_progress")).toHaveLength(0);
+  expect(after.tasks.every((t) => t.park === undefined)).toBe(true);
+  expect(after.counters.halted).toBeUndefined();
+  expect(selectNext(after, 1, false)?.id).toBe(1);      // 一次只交回一个 next，WIP 不被突破
+
+  expect(resume(d)).toBe(false);                        // 幂等
+  expect(boards.get("S").tasks.every((t) => t.status === "pending")).toBe(true);
 });
 
 it("resume 达轮数上限时文案说明不会推进（MINOR）", () => {

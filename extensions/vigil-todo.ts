@@ -79,7 +79,6 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   let mergeTimer: NodeJS.Timeout | undefined;
   let lastModelAdvanced = false;
   let pendingKill: string | undefined;
-  let pendingClearAll = false;
   const recovered = new Set<string>();
   let wired = false;
   let collapsed = false;
@@ -574,31 +573,18 @@ export default function vigilTodo(pi: ExtensionAPI): void {
         if (arg === "clear" || arg.startsWith("clear ")) {
           const tokens = arg.slice(5).trim().split(/\s+/).filter(Boolean);
           const scopeToken = tokens[0];
-          const confirmed = scopeToken === "all" && tokens[1] === "confirm";
-          if (scopeToken === "all" && !confirmed) {
-            const board = boards.get(sid);
-            const lines = board.tasks.map((t) => `#${t.id} [${t.status}] ${sanitizeTerminalText(t.subject)}`);
-            output(ctx, `将删除全部 ${board.tasks.length} 个任务（含 pending/in_progress/parked）：\n`
-              + (lines.length ? lines.join("\n") : "(空)")
-              + "\n再次输入 /vt clear all confirm 确认；R18：running/退避链会被拒绝");
-            pendingClearAll = true;
-            return;
-          }
-          if (confirmed && !pendingClearAll) {
-            output(ctx, "先 /vt clear all 查看将删除的清单，再 /vt clear all confirm");
+          const allowed = ["completed", "deleted", "settled"] as const;
+          if (scopeToken !== undefined && !(allowed as readonly string[]).includes(scopeToken)) {
+            output(ctx, `clear ${scopeToken} 不支持；可用范围：${allowed.join(" / ")}（默认 settled）。`
+              + "命令面不提供 all，pending / in_progress / parked 不可清理");
             return;
           }
           const board = boards.get(sid);
-          const plan = planCleanup(board, scopeToken as ClearScope | undefined, confirmed ? true : undefined, jobFacts());
-          if (plan.error) {
-            pendingClearAll = false;
-            output(ctx, plan.error);
-            return;
-          }
+          // 命令面只允许三个合法范围且从不传 force ⇒ planCleanup 不会报错
+          const plan = planCleanup(board, scopeToken as ClearScope | undefined, undefined, jobFacts());
           const next = applyCleanup(board, plan, Date.now());
           const roots = markPurged(jobs, plan.remove, board.tasks);   // 先 purge 再落快照（与工具层同序）
           persistBoard(next);
-          pendingClearAll = false;
           const parts: string[] = [];
           if (plan.remove.length === 0) parts.push("没有可清理的历史任务");
           else parts.push(`已清理 ${plan.remove.length} 个任务`);
@@ -615,7 +601,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     });
 
     pi.registerCommand("vigil-todo", {
-      description: "任务面板与控制：无参数看板 + 快捷提示；halt 立即停止全部后台工作；resume 继续；clear 清理历史（all 需 confirm）；doctor 自检。短别名 /vt",
+      description: "任务面板与控制：无参数看板 + 快捷提示；halt 立即停止全部后台工作；resume 继续；clear 清理历史（completed/deleted/settled）；doctor 自检。短别名 /vt",
       getArgumentCompletions: panelCompletions,
       handler: panelHandler,
     });
@@ -808,7 +794,6 @@ export default function vigilTodo(pi: ExtensionAPI): void {
       boards.evict(sid);
       recovered.clear();
       pendingKill = undefined;
-      pendingClearAll = false;
       monitor.clearAll();
       overlay.dispose();
       if (activeCtx === ctx) activeCtx = undefined;

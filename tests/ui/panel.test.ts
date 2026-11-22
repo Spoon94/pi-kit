@@ -88,15 +88,33 @@ it("doctor 报冲突与降级（F13/F12）", () => {
   expect(text).toContain("sidecar 损坏");
 });
 
-it("doctor 报 halted / purged / 超期 / 孤儿作业", () => {
+it("doctor 报 halted / purged / 超期 / 孤儿作业，且各带可执行下一步", () => {
   const b = emptyBoard();
   b.counters.halted = true;
   b.tasks = [{ id: 1, subject: "old", status: "completed", statusSince: 1 }];
   const text = renderDoctor(b, jobs(), false, undefined, { purgedRoots: 2, retentionOverdue: 1, orphanJobs: 3 });
   expect(text).toContain("强制中断");
-  expect(text).toContain("2");
-  expect(text).toContain("超期");
+  expect(text).toContain("2 条链已 purge");
+  expect(text).toContain("无需处理");
+  expect(text).toContain("如需重跑请新建任务");
+  expect(text).toContain("超期未清理");
+  expect(text).toContain("/vt clear 清理历史（只清终态）");
   expect(text).toContain("孤儿作业");
+  expect(text).toContain("bg_list 查看");
+  expect(text).toContain('bg_kill({job_id:"…"}) 回收');
+});
+
+it("doctor：in_progress 无绑定作业给出 verify 下一步与具体任务 id", () => {
+  const s = b([
+    { id: 7, subject: "a", status: "in_progress" },
+    { id: 9, subject: "b", status: "in_progress" },
+  ]);
+  const text = renderDoctor(s, jobs(), false, undefined,
+    { purgedRoots: 0, retentionOverdue: 0, orphanJobs: 0 });
+  expect(text).toContain("2 个 in_progress 任务无绑定作业");
+  expect(text).toContain("如 #7");
+  expect(text).toContain('todo({action:"verify", id:7})');
+  expect(text).toContain("重新起作业");
 });
 
 it("达轮数上限在面板首行与 doctor 标注（F24）", () => {

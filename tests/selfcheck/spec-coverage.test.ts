@@ -81,6 +81,21 @@ it("§20 的 F123-F132 都在测试文本中出现（/vt clear）", () => {
   expect(missing).toEqual([]);
 });
 
+it("派发子 agent 文档存在且覆盖关键边界（原子流程/poller/halt 语义/不自动重挂）", () => {
+  const doc = readFileSync(join(ROOT, "docs/dispatching-agents.md"), "utf8");
+  for (const needle of [
+    "两步原子流程",
+    "不要手动先",
+    "幂等 poller 模式",
+    "杀不了独立 agent 本体",
+    "不做自动重挂",
+    "重复派活",
+    "fp:stale",
+    'todo({action:"verify", id})',
+  ]) expect(doc, needle).toContain(needle);
+  expect(readFileSync(join(ROOT, "README.md"), "utf8")).toContain("docs/dispatching-agents.md");
+});
+
 it("规格文档无重复顶层章节（F102）", () => {
   const spec = readFileSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"), "utf8");
   const sections = [...spec.matchAll(/^## (\d+)\./gm)].map((m) => m[1]);

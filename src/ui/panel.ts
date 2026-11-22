@@ -131,10 +131,19 @@ export function renderDoctor(state: BoardState, jobs: JobStore, conflict: boolea
   if (cycle) {
     lines.push(`✗ 检测到依赖环：${formatCycle(cycle)} → todo({action:"update", id:${cycle[0]}, removeBlockedBy:[…]})`);
   }
-  if (extra?.purgedRoots) lines.push(`✗ ${extra.purgedRoots} 条链已 purge（catch-up 跳过）`);
-  if (extra?.retentionOverdue) lines.push(`⚠ ${extra.retentionOverdue} 个 completed/deleted 任务超期未清理`);
-  if (extra?.orphanJobs) lines.push(`⚠ ${extra.orphanJobs} 个孤儿作业（sidecar 无绑定任务）`);
+  if (extra?.purgedRoots) {
+    lines.push(`✗ ${extra.purgedRoots} 条链已 purge（catch-up 跳过）→ 清理后的预期状态，无需处理；如需重跑请新建任务`);
+  }
+  if (extra?.retentionOverdue) {
+    lines.push(`⚠ ${extra.retentionOverdue} 个 completed/deleted 任务超期未清理 → /vt clear 清理历史（只清终态）`);
+  }
+  if (extra?.orphanJobs) {
+    lines.push(`⚠ ${extra.orphanJobs} 个孤儿作业（sidecar 无绑定任务）→ bg_list 查看，bg_kill({job_id:"…"}) 回收`);
+  }
   const noEvidence = state.tasks.filter((t) => t.status === "in_progress" && (t.jobs?.length ?? 0) === 0);
-  if (noEvidence.length) lines.push(`⚠ ${noEvidence.length} 个 in_progress 任务无绑定作业`);
+  if (noEvidence.length) {
+    const id = noEvidence[0].id;
+    lines.push(`⚠ ${noEvidence.length} 个 in_progress 任务无绑定作业（如 #${id}）→ todo({action:"verify", id:${id}}) 重新取证，或重新起作业`);
+  }
   return lines.length ? sanitizeMultiline(lines.join("\n")) : "✓ 未发现问题";
 }

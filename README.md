@@ -74,6 +74,10 @@ Tab 补全：`/vigil-todo`、`/vt` 补 `halt`/`resume`/`doctor`/`clear`（`clear
 | `notifyRetryMs` | 10min |
 | `collapseKey` / `haltKey` | 折叠键 / 一键中断键（默认 `alt+h`，`off` 关闭） |
 
+## 派发子 agent
+
+用 `bg_run` 包「派发 + 等报告」的 watcher 时，请写成幂等 poller：两步原子流程、halt 只杀 watcher 的语义落差、残余风险与恢复方式见 [docs/dispatching-agents.md](docs/dispatching-agents.md)。
+
 ## 开发
 
 ```bash

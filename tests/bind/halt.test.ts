@@ -107,6 +107,18 @@ it("未 halted 时 resume 返回 false", () => {
   expect(resume(d)).toBe(false);
 });
 
+it("resume 达轮数上限时文案说明不会推进（MINOR）", () => {
+  const b = boards.get("S");
+  b.counters.turnsUsed = DEFAULTS.maxTurns;
+  boards.commit("S", b);
+  let note = "";
+  d.notify = (n) => { note = n; };
+  halt(d);
+  expect(resume(d)).toBe(true);
+  expect(note).toContain("达轮数上限");
+  expect(note).toContain("发任意消息归零");
+});
+
 it("halt 后崩溃残留作业由启动 sweep 补杀", () => {
   jobs.put(j("A"));
   halt(d);

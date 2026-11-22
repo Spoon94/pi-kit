@@ -135,7 +135,9 @@ it("timer 条件纳入未 ack 通知（F76）", () => {
   jobs.put(root({ status: "running", endedAt: null }));
   expect(needsTimer(b, jobs, DEFAULTS)).toBe(true);
   b.counters.halted = true;
-  expect(needsTimer(b, jobs, DEFAULTS)).toBe(false);
+  expect(needsTimer(b, jobs, DEFAULTS)).toBe(true);   // halted 但 running 仍需退出探活
+  jobs.put(root({ notifyState: "acked" }));
+  expect(needsTimer(b, jobs, DEFAULTS)).toBe(false);  // halted 且无 running ⇒ 0 timer
 });
 
 it("self / purged / maxTurns 后不再养 timer（MAJOR #1）", () => {

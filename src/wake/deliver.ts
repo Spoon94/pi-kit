@@ -16,7 +16,10 @@ let wakeSeq = 0;
 
 /** timer 存在条件：优先内部推进；只有通知时按实际可投递性过滤，避免永不可投递的 root 造成永久 timer。 */
 export function needsTimer(board: BoardState, jobs: JobStore, cfg: VigilConfig): boolean {
-  if (board.counters.halted) return false;
+  if (board.counters.halted) {
+    // 停机时唯一还需要 timer 的理由：running 作业的退出探活（含恢复作业）
+    return jobs.all().some((j) => j.status === "running");
+  }
   if (jobs.all().some((j) => j.status === "running" || j.retryAt != null)) return true;
   if (board.counters.turnsUsed >= cfg.maxTurns) return false;
   return jobs.all().some((j) =>

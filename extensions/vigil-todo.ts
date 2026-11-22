@@ -106,6 +106,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   const haltDeps = (): HaltDeps => ({
     boards, jobs, now: Date.now(), sessionId: sid, kill: killJob,
     notify: (n) => { if (activeCtx) output(activeCtx, n); },
+    maxTurns: getCfg().maxTurns,
   });
 
   const persistBoard = (board: BoardState): void => {
@@ -271,12 +272,8 @@ export default function vigilTodo(pi: ExtensionAPI): void {
 
   const tick = (): void => {
     if (!activeCtx || !sid) return;
-    if (isHalted(boards.get(sid))) {
-      refreshOverlay();
-      refreshTimer();
-      return;
-    }
     const now = Date.now();
+    // 恢复作业的退出探活即使 halted 也要跑（halt 时 kill 失败的残留进程不能被拖到 resume 之后）
     for (const id of [...recovered]) {
       const job = jobs.get(id);
       if (!job || job.status !== "running") { recovered.delete(id); continue; }
@@ -286,6 +283,11 @@ export default function vigilTodo(pi: ExtensionAPI): void {
       jobs.put(exited);
       jobs.save();
       onJobExit(exited);
+    }
+    if (isHalted(boards.get(sid))) {
+      refreshOverlay();
+      refreshTimer();
+      return;
     }
     runSweep();
     const removed = jobs.gc(getCfg().completedTtlMs, now);

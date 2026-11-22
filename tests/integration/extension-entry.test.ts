@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -390,4 +391,37 @@ it("恢复作业并入单 timer，不产生每作业 3s 轮询（MAJOR #4）", a
   vigilTodo(h.api);
   await h.emit("session_start", { type: "session_start", reason: "startup" });
   expect(vi.getTimerCount()).toBe(1);   // 只有扩展的单 timer
+});
+
+it("halted 时 recovered 探活仍执行，残留退出不被拖到 resume 后（MINOR）", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const child = spawn("sleep", ["30"], { stdio: "ignore" });
+  try {
+    const pid = child.pid;
+    if (pid === undefined) throw new Error("sleep spawned without pid");
+    const stamp = readStartStamp(pid);
+    setupJobs(cwd, [job({
+      id: "R", pid, startStamp: stamp, status: "running", endedAt: null,
+      exitCode: null, exitCodeKnown: false, finalized: false, finalResult: undefined,
+      taskId: undefined, sessionId: "OTHER",
+    })]);
+    const b = emptyBoard();
+    b.counters.halted = true;
+    b.counters.haltedAt = 10;
+    const h = makeHarness(cwd, [snapshot(b)], true);
+    vigilTodo(h.api);
+    await h.emit("session_start", { type: "session_start", reason: "startup" });
+    expect(vi.getTimerCount()).toBe(1);   // halted + running ⇒ 仍需单 timer 探活
+
+    child.kill("SIGKILL");
+    await new Promise<void>((res) => child.once("exit", () => res()));
+    await vi.advanceTimersByTimeAsync(1000);
+
+    const store = createJobStore(runDir(cwd));
+    store.load();
+    expect(store.get("R")?.status).toBe("failed");
+    expect(store.get("R")?.exitCodeKnown).toBe(false);
+  } finally {
+    if (child.exitCode === null) child.kill("SIGKILL");
+  }
 });

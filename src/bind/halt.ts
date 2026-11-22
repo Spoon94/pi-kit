@@ -1,11 +1,13 @@
 import type { BoardStore } from "../board/store.js";
 import type { BoardState } from "../board/types.js";
+import { DEFAULTS } from "../lib/config.js";
 import type { JobStore } from "../jobs/store.js";
 
 export interface HaltDeps {
   boards: BoardStore; jobs: JobStore; now: number; sessionId: string;
   kill(idOrRoot: string, by: "self" | "external"): void;
   notify(note: string): void;
+  maxTurns?: number;
 }
 
 export const isHalted = (state: BoardState): boolean => state.counters.halted === true;
@@ -49,7 +51,12 @@ export function resume(d: HaltDeps): boolean {
   const counters = { ...board.counters };
   delete counters.halted; delete counters.haltedAt;
   d.boards.commit(d.sessionId, { ...board, counters });   // turnsUsed 不重置
-  d.notify("已恢复自主推进");
+  const maxTurns = d.maxTurns ?? DEFAULTS.maxTurns;
+  if (board.counters.turnsUsed >= maxTurns) {
+    d.notify(`已达轮数上限 (${board.counters.turnsUsed}/${maxTurns})：发任意消息归零后再继续`);
+  } else {
+    d.notify("已恢复自主推进");
+  }
   return true;
 }
 

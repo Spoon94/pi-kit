@@ -16,14 +16,19 @@ export interface SweepDeps {
 export function sweepRespawns(d: SweepDeps): number {
   if (d.boards.get(d.sessionId).counters.halted) return 0;      // R20：停机后不 respawn
   let n = 0;
+  let dirty = false;
+  // 重验 job 是否存在与单条 job 无关：一次扫描建集合，避免逐 job 全表扫描（P3 热点）
+  const reverifyRoots = new Set<string>();
+  for (const j of d.jobs.all()) if (j.staleReverifyOf != null) reverifyRoots.add(j.rootId);
   for (const job of d.jobs.all()) {
     const root = d.jobs.get(job.rootId);
     if (job.purged || root?.purged) continue;                 // R19：清掉的链不再 respawn
     const dueBackoff = job.retryAt != null && job.retryAt <= d.now;
-    const hasReverifyJob = d.jobs.all().some((j) => j.rootId === job.rootId && j.staleReverifyOf != null);
+    const hasReverifyJob = reverifyRoots.has(job.rootId);
     const dueReverify = root?.pendingReverify === true && !root.finalized && job.id === root.id && !hasReverifyJob;
     if (root?.pendingReverify === true && hasReverifyJob && !root.finalized && job.id === root.id) {
       d.jobs.put({ ...root, pendingReverify: false });    // 重验 job 已存在 ⇒ 标记已完成使命
+      dirty = true;
     }
     if (!dueBackoff && !dueReverify) continue;
     const req: SpawnRequest = dueReverify
@@ -38,6 +43,7 @@ export function sweepRespawns(d: SweepDeps): number {
       delete next.retryAt;
       if (dueReverify) next.pendingReverify = false;
       d.jobs.put(next);
+      dirty = true;
       n++;
     } else if (dueBackoff) {
       // spawn_error：不重试、清退避、绑定任务 parked（F32）
@@ -45,14 +51,16 @@ export function sweepRespawns(d: SweepDeps): number {
       const next = { ...cur };
       delete next.retryAt;
       d.jobs.put(next);
+      dirty = true;
       if (job.sessionId === d.sessionId) parkTask(d, job.taskId, "spawn failed");
     } else if (dueReverify) {
       const cur = d.jobs.get(job.id)!;
       d.jobs.put({ ...cur, pendingReverify: false });     // 额度尽/无槽 ⇒ 不悬置
+      dirty = true;
       if (job.sessionId === d.sessionId) parkTask(d, job.taskId, "无空闲槽位重验");
     }
   }
-  d.jobs.save();
+  if (dirty) d.jobs.save();
   return n;
 }
 

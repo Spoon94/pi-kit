@@ -121,6 +121,17 @@ it("markPurged 清全链每个 job 的退避/待重验（MAJOR #2）", () => {
   }
 });
 
+it("F123 markPurged 幂等：无变化不落盘（P2）", () => {
+  const jobs = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_c1nsk0qv}}")));
+  jobs.put(job("R"));
+  markPurged(jobs, [1], [t(1, { status: "completed", jobs: ["R"] })]);
+  let saves = 0;
+  const save = jobs.save.bind(jobs);
+  jobs.save = () => { saves++; save(); };
+  expect(markPurged(jobs, [1], [t(1, { status: "completed", jobs: ["R"] })])).toEqual(["R"]);
+  expect(saves).toBe(0);
+});
+
 it("retention 只候选 completed/deleted，绝不包含 parked", () => {
   const s = b([t(1, { status: "completed", statusSince: 10 }), t(2, { status: "deleted", statusSince: 10 }),
                t(3, { status: "parked", statusSince: 10, park: { reason: "r", at: 10, from: "pending" } }),

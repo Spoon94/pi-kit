@@ -6,7 +6,7 @@
 
 | 方面 | 设计条款 | 实现文件 | 测试文件（用例数） |
 |---|---|---|---|
-| 性能 | §10.2、§16.1 | `src/lib/config.ts`（mtime 缓存）、`src/lib/tail.ts`（字节尾读）、`src/jobs/monitor.ts`（事件优先 + 单 timer 条件） | `tests/perf/budget.test.ts`（3） |
+| 性能 | §10.2、§16.1 | `src/lib/config.ts`（mtime 缓存）、`src/lib/tail.ts`（字节尾读）、`src/jobs/monitor.ts`（事件优先 + 单 timer 条件）、`src/bind/sweep.ts`（空闲零落盘 + 重验集合一次扫描）、`src/bind/finalize.ts`（同 tick 合并落盘）、`src/board/cleanup.ts`（幂等守卫） | `tests/perf/budget.test.ts`（3）、`tests/perf/scale.test.ts`（1） |
 | 容灾 | §5.3、§7.1、§16.2 | `src/bind/finalize.ts`（两步 finalize）、`src/bind/sweep.ts`（补驱动/补偿/retention）、`src/jobs/store.ts`（原子写/留档/GC/路径校验）、`src/jobs/monitor.ts`（recoverJobs） | `tests/bind/finalize.test.ts`（11）、`tests/bind/sweep.test.ts`（15）、`tests/jobs/store.test.ts`（7）、`tests/jobs/monitor.test.ts`（5） |
 | 可自定义设置 | §16.3 | `src/lib/config.ts`（`DEFAULTS` + `CONFIG_KEYS` 含 min/max + 逐键校验）、`docs/configuration.md` | `tests/lib/config.test.ts`（14） |
 | 易用性 | §6.4、§8、§16.4 | `src/ui/panel.ts`（面板/`/todos`/doctor）、`src/wake/compose.ts`（真实调用形态 + 耗时）、`extensions/vigil-todo.ts`（命令与拒绝文案） | `tests/ui/panel.test.ts`（12）、`tests/wake/compose.test.ts`（7）、`tests/tool/register.test.ts`（10） |
@@ -29,6 +29,21 @@
 - 交付前必跑：`npm test && npm run typecheck && npm run coverage:check`，或一次运行 `npm run verify`
 - perf 稳定性：`fileParallelism:false`（文件串行，避免 perf 与其他测试争 CPU）+ JIT 预热丢弃前两批 + 5 批 p95 取中位数；4 个 CPU burner 负载下连续 5 次全量套件全部通过
 - 门禁实测：正常全量通过；临时移除大量测试后覆盖率下降（本次实验 98.92→97.33 行、92.13→91.71 分支），把阈值人为提高即出现 `ERROR: Coverage for ... does not meet ...` 非零退出；删除 tool/ui 测试会使 `coverage:check` 因自检/阈值一起失败。
+
+## 性能基线（§10.2，2026-11-22）
+
+`sweepAll`（1s tick 路径）在无变更时不再重写 sidecar：`sweepRespawns` 用脏标记，仅在实际 put/delete 后 `save()`；`finalizeAndProject` 把 finalize 与 project 合并为一次落盘；`markPurged` 幂等跳过已清理记录；`recoverJobs` 返回改动条数，调用方据此决定是否落盘。另修掉逐 job 全表扫描 `staleReverifyOf` 的 O(n²) 热点，改为一次扫描建 root 集合。
+
+- 测量命令：`npx vitest run tests/perf/scale.test.ts`（JIT 预热 20 次，采样 50 次；与 piper 的临时脚本同负载、同口径）
+- 表中优化后数值取自与优化前同脚本的一次运行；重复测量有 ±0.03ms 抖动。该用例断言中位数 < 1ms 并同时打印均值/中位数，防止无条件落盘回归。
+
+| 规模（任务/作业） | 优化前 | 优化后 | 倍数 |
+|---|---|---|---|
+| 50 / 20 | 23.10 ms | 0.008 ms | ~2900× |
+| 200 / 100 | 25.61 ms | 0.034 ms | ~750× |
+| 200 / 300 | 24.06 ms | 0.050 ms | ~480× |
+
+落盘次数由回归用例固定：空闲 `sweepAll` 为 0 次（`tests/bind/sweep.test.ts`）；到期 respawn 成功/失败、清除悬置 `pendingReverify`、`finalizeAndProject`、`markPurged` 的真实变更各恰好 1 次（`tests/bind/sweep.test.ts`、`tests/bind/finalize.test.ts`、`tests/board/cleanup.test.ts`）。
 
 ## 边界守卫（§16.5 / §17.5）
 

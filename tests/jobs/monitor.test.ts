@@ -36,6 +36,13 @@ it("恢复态不伪造退出码（F5）", () => {
   expect(j.endedAt).toBe(1000);
 });
 
+it("recoverJobs 返回改动条数，无变化为 0（P2 落盘守卫）", () => {
+  const s = createJobStore(mkdtempSync(join(tmpdir(), "vigil-rec-")));
+  s.put(base());
+  expect(recoverJobs(s, 1000)).toBe(1);
+  expect(recoverJobs(s, 2000)).toBe(0);
+});
+
 it("recoveredExit：进程消失 ⇒ 终态且退出码未知（单 timer 探活）", () => {
   const j = base({ pid: 999_999, status: "running", endedAt: null });
   const out = recoveredExit(j, 1000);

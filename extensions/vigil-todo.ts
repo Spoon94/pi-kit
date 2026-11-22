@@ -302,8 +302,8 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     const loaded = jobs.load();
     degradedNote = loaded.note;
     if (loaded.degraded) notify(loaded.note ?? "sidecar 降级，已从空开始", "error");
-    recoverJobs(jobs, Date.now());
-    jobs.save();
+    const recoveredCount = recoverJobs(jobs, Date.now());
+    if (recoveredCount > 0) jobs.save();
     recovered.clear();
     for (const job of jobs.all()) {
       if (job.status === "running") recovered.add(job.id);   // 由单 timer 探活，不另起每作业 3s 轮询

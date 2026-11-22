@@ -67,10 +67,12 @@ export function recoveredExit(job: Job, now: number, readStamp: (pid: number) =>
   return { ...job, status: "failed", exitCode: null, exitCodeKnown: false, endedAt: now };
 }
 
-/** 重启恢复：进程已消失 ⇒ 不猜退出码（规格 §10.1）。 */
-export function recoverJobs(store: JobStore, now: number): void {
+/** 重启恢复：进程已消失 ⇒ 不猜退出码（规格 §10.1）。返回改动条数，调用方据此决定是否落盘。 */
+export function recoverJobs(store: JobStore, now: number): number {
+  let n = 0;
   for (const j of store.all()) {
     const exited = recoveredExit(j, now);
-    if (exited) store.put(exited);
+    if (exited) { store.put(exited); n++; }
   }
+  return n;
 }

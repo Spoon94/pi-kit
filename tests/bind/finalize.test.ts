@@ -113,6 +113,17 @@ it("重验成功生成 reverified 标记并投影 fresh（BLOCKER）", () => {
   expect(ev?.note).toContain("reverified");
 });
 
+it("F123 finalizeAndProject 合并为一次落盘，重复调用零落盘（P2）", () => {
+  jobs.put(j("R"));
+  let saves = 0;
+  const save = jobs.save.bind(jobs);
+  jobs.save = () => { saves++; save(); };
+  expect(finalizeAndProject("R", jobs, boards, "S", 50, "done", true)).toEqual({ finalized: true, projected: true });
+  expect(saves).toBe(1);
+  expect(finalizeAndProject("R", jobs, boards, "S", 60, "done", true)).toEqual({ finalized: false, projected: false });
+  expect(saves).toBe(1);
+});
+
 it("同毫秒终结时按链写入顺序取末次 job（MAJOR #4）", () => {
   jobs.put(j("R", { status: "failed", exitCode: 1, endedAt: 2 }));
   jobs.put(j("R2", { id: "R2", rootId: "R", retryOf: "R", status: "completed", exitCode: 0, endedAt: 2, fpVerdict: "fresh" }));

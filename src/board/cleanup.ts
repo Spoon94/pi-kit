@@ -63,15 +63,18 @@ export function markPurged(jobs: JobStore, taskIds: number[], tasks: Task[]): st
       if (j) roots.add(j.rootId);
     }
   }
+  let dirty = false;
   for (const id of roots) {
     for (const j of jobs.all().filter((x) => x.rootId === id)) {
+      if (j.purged && j.retryAt == null && j.pendingReverify == null) continue;   // 幂等：无变化不落盘
       const next = { ...j, purged: true };
       delete next.retryAt;
       delete next.pendingReverify;
       jobs.put(next);
+      dirty = true;
     }
   }
-  if (roots.size) jobs.save();
+  if (dirty) jobs.save();
   return [...roots];
 }
 

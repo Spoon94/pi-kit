@@ -144,6 +144,48 @@ it("respawn 抛错 → 不重试、清退避、任务 parked(spawn failed)（F32
   expect(boards.get("S").tasks[0].park?.reason).toContain("spawn failed");
 });
 
+const countSaves = (store: ReturnType<typeof createJobStore>): (() => number) => {
+  let n = 0;
+  const save = store.save.bind(store);
+  store.save = () => { n++; save(); };
+  return () => n;
+};
+
+it("F123 空闲 sweepAll 零落盘（P1 性能回归）", () => {
+  jobs.put(j("R", { attempt: 4, finalized: true, evidenceApplied: true, notifyState: "acked" }));
+  const saves = countSaves(jobs);
+  expect(sweepAll(d)).toEqual({ respawned: 0, catchUp: [], retained: 0 });
+  expect(saves()).toBe(0);
+});
+
+it("F123 到期 respawn 成功恰好落盘一次（P1）", () => {
+  jobs.put(j("R", { retryAt: 500 }));
+  const saves = countSaves(jobs);
+  expect(sweepRespawns(d)).toBe(1);
+  expect(jobs.get("R")?.retryAt).toBeUndefined();
+  expect(saves()).toBe(1);
+});
+
+it("F123 respawn 失败路径同样只在有变化时落盘（P1）", () => {
+  jobs.put(j("R", { retryAt: 500 }));
+  d.respawn = () => ({ ok: false });
+  const saves = countSaves(jobs);
+  expect(sweepRespawns(d)).toBe(0);
+  expect(jobs.get("R")?.retryAt).toBeUndefined();
+  expect(saves()).toBe(1);
+});
+
+it("F123 清除悬置 pendingReverify 计为一次变化，二次扫描零落盘（P1）", () => {
+  jobs.put(j("R", { status: "completed", exitCode: 0, pendingReverify: true }));
+  jobs.put(j("R2", { rootId: "R", retryOf: "R", staleReverifyOf: "R" }));
+  const saves = countSaves(jobs);
+  expect(sweepRespawns(d)).toBe(0);
+  expect(jobs.get("R")?.pendingReverify).toBe(false);
+  expect(saves()).toBe(1);
+  expect(sweepRespawns(d)).toBe(0);
+  expect(saves()).toBe(1);
+});
+
 it("投递失败后由单 timer 在 10min 后补偿送达（F76）", () => {
   jobs.put(j("R", { finalized: true, evidenceApplied: true, notifyState: "sent", notifySentAt: 1000 }));
   expect(catchUpScan({ ...d, now: 1000 + DEFAULTS.notifyRetryMs + 1 })).toEqual(["R"]);

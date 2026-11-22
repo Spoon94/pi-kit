@@ -806,3 +806,26 @@ it("shutdown 清理单 timer 与合并 timer", async () => {
   await h.emit("session_shutdown", { type: "session_shutdown" });
   expect(vi.getTimerCount()).toBe(0);
 });
+
+it("finalizeTerminated 对 killed 链写 note=killed", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  setupJobs(cwd, [job({
+    id: "R", status: "killed", exitCode: null, exitCodeKnown: false, endedAt: 2,
+    kill: { requestedBy: "external", at: 1 }, finalized: false, evidenceApplied: false,
+    finalResult: undefined, taskId: 1, sessionId: "S",
+  })]);
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "t", status: "in_progress", jobs: ["R"], inProgressSince: 0 }];
+  b.nextId = 2;
+  const branch: unknown[] = [snapshot(b)];
+  const h = makeHarness(cwd, branch, true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+
+  const snaps = branch.filter((e: any) => e?.customType === "rpiv-todo-state") as any[];
+  const finals = (snaps.at(-1)?.data.tasks[0].evidence as any[]).filter((e) => e.chainFinal);
+  expect(finals).toHaveLength(1);
+  expect(finals[0].note).toBe("killed");
+  expect(h.sent).toHaveLength(1);
+  expect(h.sent[0].message.content).toContain("killed");
+});

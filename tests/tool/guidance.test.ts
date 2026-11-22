@@ -69,6 +69,9 @@ it("schema 每个参数都有非空 description（含嵌套对象）", () => {
   check(TodoParamsSchema, "todo");
   check(BgRunParamsSchema, "bg_run");
   check(BgKillParamsSchema, "bg_kill");
+  const reasonDesc = (TodoParamsSchema.properties.reason as any).description as string;
+  expect(reasonDesc).toContain("park");
+  expect(reasonDesc).not.toContain("清理");
 });
 
 it("指引可被配置覆盖，优先级 file > settings > legacy > 默认", () => {

@@ -30,7 +30,7 @@ export const TodoParamsSchema = Type.Object({
   activeForm: Type.Optional(Type.String({ description: "进行中短语，面板展示。" })),
   owner: Type.Optional(Type.String({ description: "负责人。" })),
   status: Type.Optional(StatusEnum),
-  reason: Type.Optional(Type.String({ description: "park 的原因（必填）；也用于清理说明。" })),
+  reason: Type.Optional(Type.String({ description: "park 的原因（必填，仅 status:\"parked\" 时使用）。" })),
   accept: Type.Optional(Type.Literal("stale", { description: "显式接受 stale 证据完成；会留痕。" })),
   blockedBy: Type.Optional(Type.Array(Type.Number(), { description: "create 时的完整依赖 id 列表。" })),
   addBlockedBy: Type.Optional(Type.Array(Type.Number(), { description: "append 依赖；会做环检测 R21，成环即拒。" })),

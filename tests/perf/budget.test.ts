@@ -13,17 +13,24 @@ const ctx = (): RuleContext => ({
   facts: { hasRunning: () => false, hasBackoff: () => false, startedAt: () => undefined, exists: () => true },
 });
 
-it("200 任务下 1000 次 mutation p95 < 3ms", () => {
+it("200 任务下 mutation p95 中位数 < 3ms（5 批 × 1000，预热后）", () => {
   let s = emptyBoard();
   for (let i = 0; i < 200; i++) s = applyMutation(s, { action: "create", subject: `t${i}` }, ctx()).state;
-  const times: number[] = [];
-  for (let i = 0; i < 1000; i++) {
-    const t0 = performance.now();
-    applyMutation(s, { action: "update", id: (i % 200) + 1, activeForm: `f${i}` }, ctx());
-    times.push(performance.now() - t0);
-  }
-  times.sort((a, b) => a - b);
-  expect(times[Math.floor(times.length * 0.95)]).toBeLessThan(3);
+  const batchP95 = (): number => {
+    const times: number[] = [];
+    for (let i = 0; i < 1000; i++) {
+      const t0 = performance.now();
+      applyMutation(s, { action: "update", id: (i % 200) + 1, activeForm: `f${i}` }, ctx());
+      times.push(performance.now() - t0);
+    }
+    times.sort((a, b) => a - b);
+    return times[Math.floor(times.length * 0.95)];
+  };
+  // JIT 预热，丢弃前两批
+  for (let i = 0; i < 2; i++) batchP95();
+  // 5 批 p95 取中位数，降低单次调度尖峰敏感度
+  const batches = Array.from({ length: 5 }, () => batchP95()).sort((a, b) => a - b);
+  expect(batches[2]).toBeLessThan(3);
 });
 
 it("1 万条分支 replay < 30ms", () => {

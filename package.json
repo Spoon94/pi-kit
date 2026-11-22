@@ -22,7 +22,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "coverage": "vitest run --coverage",
-    "coverage:check": "vitest run --coverage"
+    "coverage:check": "vitest run --coverage",
+    "verify": "npm test && npm run typecheck && npm run coverage:check"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

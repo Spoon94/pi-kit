@@ -4,6 +4,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/**/*.test.ts"],
+    // perf 承诺 p95<3ms；文件串行运行，避免与其他测试文件争 CPU 造成假失败
+    fileParallelism: false,
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts", "extensions/**/*.ts"],

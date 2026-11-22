@@ -17,14 +17,15 @@
 | logPath 路径穿越防护 | §10.1（sidecar 安全） | `src/jobs/store.ts`（`relative` + `realpath` containment）、`src/wake/compose.ts`、`src/bind/autofill.ts`、`extensions/vigil-todo.ts`（`/bg tail`） | `tests/jobs/store.test.ts`（2）、`tests/wake/compose.test.ts`（1）、`tests/bind/autofill.test.ts`（1）、`tests/integration/extension-entry.test.ts`（1） |
 | 进度可信（allExit0/证据滚动） | §8.1 | `src/board/selectors.ts`（`evidenceRolled`）、`src/ui/panel.ts`（汇总行） | `tests/board/selectors.test.ts`（1）、`tests/ui/panel.test.ts`（1） |
 | WIP 超卖可见性 | §8.1 | `src/ui/panel.ts`（面板首行 + doctor） | `tests/ui/panel.test.ts`（1） |
-| 功能完备性与模型指引 | §19.1、§19.2、§19.3 | `src/tool/guidance.ts`（默认 per-tool snippets + 配置覆盖）、`src/tool/schema.ts`（每个参数 description）、`src/tool/envelope.ts`（list includeDeleted/status、get 详情）、`src/ui/panel.ts`（truncateToWidth）、`extensions/vigil-todo.ts`（session_start 按配置重注册工具指引） | `tests/tool/guidance.test.ts`（5）、`tests/tool/envelope.test.ts`（7）、`tests/ui/panel.test.ts`（14）、`tests/integration/extension-entry.test.ts`（guidance 覆盖 1）、`tests/board/edge-cases.test.ts`（6）、`tests/tool/edge-cases.test.ts`（3） |
+| 功能完备性与模型指引 | §19.1、§19.2、§19.3 | `src/tool/guidance.ts`（默认 per-tool snippets + 配置覆盖）、`src/tool/schema.ts`（每个参数 description）、`src/tool/envelope.ts`（list includeDeleted/status、get 详情）、`src/ui/panel.ts`（truncateToWidth）、`extensions/vigil-todo.ts`（session_start 按配置重注册工具指引） | `tests/tool/guidance.test.ts`（5）、`tests/tool/envelope.test.ts`（7）、`tests/ui/panel.test.ts`（14）、`tests/integration/extension-entry.test.ts`（guidance/killed note 等）、`tests/board/edge-cases.test.ts`（9）、`tests/tool/edge-cases.test.ts`（3） |
 
 ## 覆盖率基线与门禁（§19.5）
 
 - 测量命令：`npm run coverage`（v8 provider；排除纯类型文件 `src/jobs/types.ts`）
 - 门禁命令：`npm run coverage:check`，阈值 **行 ≥95% / 分支 ≥90% / 函数 ≥95%**，未达即非零退出
-- 本轮基线（2026-11-22）：**行 98.97% / 分支 92.77% / 函数 98.63%**
-- 交付前必跑：`npm test && npm run typecheck && npm run coverage:check`
+- 本轮基线（2026-11-22）：**行 98.97% / 分支 92.87% / 函数 98.63%**
+- 交付前必跑：`npm test && npm run typecheck && npm run coverage:check`，或一次运行 `npm run verify`
+- perf 稳定性：`fileParallelism:false`（文件串行，避免 perf 与其他测试争 CPU）+ JIT 预热丢弃前两批 + 5 批 p95 取中位数；4 个 CPU burner 负载下连续 5 次全量套件全部通过
 - 门禁实测：正常全量通过；临时移除大量测试后覆盖率下降（本次实验 98.92→97.33 行、92.13→91.71 分支），把阈值人为提高即出现 `ERROR: Coverage for ... does not meet ...` 非零退出；删除 tool/ui 测试会使 `coverage:check` 因自检/阈值一起失败。
 
 ## 边界守卫（§16.5 / §17.5）

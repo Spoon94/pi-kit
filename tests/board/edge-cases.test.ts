@@ -103,6 +103,27 @@ it("tasks[] 单项畸形：subject 非字符串/缺省、metadata 非对象", ()
   expect(msg(applyMutation(s, { action: "create", tasks: [] }, ctx()))).toContain("subject required");
 });
 
+it("create 带 tasks[] 时顶层字段被拒（不静默丢弃）", () => {
+  const s = board3();
+  for (const extra of [
+    { description: "d" }, { activeForm: "x" }, { owner: "o" },
+    { metadata: { z: 1 } }, { blockedBy: [2] }, { verify: { kind: "command", command: "true" } },
+  ]) {
+    expect(msg(applyMutation(s, { action: "create", tasks: [{ subject: "a" }], ...extra } as never, ctx())))
+      .toContain("only apply to single create");
+  }
+});
+
+it("park + verify 改动被拒（与 completed 对称）", () => {
+  const s = applyMutation(emptyBoard(), {
+    action: "create", subject: "v", verify: { kind: "command", command: "npm test" },
+  }, ctx()).state;
+  expect(msg(applyMutation(s, {
+    action: "update", id: 1, status: "parked", reason: "r", verify: { kind: "command", command: "true" },
+  }, ctx()))).toContain("cannot change verify and park");
+  expect(applyMutation(s, { action: "update", id: 1, status: "parked", reason: "r" }, ctx()).op.kind).toBe("update");
+});
+
 it("clear：非法 scope 与非布尔 force 拒绝", () => {
   const s = board3();
   expect(msg(applyMutation(s, { action: "clear", scope: "bogus" } as never, ctx()))).toContain("invalid scope");

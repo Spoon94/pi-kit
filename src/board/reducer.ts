@@ -20,6 +20,13 @@ const isBag = (v: unknown) => typeof v === "object" && v !== null && !Array.isAr
 export function applyMutation(state: BoardState, p: MutationParams, ctx: RuleContext): ApplyResult {
   if (p.action === "create") {
     if (p.subject !== undefined && p.tasks !== undefined) return err(state, "create requires subject or tasks[], not both");
+    if (p.tasks !== undefined) {
+      const topLevel = (["description", "activeForm", "owner", "metadata", "blockedBy", "verify"] as const)
+        .filter((k) => p[k] !== undefined);
+      if (topLevel.length) {
+        return err(state, `top-level ${topLevel.join(", ")} only apply to single create; put them on each tasks[] item`);
+      }
+    }
     const fromTasks = p.tasks !== undefined;
     const items = p.tasks ?? (p.subject !== undefined ? [{ subject: p.subject, description: p.description, activeForm: p.activeForm, blockedBy: p.blockedBy, owner: p.owner, metadata: p.metadata, verify: p.verify }] : []);
     if (items.length === 0) return err(state, "subject required for create");
@@ -114,7 +121,11 @@ export function applyMutation(state: BoardState, p: MutationParams, ctx: RuleCon
     const bad = verifyError(p.verify);
     if (bad) return err(state, bad);
   }
-  if (p.status === "completed" && p.verify !== undefined && p.verify.command !== cur.verify?.command) {
+  if ((p.status === "completed" || p.status === "parked")
+    && p.verify !== undefined && p.verify.command !== cur.verify?.command) {
+    if (p.status === "parked") {
+      return err(state, `#${cur.id} cannot change verify and park in one update → 先 park，再单独 todo({action:"update", id:${cur.id}, verify:…})`);
+    }
     return err(state, `#${cur.id} cannot change verify and complete in one update → 先改 verify，再 todo({action:"verify", id:${cur.id}})，最后 completed`);
   }
   if (p.status === "completed") {

@@ -9,8 +9,8 @@ pi remove pi-bg-run
 
 Behavior of pi 1.5.2, evidenced from `dist/` sources (see [p0-findings.md](p0-findings.md)):
 
-- **For same-named tools the first registrant wins; later ones are silently dropped** (`runner.js:410-421`). With both packages present, who owns `todo` depends purely on the declaration order in `settings.packages`.
-- **Events are broadcast**: both packages receive `tool_call` / `tool_result`. This can produce a half-effective state — the old package's reducer writing state while the new package's preflight blocks calls — which is harder to debug than not working at all.
+- **pi fails to load the later-registered extension with an explicit tool-conflict error** (`Failed to load extension "...": Tool "todo" conflicts with ...`; observed on pi 1.5.2). The definition layer also falls back to first-registrant-wins, but the loader error already prevents normal coexistence.
+- **If both packages somehow load** (only by bypassing the loader error), events are broadcast: both packages receive `tool_call` / `tool_result`, producing a theoretical half-effective state — the old package's reducer writing state while the new package's preflight blocks calls. This is a theoretical risk, not the normal user-visible outcome; the loader error normally stops coexistence first.
 - Startup self-check: at `session_start` the extension looks up `todo`'s `sourceInfo` via `getAllTools()`; if it is not ours it notifies an error and **registers no event handlers**. `/vigil-todo doctor` reports the conflict as its first line.
 
 **Appending this package without removing the old ones is not a successful install.**
@@ -57,7 +57,7 @@ If you must roll back: export task text via `/todos`, back up `~/.pi/agent/sessi
 ## 5. Post-migration self-check
 
 ```
-/vigil-todo doctor     # expect: no problems found
+/vigil-todo doctor     # expect: ✓ No issues found
 /todos                 # old tasks should appear as-is
 /bg                    # old job records visible (a corrupt sidecar is archived and restarted empty)
 ```

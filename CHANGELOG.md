@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.1.0] - 2026-11-22
+## [0.1.0] - Unreleased
 
 ### Added
 
@@ -10,4 +10,4 @@
 
 ### Notes
 
-- Remove `@juicesharp/rpiv-todo` and `pi-bg-run` first: tool-name registration is first-registrant-wins, and leaving the old packages installed produces a half-working state.
+- Remove `@juicesharp/rpiv-todo` and `pi-bg-run` first: pi fails to load the later-registered extension with an explicit tool-conflict error (observed on pi 1.5.2). Coexistence is broken either way — uninstall both before installing this package.

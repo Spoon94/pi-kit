@@ -6,9 +6,9 @@
 
 ## 1. Performance — done
 
-- Baselines established: `tests/perf/{budget,scale,burst,soak}.test.ts`.
-- Idle tick (full path incl. gc) measured: 0.0426 ms (50 tasks/20 jobs) → 0.2485 ms (200/2000). Before the fix, `sweepAll` alone cost 22.8 ms from unconditional sidecar writes; now zero-change ticks write nothing.
-- Wake composition budgeted: 50 chains 6.86 ms; 200 chains with a 2000-char next subject 5.83 ms / 4736 chars, footer intact, log reads stop at budget.
+- Baselines established: `tests/vigil-todo/perf/{budget,scale,burst,soak,wake,tick}.test.ts`.
+- Full idle tick (`gc` + `sweepAll` + `renderPanel` + `needsTimer`) is measured by `tests/vigil-todo/perf/tick.test.ts` at 50/20, 200/100, 200/300, and 200/2000; the test prints every component and asserts the total < 1 ms. Before the fix, `sweepAll` alone cost 22.8 ms from unconditional sidecar writes; now zero-change ticks write nothing.
+- Wake composition budgeted: 50 chains 6.86 ms; 200 chains with a 2000-char next subject 5.83 ms / 4736 chars, footer intact, log reads stop at budget (`tests/vigil-todo/perf/wake.test.ts`).
 - Real-GC soak: +0.10 MB / +0.06 MB per 300 job cycles; handles flat; `clearAll` recovers.
 - No timers when there is nothing to do; no per-job polling; single coalesced sidecar write per changed tick.
 
@@ -42,7 +42,7 @@ Open:
 ## 5. Extensibility — done
 
 - Multi-extension layout: `extensions/<name>.ts` + `src/<name>/` + `tests/<name>/` + `docs/<name>/`; guide in [`../adding-an-extension.md`](../adding-an-extension.md).
-- Repo guards: module boundaries, retired-mechanism scope, CJK-free source — each proven by an injected-violation probe.
+- Repo guards: module boundaries, retired-mechanism scope, CJK-free source — each proven by a permanent injected-violation test in `tests/arch/`.
 - No premature `src/shared/`: extract only when a second real consumer appears.
 
 Open:
@@ -51,7 +51,7 @@ Open:
 ## 6. Self-verification — done
 
 - Spec↔test mapping enforced: `tests/selfcheck/spec-coverage.test.ts` parses every F-id from the spec and fails if any lacks a test; verified live by deleting an F-id and watching it fail.
-- Coverage gate: lines ≥95 / branches ≥90 / functions ≥95 via `npm run coverage:check`; current 99.51 / 94.20 / 98.83.
+- Coverage gate: lines ≥95 / branches ≥90 / functions ≥95 via `npm run coverage:check`; current 99.51 / 94.29 / 98.83.
 - `npm run verify` = test + typecheck + coverage, non-zero on any failure.
 - `/vt doctor` reports conflicts, orphans, overdue retention, cycles, WIP oversell, turn limit — each with an executable next step.
 

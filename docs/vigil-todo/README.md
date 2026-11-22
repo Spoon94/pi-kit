@@ -11,7 +11,7 @@
    pi remove @juicesharp/rpiv-todo
    pi remove pi-bg-run
    ```
-   Tool names are first-registrant-wins and silent; having both packages installed produces a half-working state.
+   Tool names conflict: pi fails to load the later-registered extension with an explicit tool-conflict error. Remove both old packages before installing this one.
 2. Install this repository with pi (see the collection [README](../../README.md) for local and git-source forms).
 3. Restart pi. `/vigil-todo doctor` should show `✓ No issues found`.
 

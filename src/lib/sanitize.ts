@@ -12,3 +12,9 @@ export function sanitizeTerminalText(value: string): string {
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, (c) => (c === "\n" || c === "\r" || c === "\t" ? " " : ""))
     .replace(BIDI, "");
 }
+
+/** 逐行清洗，保留换行分隔（用于多行终端输出/工具文本/唤醒消息）。 */
+export function sanitizeMultiline(value: string): string {
+  return value.split("\n").map(sanitizeTerminalText).join("\n");
+}
+

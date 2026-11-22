@@ -321,7 +321,9 @@ it("F10：同 cwd 两会话的通知各回各家（MINOR #8）", async () => {
 
 it("F72/F74：4 次失败只投递一次，chainFinal 恰一条且带日志尾（MINOR #7）", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
-  const log = join(cwd, "fail.log");
+  const storeDir = runDir(cwd);
+  mkdirSync(storeDir, { recursive: true });
+  const log = join(storeDir, "fail.log");
   writeFileSync(log, "boom-tail");
   const ids = ["R", "a2", "a3", "a4"];
   setupJobs(cwd, ids.map((id, i) => job({
@@ -354,7 +356,9 @@ it("F72/F74：4 次失败只投递一次，chainFinal 恰一条且带日志尾�
 
 it("/bg k 需二次确认，/bg tail 可看日志尾（§8.4）", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
-  const log = join(cwd, "r.log");
+  const storeDir = runDir(cwd);
+  mkdirSync(storeDir, { recursive: true });
+  const log = join(storeDir, "r.log");
   writeFileSync(log, "line1\nline2\nline3");
   setupJobs(cwd, [job({ id: "R", status: "failed", exitCode: 1, endedAt: 2, logPath: log })]);
   const h = makeHarness(cwd, [snapshot(emptyBoard())], true);
@@ -424,4 +428,49 @@ it("halted 时 recovered 探活仍执行，残留退出不被拖到 resume 后�
   } finally {
     if (child.exitCode === null) child.kill("SIGKILL");
   }
+});
+
+it("命令输出清洗恶意 label/command/subject（MINOR #1）", async () => {
+  const evil = "\u001b]0;pwned\u0007\u001b[31mRED";
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const storeDir = runDir(cwd);
+  mkdirSync(storeDir, { recursive: true });
+  const log = join(storeDir, "r.log");
+  writeFileSync(log, evil);
+  setupJobs(cwd, [job({
+    id: "R", label: evil, command: evil, logPath: log, status: "failed", exitCode: 1,
+    endedAt: 2, finalized: true, evidenceApplied: true, notifyState: "acked",
+  })]);
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: evil, status: "pending" }];
+  b.nextId = 2;
+  const h = makeHarness(cwd, [snapshot(b)], true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+
+  await h.runCommand("vigil-todo", "");
+  await h.runCommand("bg", "");
+  await h.runCommand("bg", "k R");
+  await h.runCommand("bg", "tail R");
+  const out = h.notifications.join("\n");
+  expect(out).not.toContain("\u001b");
+  expect(out).not.toContain("\u0007");
+  expect(out).toContain("RED");
+});
+
+it("/bg tail 拒绝 runDir 外的 logPath（MINOR #2）", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const secret = join(cwd, "secret.txt");
+  writeFileSync(secret, "TOPSECRET");
+  setupJobs(cwd, [job({
+    id: "R", logPath: secret, status: "failed", exitCode: 1, endedAt: 2,
+    finalized: true, evidenceApplied: true, notifyState: "acked",
+  })]);
+  const h = makeHarness(cwd, [snapshot(emptyBoard())], true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  await h.runCommand("bg", "tail R");
+  const out = h.notifications.join("\n");
+  expect(out).toContain("sidecar 可疑");
+  expect(out).not.toContain("TOPSECRET");
 });

@@ -17,10 +17,13 @@ export function completedSummary(state: BoardState) {
   const visible = state.tasks.filter((t) => t.status !== "deleted");
   const done = visible.filter((t) => t.status === "completed");
   const finals = done.flatMap((t) => (t.evidence ?? []).filter((e) => e.chainFinal));
+  const withTrace = done.filter((t) => (t.jobs?.length ?? 0) > 0 || t.lastFailure !== undefined);
+  const evidenceRolled = done.length > 0 && finals.length === 0 && withTrace.length > 0;
   return {
     done: done.length,
     total: visible.length,
-    allExit0: finals.every((e) => e.ok && e.exitCode === 0),
+    allExit0: finals.length > 0 ? finals.every((e) => e.ok && e.exitCode === 0) : withTrace.length === 0,
+    evidenceRolled,
     fpUnknown: finals.filter((e) => e.fp === "unknown").length,
     reverified: finals.filter((e) => e.note?.includes("reverified")).length,
     verifyChanged: done.filter((t) => t.verifyChanged).length,

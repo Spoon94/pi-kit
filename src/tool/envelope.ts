@@ -1,5 +1,6 @@
 import type { Op } from "../board/reducer.js";
 import type { BoardCounters, BoardState, Task } from "../board/types.js";
+import { sanitizeMultiline } from "../lib/sanitize.js";
 
 export interface Snapshot {
   action: string; params: Record<string, unknown>;
@@ -16,7 +17,7 @@ export function buildResult(params: Record<string, unknown>, state: BoardState, 
   };
   if (op.kind === "error") {
     details.error = op.message;
-    return { content: [{ type: "text", text: `Error: ${op.message}` }], details, isError: true };
+    return { content: [{ type: "text", text: sanitizeMultiline(`Error: ${op.message}`) }], details, isError: true };
   }
   const text =
     op.kind === "create" ? `Created ${op.ids.map((i) => `#${i}`).join(", ")}`
@@ -25,5 +26,5 @@ export function buildResult(params: Record<string, unknown>, state: BoardState, 
     : op.kind === "clear" ? `Cleared ${op.count} tasks`
     : op.kind === "get" ? `#${op.task.id} [${op.task.status}] ${op.task.subject}`
     : state.tasks.filter((t) => t.status !== "deleted").map((t) => `[${t.status}] #${t.id} ${t.subject}`).join("\n") || "No tasks";
-  return { content: [{ type: "text", text }], details };
+  return { content: [{ type: "text", text: sanitizeMultiline(text) }], details };
 }

@@ -80,3 +80,32 @@ it("loader 分离 stat 与读取：未变不读文件，settings/mtime 变化才
   mtime = 2;
   expect(load().maxTurns).toBe(4);
 });
+
+it("超上限逐项退回默认（max 生效，MINOR #4）", () => {
+  const c = resolveConfig({ file: {
+    maxTailBytes: 1e12, maxTurns: 20_000, wipLimit: 1000, tailLines: 501,
+    maxWidgetLines: 201, retryDelaysMs: [0, 4_000_000],
+  } });
+  expect(c.maxTailBytes).toBe(DEFAULTS.maxTailBytes);
+  expect(c.maxTurns).toBe(DEFAULTS.maxTurns);
+  expect(c.wipLimit).toBe(DEFAULTS.wipLimit);
+  expect(c.tailLines).toBe(DEFAULTS.tailLines);
+  expect(c.maxWidgetLines).toBe(DEFAULTS.maxWidgetLines);
+  expect(c.retryDelaysMs).toEqual(DEFAULTS.retryDelaysMs);
+});
+
+it("边界值本身可用", () => {
+  const c = resolveConfig({ file: { wipLimit: 100, maxTailBytes: 1_048_576, tailLines: 500 } });
+  expect(c.wipLimit).toBe(100);
+  expect(c.maxTailBytes).toBe(1_048_576);
+  expect(c.tailLines).toBe(500);
+});
+
+it("CONFIG_KEYS 暴露上限（MINOR #4）", () => {
+  expect(CONFIG_KEYS.maxTailBytes.max).toBe(1_048_576);
+  expect(CONFIG_KEYS.maxWidgetLines.max).toBe(200);
+  expect(CONFIG_KEYS.wipLimit.max).toBe(100);
+  expect(CONFIG_KEYS.maxConcurrentJobs.max).toBe(200);
+  expect(CONFIG_KEYS.maxTurns.max).toBe(10_000);
+  expect(CONFIG_KEYS.tailLines.max).toBe(500);
+});

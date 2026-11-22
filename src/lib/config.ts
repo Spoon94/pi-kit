@@ -19,27 +19,27 @@ export const DEFAULTS: VigilConfig = {
 type Bag = Record<string, unknown>;
 const isBag = (v: unknown): v is Bag => typeof v === "object" && v !== null && !Array.isArray(v);
 
-export const CONFIG_KEYS: Record<keyof VigilConfig, { type: "int" | "int[]" | "string"; min?: number; reload: boolean; default: unknown }> = {
-  wipLimit: { type: "int", min: 1, reload: false, default: DEFAULTS.wipLimit },
-  retries: { type: "int", min: 0, reload: false, default: DEFAULTS.retries },
-  retryDelaysMs: { type: "int[]", min: 0, reload: false, default: DEFAULTS.retryDelaysMs },
-  staleReverify: { type: "int", min: 0, reload: false, default: DEFAULTS.staleReverify },
-  maxTurns: { type: "int", min: 1, reload: false, default: DEFAULTS.maxTurns },
-  maxConcurrentJobs: { type: "int", min: 1, reload: false, default: DEFAULTS.maxConcurrentJobs },
-  completedTtlMs: { type: "int", min: 1, reload: false, default: DEFAULTS.completedTtlMs },
-  taskRetentionMs: { type: "int", min: 0, reload: false, default: DEFAULTS.taskRetentionMs },
-  tailLines: { type: "int", min: 1, reload: false, default: DEFAULTS.tailLines },
-  maxTailBytes: { type: "int", min: 1, reload: false, default: DEFAULTS.maxTailBytes },
-  maxWidgetLines: { type: "int", min: 3, reload: false, default: DEFAULTS.maxWidgetLines },
+export const CONFIG_KEYS: Record<keyof VigilConfig, { type: "int" | "int[]" | "string"; min?: number; max?: number; reload: boolean; default: unknown }> = {
+  wipLimit: { type: "int", min: 1, max: 100, reload: false, default: DEFAULTS.wipLimit },
+  retries: { type: "int", min: 0, max: 20, reload: false, default: DEFAULTS.retries },
+  retryDelaysMs: { type: "int[]", min: 0, max: 3_600_000, reload: false, default: DEFAULTS.retryDelaysMs },
+  staleReverify: { type: "int", min: 0, max: 10, reload: false, default: DEFAULTS.staleReverify },
+  maxTurns: { type: "int", min: 1, max: 10_000, reload: false, default: DEFAULTS.maxTurns },
+  maxConcurrentJobs: { type: "int", min: 1, max: 200, reload: false, default: DEFAULTS.maxConcurrentJobs },
+  completedTtlMs: { type: "int", min: 1, max: 365 * 24 * 3600_000, reload: false, default: DEFAULTS.completedTtlMs },
+  taskRetentionMs: { type: "int", min: 0, max: 365 * 24 * 3600_000, reload: false, default: DEFAULTS.taskRetentionMs },
+  tailLines: { type: "int", min: 1, max: 500, reload: false, default: DEFAULTS.tailLines },
+  maxTailBytes: { type: "int", min: 1, max: 1_048_576, reload: false, default: DEFAULTS.maxTailBytes },
+  maxWidgetLines: { type: "int", min: 3, max: 200, reload: false, default: DEFAULTS.maxWidgetLines },
   collapseKey: { type: "string", reload: true, default: DEFAULTS.collapseKey },
-  notifyRetryMs: { type: "int", min: 1, reload: false, default: DEFAULTS.notifyRetryMs },
-  wakeMergeMs: { type: "int", min: 0, reload: false, default: DEFAULTS.wakeMergeMs },
+  notifyRetryMs: { type: "int", min: 1, max: 86_400_000, reload: false, default: DEFAULTS.notifyRetryMs },
+  wakeMergeMs: { type: "int", min: 0, max: 60_000, reload: false, default: DEFAULTS.wakeMergeMs },
 };
 
-const posInt = (v: unknown, min: number): number | undefined =>
-  typeof v === "number" && Number.isInteger(v) && v >= min ? v : undefined;
+const posInt = (v: unknown, min: number, max?: number): number | undefined =>
+  typeof v === "number" && Number.isInteger(v) && v >= min && (max === undefined || v <= max) ? v : undefined;
 
-/** file > settings.vigilTodo > legacy.bgRun > DEFAULTS；非法值逐项退回默认。 */
+/** file > settings.vigilTodo > legacy.bgRun > DEFAULTS；非法/超限值逐项退回默认。 */
 export function resolveConfig(s: { file?: unknown; settings?: unknown; legacy?: unknown }): VigilConfig {
   const layers = [s.legacy, s.settings, s.file].filter(isBag);
   const pick = (k: keyof VigilConfig): unknown => {
@@ -47,18 +47,17 @@ export function resolveConfig(s: { file?: unknown; settings?: unknown; legacy?: 
     return undefined;
   };
   const out = { ...DEFAULTS };
-  const mins: Partial<Record<keyof VigilConfig, number>> = {
-    wipLimit: 1, retries: 0, staleReverify: 0, maxTurns: 1, maxConcurrentJobs: 1,
-    completedTtlMs: 1, taskRetentionMs: 0, tailLines: 1, maxTailBytes: 1, maxWidgetLines: 3,
-    notifyRetryMs: 1, wakeMergeMs: 0,
-  };
-  for (const [k, min] of Object.entries(mins)) {
-    const v = posInt(pick(k as keyof VigilConfig), min as number);
-    if (v !== undefined) (out as unknown as Bag)[k] = v;
-  }
-  const delays = pick("retryDelaysMs");
-  if (Array.isArray(delays) && delays.length > 0 && delays.every((d) => posInt(d, 0) !== undefined)) {
-    out.retryDelaysMs = delays as number[];
+  for (const [k, meta] of Object.entries(CONFIG_KEYS)) {
+    if (meta.type === "int") {
+      const v = posInt(pick(k as keyof VigilConfig), meta.min ?? 0, meta.max);
+      if (v !== undefined) (out as unknown as Bag)[k] = v;
+    } else if (meta.type === "int[]") {
+      const arr = pick(k as keyof VigilConfig);
+      if (Array.isArray(arr) && arr.length > 0
+        && arr.every((d) => posInt(d, meta.min ?? 0, meta.max) !== undefined)) {
+        (out as unknown as Bag)[k] = arr as number[];
+      }
+    }
   }
   const key = pick("collapseKey");
   if (typeof key === "string" && key.trim() !== "") out.collapseKey = key.trim().toLowerCase();

@@ -22,7 +22,7 @@ import { createJobStore, runDir, type JobStore } from "../src/jobs/store.js";
 import type { Job } from "../src/jobs/types.js";
 import { createConfigLoader } from "../src/lib/config.js";
 import { collectFingerprint } from "../src/lib/fingerprint.js";
-import { sanitizeTerminalText } from "../src/lib/sanitize.js";
+import { sanitizeMultiline, sanitizeTerminalText } from "../src/lib/sanitize.js";
 import { tailLines } from "../src/lib/tail.js";
 import {
   createBgKillTool, createBgListTool, createBgRunTool, createTodoTool, detectToolConflict,
@@ -91,7 +91,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   });
 
   const notify = (message: string, level: "info" | "warning" | "error" = "warning"): void => {
-    if (activeCtx?.hasUI) activeCtx.ui.notify(message, level);
+    if (activeCtx?.hasUI) activeCtx.ui.notify(sanitizeMultiline(message), level);
   };
 
   const jobFacts = () => ({
@@ -406,7 +406,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   };
 
   const output = (ctx: ExtensionContext, text: string): void => {
-    ctx.ui.notify(text, "info");
+    ctx.ui.notify(sanitizeMultiline(text), "info");
   };
 
   const commandHandler = (run: (arg: string, ctx: ExtensionCommandContext) => void) =>
@@ -500,6 +500,10 @@ export default function vigilTodo(pi: ExtensionAPI): void {
           const id = arg.slice(5).trim();
           const target = jobs.get(id);
           if (!target) { output(ctx, `${id} not found`); return; }
+          if (!jobs.isSafeLogPath(target.logPath)) {
+            output(ctx, `sidecar 可疑：${target.id} 的 logPath 不在运行目录，已拒绝读取`);
+            return;
+          }
           const cfg = getCfg();
           const tail = tailLines(target.logPath, cfg.tailLines, cfg.maxTailBytes);
           output(ctx, tail.length ? tail.map(sanitizeTerminalText).join("\n") : "(no log)");

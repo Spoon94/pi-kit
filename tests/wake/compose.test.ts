@@ -76,3 +76,18 @@ it("成功消息带作业耗时（§7.5）", () => {
   const b = emptyBoard(); b.tasks = [{ id: 1, subject: "回归", status: "completed" }];
   expect(composeWake(["R"], b, jobs, DEFAULTS, undefined)).toContain("3m12s");
 });
+
+it("logPath 越界时不读日志，避免 sidecar 篡改泄密（MINOR #2）", () => {
+  const root = mkdtempSync(join(tmpdir(), "{{SECRET_9q0d6s1e}}"));
+  const secret = join(root, "secret.txt");
+  writeFileSync(secret, "TOPSECRET");
+  const jobs = createJobStore(join(root, "store"));
+  jobs.put(j({
+    logPath: secret, status: "failed", exitCode: 1,
+    finalResult: { ok: false, note: "failed", trigger: "external", at: 2, jobId: "R" },
+  }));
+  const b = emptyBoard(); b.tasks = [{ id: 1, subject: "回归", status: "parked" }];
+  const text = composeWake(["R"], b, jobs, DEFAULTS, undefined);
+  expect(text).not.toContain("TOPSECRET");
+  expect(text).not.toContain("log tail");
+});

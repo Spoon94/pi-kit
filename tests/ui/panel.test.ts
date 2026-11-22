@@ -99,3 +99,29 @@ it("in_progress 行显示 ✶ 耗时，retry 上限随配置（§8.1）", () => 
   expect(line).toContain("✶ 2m10s");
   expect(line).toContain("retry 1/6");
 });
+
+it("证据滚动时汇总不显示 all exit 0（MINOR #3）", () => {
+  const evidence: Evidence[] = Array.from({ length: 8 }, (_, i) => ({
+    ok: false, kind: "job", origin: "async", chainFinal: false,
+    at: i, known: true, fp: "fresh", exitCode: 1, ref: `bg_${i}`,
+  }));
+  const s = b([{ id: 1, subject: "d", status: "completed", jobs: ["bg_a"], evidence }]);
+  const summary = renderPanel(s, jobs(), DEFAULTS).find((r) => r.includes("done ·")) ?? "";
+  expect(summary).toContain("证据已滚动");
+  expect(summary).not.toContain("all exit 0");
+});
+
+it("WIP 超卖在面板与 doctor 可见（MINOR #5）", () => {
+  const tasks: Task[] = [
+    { id: 1, subject: "i1", status: "in_progress" },
+    { id: 2, subject: "i2", status: "in_progress" },
+    { id: 3, subject: "i3", status: "in_progress" },
+    { id: 4, subject: "p", status: "pending" },
+  ];
+  const s = b(tasks);
+  expect(renderPanel(s, jobs(), { ...DEFAULTS, wipLimit: 1 })[0]).toContain("WIP 超卖 (3/1)");
+  const doc = renderDoctor(s, jobs(), false, undefined,
+    { purgedRoots: 0, retentionOverdue: 0, orphanJobs: 0, wipLimit: 1 });
+  expect(doc).toContain("超过 wipLimit=1");
+  expect(doc).not.toContain("无可推进");
+});

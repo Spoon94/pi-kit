@@ -9,6 +9,7 @@ import type { JobStore } from "../jobs/store.js";
 import type { VigilConfig } from "../lib/config.js";
 import { buildResult } from "./envelope.js";
 import { BgKillParamsSchema, BgListParamsSchema, BgRunParamsSchema, TodoParamsSchema, prepareTodoArguments } from "./schema.js";
+import { sanitizeMultiline } from "../lib/sanitize.js";
 import type { TSchema } from "typebox";
 
 export function detectToolConflict(
@@ -63,7 +64,7 @@ export interface ToolDeps {
 }
 
 const errResult = (message: string): ToolResultLike => ({
-  content: [{ type: "text", text: `Error: ${message}` }], details: { error: message }, isError: true,
+  content: [{ type: "text", text: sanitizeMultiline(`Error: ${message}`) }], details: { error: message }, isError: true,
 });
 
 const asParams = (v: unknown): MutationParams => v as MutationParams;
@@ -193,7 +194,7 @@ export function createBgRunTool(deps: ToolDeps): ToolDef {
         });
         deps.commit(board);
         deps.appendEntry("rpiv-todo-state", result.details);
-        return { content: [{ type: "text", text: `Started ${spawned.jobId} for #${task.id}` }], details: result.details };
+        return { content: [{ type: "text", text: sanitizeMultiline(`Started ${spawned.jobId} for #${task.id}`) }], details: result.details };
       } catch (e) {
         deps.kill(spawned.jobId, "self");
         return errResult(`bind failed: ${String(e)}; 已 kill ${spawned.jobId}`);
@@ -213,7 +214,7 @@ export function createBgListTool(deps: ToolDeps): ToolDef {
       const text = jobs
         .map((j) => `${j.id} [${j.status}] exit ${j.exitCode ?? "?"} ${j.label}  ${j.command}`)
         .join("\n") || "No background jobs";
-      return { content: [{ type: "text", text }], details: { action: "bg_list", jobs } };
+      return { content: [{ type: "text", text: sanitizeMultiline(text) }], details: { action: "bg_list", jobs } };
     },
   };
 }
@@ -233,7 +234,7 @@ export function createBgKillTool(deps: ToolDeps): ToolDef {
       deps.kill(id, "self");
       deps.jobs.save();
       return {
-        content: [{ type: "text", text: `Killed ${target.rootId}: ${chain.join(", ")}` }],
+        content: [{ type: "text", text: sanitizeMultiline(`Killed ${target.rootId}: ${chain.join(", ")}`) }],
         details: { action: "bg_kill", rootId: target.rootId, jobs: chain },
       };
     },

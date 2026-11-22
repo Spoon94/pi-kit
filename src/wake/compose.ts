@@ -3,7 +3,7 @@ import type { JobStore } from "../jobs/store.js";
 import type { VigilConfig } from "../lib/config.js";
 import { formatElapsed } from "../lib/format.js";
 import { fpReason } from "../lib/fingerprint.js";
-import { sanitizeTerminalText } from "../lib/sanitize.js";
+import { sanitizeMultiline, sanitizeTerminalText } from "../lib/sanitize.js";
 import { tailLines } from "../lib/tail.js";
 
 export const WAKE_CUSTOM_TYPE = "vigil-todo-wake";
@@ -25,7 +25,7 @@ export function composeWake(roots: string[], board: BoardState, jobs: JobStore, 
       lines.push(`    todo({action:"verify", id:${j.taskId}})`);
     }
     if (!root.finalResult?.ok) {
-      const tail = tailLines(j.logPath, cfg.tailLines, cfg.maxTailBytes);
+      const tail = jobs.isSafeLogPath(j.logPath) ? tailLines(j.logPath, cfg.tailLines, cfg.maxTailBytes) : [];
       if (tail.length) { lines.push(`  log tail (last ${tail.length}):`); for (const l of tail) lines.push(`    ${sanitizeTerminalText(l).slice(0, 200)}`); }
     }
   }
@@ -39,5 +39,5 @@ export function composeWake(roots: string[], board: BoardState, jobs: JobStore, 
   } else {
     lines.push("无可推进任务");
   }
-  return lines.join("\n").slice(0, 4800);
+  return sanitizeMultiline(lines.join("\n")).slice(0, 4800);
 }

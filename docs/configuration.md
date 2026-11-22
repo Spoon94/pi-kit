@@ -19,22 +19,24 @@
 
 ## 全键表
 
-| 键 | 类型 | 最小 | 默认 | 生效时机 |
-|---|---|---|---|---|
-| `wipLimit` | int | 1 | 1 | 即时（每次 WIP 判定） |
-| `retries` | int | 0 | 3 | 即时（下次重试判定；总尝试 = 1 + retries） |
-| `retryDelaysMs` | int[] | 0（每项） | `[0, 30000, 120000]` | 即时（下次退避调度） |
-| `staleReverify` | int | 0 | 1 | 即时（下次 stale 判定） |
-| `maxTurns` | int | 1 | 50 | 即时（`tryDeliver` 第一行闸门） |
-| `maxConcurrentJobs` | int | 1 | 10 | 即时（下次 spawn 准入） |
-| `completedTtlMs` | int | 1 | 604800000（7 天） | 即时（下次 GC） |
-| `taskRetentionMs` | int | 0 | **0（关闭）** | 即时（下次 sweep） |
-| `tailLines` | int | 1 | 20 | 即时（下次尾读） |
-| `maxTailBytes` | int | 1 | 8192 | 即时（下次尾读） |
-| `maxWidgetLines` | int | 3 | 12 | 即时（下次渲染） |
-| `collapseKey` | string | — | `ctrl+shift+t` / `off` | **需 `/reload`**（快捷键只注册一次） |
-| `notifyRetryMs` | int | 1 | 600000（10 分钟） | 即时（下次补偿扫描） |
-| `wakeMergeMs` | int | 0 | 250 | 即时（下次唤醒合并窗口） |
+| 键 | 类型 | 最小 | 最大 | 默认 | 生效时机 |
+|---|---|---|---|---|---|
+| `wipLimit` | int | 1 | 100 | 1 | 即时（每次 WIP 判定） |
+| `retries` | int | 0 | 20 | 3 | 即时（下次重试判定；总尝试 = 1 + retries） |
+| `retryDelaysMs` | int[] | 0（每项） | 3600000（每项） | `[0, 30000, 120000]` | 即时（下次退避调度） |
+| `staleReverify` | int | 0 | 10 | 1 | 即时（下次 stale 判定） |
+| `maxTurns` | int | 1 | 10000 | 50 | 即时（`tryDeliver` 第一行闸门） |
+| `maxConcurrentJobs` | int | 1 | 200 | 10 | 即时（下次 spawn 准入） |
+| `completedTtlMs` | int | 1 | 31536000000（365 天） | 604800000（7 天） | 即时（下次 GC） |
+| `taskRetentionMs` | int | 0 | 31536000000（365 天） | **0（关闭）** | 即时（下次 sweep） |
+| `tailLines` | int | 1 | 500 | 20 | 即时（下次尾读） |
+| `maxTailBytes` | int | 1 | 1048576（1MB） | 8192 | 即时（下次尾读） |
+| `maxWidgetLines` | int | 3 | 200 | 12 | 即时（下次渲染） |
+| `collapseKey` | string | — | — | `ctrl+shift+t` / `off` | **需 `/reload`**（快捷键只注册一次） |
+| `notifyRetryMs` | int | 1 | 86400000（24h） | 600000（10 分钟） | 即时（下次补偿扫描） |
+| `wakeMergeMs` | int | 0 | 60000（1min） | 250 | 即时（下次唤醒合并窗口） |
+
+超出最小值或最大值的键**逐项退回默认**，不影响其他键；上限用于防止 `maxTailBytes` 之类配置造成 TB 级缓冲/读盘自伤。
 
 ## `taskRetentionMs` 为什么默认 0
 

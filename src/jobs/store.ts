@@ -1,5 +1,5 @@
 import { mkdirSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import { quarantine, readJsonSafe, writeJsonAtomic } from "../lib/atomic.js";
 import type { Job } from "./types.js";
 
@@ -25,6 +25,12 @@ export function createJobStore(dir: string) {
     all: (): Job[] => [...jobs.values()],
     get: (id: string) => jobs.get(id),
     put: (j: Job) => { jobs.set(j.id, { ...j }); },
+    /** logPath 必须落在本 store 的 runDir 内（防 sidecar 被篡改后读任意文件）。 */
+    isSafeLogPath: (p: string): boolean => {
+      if (typeof p !== "string" || p === "") return false;
+      const rel = relative(dir, p);
+      return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+    },
     save: () => { ensure(); writeJsonAtomic(path, { jobs: [...jobs.values()] }); },
     load: (): { degraded: boolean; note?: string } => {
       ensure();

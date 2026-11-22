@@ -52,3 +52,13 @@ it("GC 只清超 TTL 的终态作业，running 永不清，并返回删除数", 
   expect(s.get("old")).toBeUndefined();
   expect(s.get("run")).toBeDefined();
 });
+
+it("isSafeLogPath 只允许 runDir 内路径（MINOR #2）", () => {
+  const d = dir(); const s = createJobStore(d);
+  expect(s.isSafeLogPath(join(d, "a.log"))).toBe(true);
+  expect(s.isSafeLogPath(join(d, "sub", "a.log"))).toBe(true);
+  expect(s.isSafeLogPath("/etc/passwd")).toBe(false);
+  expect(s.isSafeLogPath(join(d))).toBe(false);
+  expect(s.isSafeLogPath(join(d, "..", "escape.log"))).toBe(false);
+  expect(s.isSafeLogPath("")).toBe(false);
+});

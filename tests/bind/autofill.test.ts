@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -125,6 +125,15 @@ describe("人工优先（R2-5）", () => {
     jobs.put(job({ sessionId: "OTHER" }));
     expect(autofillJob("A", { ...deps, sessionId: "S" }).action).toBe("recorded");
     expect(boards.get("S").tasks[0].evidence ?? []).toHaveLength(0);
+  });
+  it("logPath 越界时不读日志进 lastFailure（MINOR #2）", () => {
+    const dir = mkdtempSync(join(tmpdir(), "{{SECRET_dzs7b2he}}"));
+    const secret = join(dir, "secret.txt");
+    writeFileSync(secret, "TOPSECRET");
+    jobs.put(job({ status: "failed", exitCode: 1, attempt: 4, logPath: secret }));
+    autofillJob("A", deps);
+    expect(boards.get("S").tasks[0].lastFailure?.note).toBeUndefined();
+    expect(boards.get("S").tasks[0].park?.reason ?? "").not.toContain("TOPSECRET");
   });
   it("任务已 completed 时失败作业不降级为 parked（BLOCKER）", () => {
     const b = boards.get("S"); b.tasks[0].status = "completed"; boards.commit("S", b);

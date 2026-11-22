@@ -30,3 +30,14 @@ it("completed 汇总统计 fp:? 与 reverified（F58）", () => {
   const s = b([done(1, "fresh"), done(2, "unknown"), done(3, "fresh", "reverified"), t(4)]);
   expect(completedSummary(s)).toMatchObject({ done: 3, total: 4, allExit0: true, fpUnknown: 1, reverified: 1 });
 });
+
+it("chainFinal 被环形挤出时不谎报 all exit 0（MINOR #3）", () => {
+  const evidence = Array.from({ length: 8 }, (_, i) => ({
+    ok: false, kind: "job" as const, origin: "async" as const, chainFinal: false,
+    at: i, known: true, fp: "fresh" as const, exitCode: 1, ref: `bg_${i}`,
+  }));
+  const s = b([t(1, { status: "completed", jobs: ["bg_a"], evidence })]);
+  const sum = completedSummary(s);
+  expect(sum.allExit0).toBe(false);
+  expect(sum.evidenceRolled).toBe(true);
+});

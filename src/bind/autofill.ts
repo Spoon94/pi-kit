@@ -6,6 +6,7 @@ import type { SpawnRequest } from "../jobs/spawn.js";
 import type { JobStore } from "../jobs/store.js";
 import type { VigilConfig } from "../lib/config.js";
 import { classifyOverlap, verdictAt } from "../lib/fingerprint.js";
+import { sanitizeTerminalText } from "../lib/sanitize.js";
 import { tailLines } from "../lib/tail.js";
 
 export interface AutofillDeps {
@@ -42,10 +43,13 @@ export function autofillJob(jobId: string, d: AutofillDeps): { action: AutofillA
   d.jobs.put({ ...job, fpVerdict: fp, interferers: cls.interferers });
 
   const ok = job.exitCodeKnown && job.exitCode === 0 && job.status === "completed";
+  const tailLine = ok || !d.jobs.isSafeLogPath(job.logPath)
+    ? undefined
+    : sanitizeTerminalText(tailLines(job.logPath, 1, d.cfg.maxTailBytes)[0] ?? "") || undefined;
   const ev: Evidence = {
     ok, kind: "job", origin: "async", chainFinal: false, at: d.now,
     exitCode: job.exitCode, known: job.exitCodeKnown, fp, ref: job.id,
-    note: ok ? undefined : tailLines(job.logPath, 1, d.cfg.maxTailBytes)[0],
+    note: tailLine,
   };
 
   const humanFirst = task.status !== "in_progress";

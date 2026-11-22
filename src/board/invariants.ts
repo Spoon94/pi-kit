@@ -46,7 +46,7 @@ export function checkStructure(state: BoardState, task: Task, p: UpdateParams, c
     }
   }
 
-  // R4 依赖
+  // R4 依赖（R21 环检测在 reducer/graph.ts：提议边并入后 DFS，回边即拒）
   if (p.status === "in_progress" || p.status === "completed") {
     for (const dep of task.blockedBy ?? []) {
       const d = state.tasks.find((x) => x.id === dep);

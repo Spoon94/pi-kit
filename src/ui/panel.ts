@@ -1,5 +1,6 @@
-import { completedSummary } from "../board/selectors.js";
+import { completedSummary, selectNext, wipCount } from "../board/selectors.js";
 import type { BoardState } from "../board/types.js";
+import { detectCycle, formatCycle } from "../board/graph.js";
 import type { JobStore } from "../jobs/store.js";
 import { DEFAULTS, type VigilConfig } from "../lib/config.js";
 import { formatElapsed } from "../lib/format.js";
@@ -14,7 +15,14 @@ export function layoutRows(
   const sum = completedSummary(state);
   const parked = state.tasks.filter((t) => t.status === "parked");
   const atLimit = state.counters.turnsUsed >= cfg.maxTurns;
-  const head = `● vigil-todo ${sum.done}/${sum.total}${parked.length ? ` · ⚠ ${parked.length} parked` : ""}${atLimit ? ` · ⏸ 达轮数上限 (${state.counters.turnsUsed}/${cfg.maxTurns})` : ""}`;
+  const pending = state.tasks.filter((t) => t.status === "pending");
+  const busySlots = jobs.all().filter((j) => j.status === "running" || j.retryAt != null).length;
+  const capacityFull = busySlots >= cfg.maxConcurrentJobs;
+  const stuck = pending.length > 0 && !capacityFull && wipCount(state) < cfg.wipLimit
+    && selectNext(state, cfg.wipLimit, capacityFull) === undefined;
+  const head = `● vigil-todo ${sum.done}/${sum.total}${parked.length ? ` · ⚠ ${parked.length} parked` : ""}`
+    + `${atLimit ? ` · ⏸ 达轮数上限 (${state.counters.turnsUsed}/${cfg.maxTurns})` : ""}`
+    + `${stuck ? " · ⚠ 无可推进" : ""}`;
   const rows: string[] = [head];
   let used = 1;
   const summaryParts = [`${sum.done} done`, sum.allExit0 ? "all exit 0" : "有非零退出"];
@@ -64,7 +72,8 @@ export function renderTodos(state: BoardState, _jobs: JobStore): string {
 }
 
 export interface DoctorExtra {
-  purgedRoots: number; retentionOverdue: number; orphanJobs: number; maxTurns?: number;
+  purgedRoots: number; retentionOverdue: number; orphanJobs: number;
+  maxTurns?: number; wipLimit?: number; maxConcurrentJobs?: number;
 }
 
 export function renderDoctor(state: BoardState, jobs: JobStore, conflict: boolean, degraded?: string, extra?: DoctorExtra): string {
@@ -75,6 +84,20 @@ export function renderDoctor(state: BoardState, jobs: JobStore, conflict: boolea
   const maxTurns = extra?.maxTurns ?? DEFAULTS.maxTurns;
   if (state.counters.turnsUsed >= maxTurns) {
     lines.push(`⏸ 达轮数上限 (${state.counters.turnsUsed}/${maxTurns}) → 用户发消息归零`);
+  }
+  const wipLimit = extra?.wipLimit ?? DEFAULTS.wipLimit;
+  const maxJobs = extra?.maxConcurrentJobs ?? DEFAULTS.maxConcurrentJobs;
+  const pending = state.tasks.filter((t) => t.status === "pending");
+  const busySlots = jobs.all().filter((j) => j.status === "running" || j.retryAt != null).length;
+  const capacityFull = busySlots >= maxJobs;
+  const stuck = pending.length > 0 && !capacityFull && wipCount(state) < wipLimit
+    && selectNext(state, wipLimit, capacityFull) === undefined;
+  if (stuck) {
+    lines.push(`⚠ 有 ${pending.length} 个 pending 但无可推进任务（依赖环或全部被阻塞）→ /todos 查依赖`);
+  }
+  const cycle = detectCycle(state);
+  if (cycle) {
+    lines.push(`✗ 检测到依赖环：${formatCycle(cycle)} → todo({action:"update", id:${cycle[0]}, removeBlockedBy:[…]})`);
   }
   if (extra?.purgedRoots) lines.push(`✗ ${extra.purgedRoots} 条链已 purge（catch-up 跳过）`);
   if (extra?.retentionOverdue) lines.push(`⚠ ${extra.retentionOverdue} 个 completed/deleted 任务超期未清理`);

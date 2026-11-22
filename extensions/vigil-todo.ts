@@ -459,7 +459,9 @@ export default function vigilTodo(pi: ExtensionAPI): void {
           const orphanJobs = jobs.all()
             .filter((j) => j.taskId === undefined || !board.tasks.some((t) => t.id === j.taskId)).length;
           output(ctx, renderDoctor(board, jobs, conflict, degradedNote,
-            { purgedRoots, retentionOverdue, orphanJobs, maxTurns: getCfg().maxTurns }));
+            { purgedRoots, retentionOverdue, orphanJobs,
+              maxTurns: getCfg().maxTurns, wipLimit: getCfg().wipLimit,
+              maxConcurrentJobs: getCfg().maxConcurrentJobs }));
           return;
         }
         output(ctx, renderTodos(boards.get(sid), jobs));

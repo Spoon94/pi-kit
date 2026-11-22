@@ -12,6 +12,7 @@
 | 自验证能力 | §13、§16.6 | `src/ui/panel.ts`（`renderDoctor`）、`extensions/vigil-todo.ts`（doctor 汇总 purged/超期/孤儿） | `tests/selfcheck/spec-coverage.test.ts`（3）、`tests/ui/panel.test.ts`（8） |
 | 清理 todo | §16.7 | `src/board/cleanup.ts`（选择性 clear / `purged` / retention）、`src/tool/register.ts`（clear 接线）、`src/bind/sweep.ts`（catch-up 过滤 + retention） | `tests/board/cleanup.test.ts`（12） |
 | 强制中断 | §16.8 | `src/bind/halt.ts`（halt/resume/reap）、`src/wake/deliver.ts`（首行闸门）、`src/bind/sweep.ts`（两处短路）、`extensions/vigil-todo.ts`（命令 + before_settle + timer/init 短路） | `tests/bind/halt.test.ts`（11） |
+| 依赖环与死锁可见性 | §18（R21） | `src/board/graph.ts`（DFS 三色找环）、`src/board/reducer.ts`（create/addBlockedBy 接入）、`src/ui/panel.ts`（doctor 环与「无可推进」、面板首行标记） | `tests/board/cycle.test.ts`（7） |
 
 ## 边界守卫（§16.5 / §17.5）
 

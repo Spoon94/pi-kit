@@ -1,6 +1,7 @@
 import { READONLY_FIELDS, checkStructure, type MutationParams, type RuleContext } from "./invariants.js";
 import { appendEvidence, completionGate } from "./evidence.js";
 import { applyCleanup, planCleanup } from "./cleanup.js";
+import { detectCycle, formatCycle } from "./graph.js";
 import type { BoardState, Status, Task } from "./types.js";
 
 export type Op =
@@ -44,7 +45,16 @@ export function applyMutation(state: BoardState, p: MutationParams, ctx: RuleCon
       if (it.verify) t.verify = { ...it.verify };
       return t;
     });
-    return { state: { ...state, tasks: [...state.tasks, ...created], nextId: state.nextId + created.length }, op: { kind: "create", ids: created.map((t) => t.id) } };
+    const nextState: BoardState = {
+      ...state, tasks: [...state.tasks, ...created], nextId: state.nextId + created.length,
+    };
+    // R21：create 的 blockedBy 并入图后做 DFS 环检测
+    const cycle = detectCycle(nextState);
+    if (cycle) {
+      const head = created.find((t) => cycle.includes(t.id)) ?? created[0];
+      return err(state, `create would create a cycle (${formatCycle(cycle)}) → todo({action:"update", id:${head.id}, removeBlockedBy:[…]})`);
+    }
+    return { state: nextState, op: { kind: "create", ids: created.map((t) => t.id) } };
   }
 
   if (p.action === "clear") {
@@ -115,6 +125,16 @@ export function applyMutation(state: BoardState, p: MutationParams, ctx: RuleCon
       if (!t) return err(state, `addBlockedBy: #${d} not found`);
       if (t.status === "deleted") return err(state, `addBlockedBy: #${d} is deleted`);
       if (!deps.includes(d)) deps.push(d);
+    }
+    // R21：addBlockedBy 的提议边并入图后做 DFS 环检测（三节点以上环不能靠逐对比较）
+    if (p.addBlockedBy?.length) {
+      const cycle = detectCycle(state, { taskId: cur.id, deps });
+      if (cycle) {
+        const dep = p.addBlockedBy[0];
+        return err(state,
+          `#${cur.id} addBlockedBy[${dep}] would create a cycle (${formatCycle(cycle)})`
+          + ` → todo({action:"update", id:${cur.id}, removeBlockedBy:[${dep}]})`);
+      }
     }
     set("blockedBy", deps.length ? deps : undefined);
   }

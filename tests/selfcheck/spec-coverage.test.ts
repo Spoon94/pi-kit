@@ -47,6 +47,16 @@ it("入口级 F 编号必须在 tests/integration/ 有事件顺序断言（G2）
   expect(missing).toEqual([]);
 });
 
+it("§18 的 F106-F111 都在测试文本中出现（R21 / 死锁可见性）", () => {
+  const spec = readFileSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"), "utf8");
+  const section = spec.slice(spec.indexOf("### 18.4"));
+  const ids = [...new Set([...section.matchAll(/\bF(\d+)\b/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
+  expect(ids).toEqual([106, 107, 108, 109, 110, 111]);
+  const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
+  const missing = ids.filter((n) => !new RegExp(`\\bF${n}\\b`).test(corpus));
+  expect(missing).toEqual([]);
+});
+
 it("规格文档无重复顶层章节（F102）", () => {
   const spec = readFileSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"), "utf8");
   const sections = [...spec.matchAll(/^## (\d+)\./gm)].map((m) => m[1]);

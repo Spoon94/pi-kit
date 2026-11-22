@@ -8,7 +8,7 @@
 
 - Baselines established: `tests/vigil-todo/perf/{budget,scale,burst,soak,wake,tick,reap}.test.ts`.
 - Full idle tick (`gc` + `sweepAll` + `renderPanel` + `needsTimer`) is measured by `tests/vigil-todo/perf/tick.test.ts` at 50/20, 200/100, 200/300, and 200/2000; the test prints every component and asserts the median total < 1 ms at 50/20, 200/100, and 200/300 (< 2 ms at the 200/2000 terminal cap). Before the fix, `sweepAll` alone cost 22.8 ms from unconditional sidecar writes; now zero-change ticks write nothing.
-- Wake composition budgeted: 50 chains 6.86 ms; 200 chains with a 2000-char next subject 5.83 ms / 4736 chars, footer intact, log reads stop at budget (`tests/vigil-todo/perf/wake.test.ts`).
+- Wake composition budgeted: `tests/vigil-todo/perf/wake.test.ts` gates 50- and 200-chain wakes — length ≤4800, log reads stop once the budget is spent, truncation marker and earliest status line survive, and the footer (next / Start / Needs-a-decision) stays intact even with a 2000-char next subject. The 6.86 ms / 5.83 ms / 4736-char figures were manual measurements (piper, 2026-11-22) and are not gated.
 - Real-GC soak: +0.10 MB / +0.06 MB per 300 job cycles; handles flat; `clearAll` recovers.
 - No timers when there is nothing to do; no per-job polling; single coalesced sidecar write per changed tick.
 

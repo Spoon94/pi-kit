@@ -1,5 +1,8 @@
 # P0 · 假设验证结论
 
+> **订正 / Errata (2026-11-22)**：本文 Q1 曾结论「同名工具先注册者胜、静默忽略后来者」。后经真机实测与 pi 1.5.2 源码复核订正：CLI 会打印显式冲突错误 `Error: Failed to load extension "<path>": Tool "todo" conflicts with <path>` 并 **exit 1 拒绝启动**；loader 层两扩展仍保持加载、工具归属先到先得；半生效态仅存在于 diagnostic 非致命的嵌入/SDK 场景。现行表述以 [`migration.md`](./migration.md) §0 为准。本文其余部分作为历史取证保留原文。
+> **Errata (EN)**: Q1 below originally concluded "first registrant wins, later one silently dropped". Corrected after real-pi observation and pi 1.5.2 source review: the CLI prints an explicit tool-conflict error and **refuses to start (exit 1)**; at the loader level both extensions stay loaded with first-registrant ownership; the half-effective state exists only where such diagnostics are non-fatal (embedded/SDK). Current wording lives in [`migration.md`](./migration.md) §0. The rest of this file is preserved as-is as a historical record.
+
 > 取证方式：阅读 pi 1.5.2 的 `dist/` 实现（非文档、非猜测）
 > 根路径 `P = /usr/local/Cellar/pi-coding-agent/1.5.2/libexec/lib/node_modules/@earendil-works/pi-coding-agent`
 > 结论：**四个假设全部证实，其中两个推翻了原设计**。另有两个附带发现。

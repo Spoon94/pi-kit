@@ -39,7 +39,7 @@ reverify todo({action:"verify", id})
 | Command | Effect |
 |---|---|
 | `/vigil-todo` or `/vt` | Board + one-line quick help (no need to memorize halt/resume/doctor) |
-| `/vigil-todo halt` | Forced halt: stop autonomous progress, kill this session's jobs, park affected tasks |
+| `/vigil-todo halt` | Forced halt: stop autonomous progress, kill this session's jobs, park affected tasks, abort the in-flight turn, and freeze model mutation tools until resume |
 | `/vigil-todo resume` | Resume after a halt (does not reset turnsUsed) |
 | `/vigil-todo doctor` | Conflict / sidecar degraded / halted / purged / overdue / in_progress without a job |
 | `/vt clear` | Clear history: default `settled` (completed+deleted); also `clear completed` / `deleted` / `settled`. pending/in_progress/parked are never cleared |
@@ -52,7 +52,7 @@ Tab completion: `/vigil-todo` and `/vt` complete `halt`/`resume`/`doctor`/`clear
 
 Collapse shortcut defaults to `ctrl+shift+t`; the one-key halt defaults to `alt+h` (both accept `off`; `/reload` required).
 
-Model-side trigger: when the user says “run it in the background / I'm going to sleep / batch / long task / run overnight”, the guidance tells the model to create a todo and start `bg_run` without being asked for the tool name. `/vt halt` is always the brake.
+Model-side trigger: when the user says “run it in the background / I'm going to sleep / batch / long task / run overnight”, the guidance tells the model to create a todo and start `bg_run` without being asked for the tool name. `/vt halt` is always the brake: it aborts the in-flight turn and freezes model writes until `/vt resume`.
 
 ## Configuration
 

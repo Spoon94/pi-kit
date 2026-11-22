@@ -52,6 +52,7 @@ function makeHarness(
   const shortcuts = new Map<string, (ctx: any) => unknown>();
   const widgets: (string | undefined)[] = [];
   const statuses: (string | undefined)[] = [];
+  const aborts: number[] = [];
   const sent: any[] = [];
   const notifications: string[] = [];
   let isIdle = idle;
@@ -64,6 +65,7 @@ function makeHarness(
       setStatus: (_key: string, text?: string) => { statuses.push(text); },
     },
     isIdle: () => isIdle,
+    abort: () => { aborts.push(1); },
     executeTool: opts.executeTool ?? (async () => ({
       isError: false,
       result: { content: [{ type: "text", text: "ok" }], details: {}, structuredContent: { exit_code: 0 } },
@@ -115,7 +117,7 @@ function makeHarness(
   };
   const setIdle = (v: boolean) => { isIdle = v; };
   return {
-    api, emit, runCommand, runTool, sent, notifications, toolDefs, shortcuts, widgets, statuses, commandDefs, setIdle, ctx,
+    api, emit, runCommand, runTool, sent, notifications, toolDefs, shortcuts, widgets, statuses, aborts, commandDefs, setIdle, ctx,
   };
 }
 
@@ -538,6 +540,48 @@ it("F119: /vigil-todo halt and resume command entry points take real effect", as
   expect(lastSnap().tasks[0].park).toBeUndefined();
   expect(h.notifications.join("\n")).toContain("Autonomous progress resumed");
   expect(h.notifications.join("\n")).toContain("1 halted tasks back to pending");
+});
+
+it("F134: halt aborts an in-flight turn exactly once", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const h = makeHarness(cwd, [snapshot(emptyBoard())], false);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  await h.runCommand("vt", "halt");
+  expect(h.aborts).toHaveLength(1);
+});
+
+it("F136: idle halt is safe and still aborts once", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const h = makeHarness(cwd, [snapshot(emptyBoard())], true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  await expect(h.runCommand("vt", "halt")).resolves.toBeUndefined();
+  expect(h.aborts).toHaveLength(1);
+});
+
+it("F135: resume restores model mutations after a halted refusal", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "existing", status: "pending" }];
+  b.nextId = 2;
+  b.counters.halted = true;
+  b.counters.haltedAt = 1;
+  const branch: unknown[] = [snapshot(b)];
+  const h = makeHarness(cwd, branch, true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+
+  const blocked = await h.runTool("todo", { action: "create", subject: "blocked" });
+  expect(blocked.isError).toBe(true);
+  expect(blocked.content[0].text).toContain("/vt resume");
+
+  await h.runCommand("vt", "resume");
+  const allowed = await h.runTool("todo", { action: "create", subject: "allowed" });
+  expect(allowed.isError).toBeFalsy();
+  const last = (branch.filter((e: any) => e?.customType === "rpiv-todo-state") as any[]).at(-1)?.data;
+  expect(last.counters.halted).toBeUndefined();
+  expect(last.tasks).toHaveLength(2);
 });
 
 it("F120: config file guidance overrides tool promptSnippet/promptGuidelines", async () => {
@@ -1016,6 +1060,7 @@ it("C4 halt shortcut really halts and writes a snapshot", async () => {
   await h.emit("session_start", { type: "session_start", reason: "startup" });
 
   await h.shortcuts.get("alt+h")!(h.ctx);
+  expect(h.aborts).toHaveLength(1);              // layer 3 applies to the shortcut too
   const last = (branch.filter((e: any) => e?.customType === "rpiv-todo-state") as any[]).at(-1)?.data;
   expect(last.counters.halted).toBe(true);
   expect(last.tasks[0].status).toBe("parked");

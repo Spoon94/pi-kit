@@ -6,7 +6,7 @@ import { emptyBoard } from "../../../src/vigil-todo/board/types.js";
 import { createJobStore } from "../../../src/vigil-todo/jobs/store.js";
 import { jobFactsOf } from "../../../src/vigil-todo/jobs/facts.js";
 import type { Job } from "../../../src/vigil-todo/jobs/types.js";
-import { createBgKillTool, createBgRunTool, createTodoTool, detectToolConflict, preflight, type ToolDeps } from "../../../src/vigil-todo/tool/register.js";
+import { createBgKillTool, createBgListTool, createBgRunTool, createTodoTool, detectToolConflict, preflight, type ToolDeps } from "../../../src/vigil-todo/tool/register.js";
 import { DEFAULTS } from "../../../src/vigil-todo/lib/config.js";
 import type { RuleContext } from "../../../src/vigil-todo/board/invariants.js";
 
@@ -60,6 +60,47 @@ const toolDeps = (
   ruleCtx: ctx, jobs: createJobStore(mkdtempSync(join(tmpdir(), "vigil-reg-"))), cfg: DEFAULTS,
   spawn: () => ({ ok: true, jobId: "bg_x" }), kill: () => {},
   runVerify: async () => ({ ok: true, exitCode: 0 }), now: () => 1, ...over,
+});
+
+it("F133 halted freezes model mutations but allows reads and bg_kill", async () => {
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "a", status: "in_progress", verify: { kind: "command", command: "true" } }];
+  b.nextId = 2;
+  b.counters.halted = true;
+  const jobs = createJobStore(mkdtempSync(join(tmpdir(), "vigil-reg-")));
+  const running: Job = {
+    id: "bg_r", label: "r", command: "true", logPath: "/tmp/r.log", cwd: "/tmp", pid: 1,
+    status: "running", exitCode: null, exitCodeKnown: false, startedAt: 1, endedAt: null,
+    fpVerdict: "unknown", interferers: [], rootId: "bg_r", attempt: 1,
+    evidenceApplied: false, notifyState: "pending",
+  };
+  jobs.put(running);
+  const deps = toolDeps(b, { jobs });
+  const todo = createTodoTool(deps);
+  const bgRun = createBgRunTool(deps);
+  const bgList = createBgListTool(deps);
+  const bgKill = createBgKillTool(deps);
+
+  for (const params of [
+    { action: "create", subject: "x" },
+    { action: "update", id: 1, status: "parked", reason: "r" },
+    { action: "delete", id: 1 },
+    { action: "clear" },
+    { action: "verify", id: 1 },
+  ]) {
+    const r = await todo.execute(params as Record<string, unknown>);
+    expect(r.isError, JSON.stringify(params)).toBe(true);
+    expect(r.content[0].text).toContain("/vt resume");
+  }
+  const bg = await bgRun.execute({ command: "true", task_id: 1 });
+  expect(bg.isError).toBe(true);
+  expect(bg.content[0].text).toContain("/vt resume");
+
+  for (const params of [{ action: "list" }, { action: "get", id: 1 }]) {
+    expect((await todo.execute(params)).isError).toBeFalsy();
+  }
+  expect((await bgList.execute({})).isError).toBeFalsy();
+  expect((await bgKill.execute({ job_id: "bg_r" })).isError).toBeFalsy();
 });
 
 it("The same job cannot bind to two tasks (F30)", async () => {

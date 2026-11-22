@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
+import { extractFIds, missingFIds } from "./fids.js";
 
 const ROOT = new URL("../../", import.meta.url).pathname;
 const walk = (dir: string): string[] => {
@@ -25,11 +26,10 @@ const RETIRED = new Set([
 it("every F number in spec §13 appears in test text (spec and tests stay linked)", () => {
   const spec = readFileSync(join(ROOT, "docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md"), "utf8");
   const table = spec.slice(spec.indexOf("## 13."), spec.indexOf("## 14."));
-  const ids = [...new Set([...table.matchAll(/\bF(\d+)\b/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
+  const ids = extractFIds(table);
   expect(ids.length).toBeGreaterThanOrEqual(105);
   const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
-  const missing = ids.filter((n) => !RETIRED.has(n) && !new RegExp(`\\bF${n}\\b`).test(corpus));
-  expect(missing).toEqual([]);
+  expect(missingFIds(table, corpus).filter((n) => !RETIRED.has(n))).toEqual([]);
 });
 
 it("the eight-aspect matrix exists and covers all eight rows", () => {
@@ -75,7 +75,7 @@ it("§20 F123-F132 all appear in test text (/vt clear)", () => {
   const spec = readFileSync(join(ROOT, "docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md"), "utf8");
   const end = spec.indexOf("## 21.");
   const section = spec.slice(spec.indexOf("### 20.4"), end > 0 ? end : undefined);
-  const ids = [...new Set([...section.matchAll(/\bF(\d+)\b/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
+  const ids = extractFIds(section);
   expect(ids).toEqual([123, 124, 125, 126, 127, 128, 129, 130, 131, 132]);
   const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
   const missing = ids.filter((n) => !new RegExp(`\\bF${n}\\b`).test(corpus));
@@ -85,7 +85,7 @@ it("§20 F123-F132 all appear in test text (/vt clear)", () => {
 it("§21 F133-F136 all appear in test text (full halt brake)", () => {
   const spec = readFileSync(join(ROOT, "docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md"), "utf8");
   const section = spec.slice(spec.indexOf("### 21.3"));
-  const ids = [...new Set([...section.matchAll(/\bF(\d+)\b/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
+  const ids = extractFIds(section);
   expect(ids).toEqual([133, 134, 135, 136]);
   const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
   const missing = ids.filter((n) => !new RegExp(`\\bF${n}\\b`).test(corpus));

@@ -25,7 +25,7 @@ Every aspect must leave a trace at three layers: a design clause, implementation
 
 - Measurement command: `npm run coverage` (v8 provider; excludes the pure type file `src/vigil-todo/jobs/types.ts`)
 - Gate command: `npm run coverage:check`; thresholds **lines ≥95% / branches ≥90% / functions ≥95%**; a miss exits non-zero
-- Current baseline (2026-11-23): **lines 99.79% / branches 94.49% / functions 98.83%** (463 tests)
+- Current baseline (2026-11-23): **lines 99.79% / branches 94.49% / functions 98.83%** (464 tests)
 - Before delivery run: `npm test && npm run typecheck && npm run coverage:check`, or `npm run verify`
 - Perf stability: `fileParallelism:false` (files run serially so perf does not compete with other tests) + JIT warm-up discards the first two batches + median of five p95 batches; the full suite passed five consecutive runs under four CPU burners
 - Gate experiment: normally the full suite passes; temporarily removing many tests lowered coverage (98.92→97.33 lines, 92.13→91.71 branches in that experiment), raising the thresholds produced a non-zero `ERROR: Coverage for ... does not meet ...`, and deleting tool/ui tests makes `coverage:check` fail on both self-checks and thresholds.

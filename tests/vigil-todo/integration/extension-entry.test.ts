@@ -52,7 +52,7 @@ function makeHarness(
   const shortcuts = new Map<string, (ctx: any) => unknown>();
   const widgets: (string | undefined)[] = [];
   const statuses: (string | undefined)[] = [];
-  const aborts: number[] = [];
+  const aborts: unknown[] = [];
   const sent: any[] = [];
   const notifications: string[] = [];
   let isIdle = idle;
@@ -65,7 +65,7 @@ function makeHarness(
       setStatus: (_key: string, text?: string) => { statuses.push(text); },
     },
     isIdle: () => isIdle,
-    abort: () => { aborts.push(1); },
+    abort: () => { aborts.push(branch[branch.length - 1]); },
     executeTool: opts.executeTool ?? (async () => ({
       isError: false,
       result: { content: [{ type: "text", text: "ok" }], details: {}, structuredContent: { exit_code: 0 } },
@@ -542,13 +542,16 @@ it("F119: /vigil-todo halt and resume command entry points take real effect", as
   expect(h.notifications.join("\n")).toContain("1 halted tasks back to pending");
 });
 
-it("F134: halt aborts an in-flight turn exactly once", async () => {
+it("F134: halt aborts an in-flight turn exactly once, after the halted snapshot is durable", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const h = makeHarness(cwd, [snapshot(emptyBoard())], false);
   vigilTodo(h.api);
   await h.emit("session_start", { type: "session_start", reason: "startup" });
   await h.runCommand("vt", "halt");
   expect(h.aborts).toHaveLength(1);
+  const atAbort = h.aborts[0] as any;
+  expect(atAbort?.customType).toBe("rpiv-todo-state");
+  expect(atAbort?.data?.counters?.halted).toBe(true);
 });
 
 it("F136: idle halt is safe and still aborts once", async () => {
@@ -582,6 +585,33 @@ it("F135: resume restores model mutations after a halted refusal", async () => {
   const last = (branch.filter((e: any) => e?.customType === "rpiv-todo-state") as any[]).at(-1)?.data;
   expect(last.counters.halted).toBeUndefined();
   expect(last.tasks).toHaveLength(2);
+});
+
+it("§21.2 human command path: /vt clear still clears terminal history while halted", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const b = emptyBoard();
+  b.tasks = [
+    { id: 1, subject: "done", status: "completed", statusSince: 1 },
+    { id: 2, subject: "gone", status: "deleted", statusSince: 1 },
+    { id: 3, subject: "pending", status: "pending" },
+  ];
+  b.nextId = 4;
+  b.counters.halted = true;
+  b.counters.haltedAt = 1;
+  const branch: unknown[] = [snapshot(b)];
+  const h = makeHarness(cwd, branch, true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+
+  await h.runCommand("vt", "clear");
+  expect(h.notifications.at(-1)).toContain("cleared 2 tasks");
+  expect(h.notifications.at(-1)).not.toContain("Halted");
+  const replayed = replayBranch(branch as never[]);
+  expect(replayed.tasks.map((t) => t.id)).toEqual([3]);
+  expect(replayed.counters.halted).toBe(true);
+  const last = (branch.filter((e: any) => e?.customType === "rpiv-todo-state") as any[]).at(-1)?.data;
+  expect(last.tasks.map((t: any) => t.id)).toEqual([3]);
+  expect(last.counters.halted).toBe(true);
 });
 
 it("F120: config file guidance overrides tool promptSnippet/promptGuidelines", async () => {

@@ -45,6 +45,28 @@
 
 落盘次数由回归用例固定：空闲 `sweepAll` 为 0 次（`tests/bind/sweep.test.ts`）；到期 respawn 成功/失败、清除悬置 `pendingReverify`、`finalizeAndProject`、`markPurged` 的真实变更各恰好 1 次（`tests/bind/sweep.test.ts`、`tests/bind/finalize.test.ts`、`tests/board/cleanup.test.ts`）。
 
+### 完整空转 tick 成本（piper 独立测量，含 gc + sweep + 渲染 + needsTimer）
+
+上表只比 `sweepAll` 单组件；下表是 **整个 tick 路径的合计**，包括之前未单独量过的 `jobs.gc`（每 tick 扫全表）：
+
+| 规模（任务/作业） | gc | sweepAll | renderPanel | needsTimer | **完整 tick** |
+|---|---|---|---|---|---|
+| 50 / 20 | 0.0014 | 0.0069 | 0.0330 | 0.0013 | **0.0426 ms** |
+| 200 / 100 | 0.0038 | 0.0173 | 0.0744 | 0.0029 | **0.0984 ms** |
+| 200 / 300 | 0.0037 | 0.0294 | 0.0450 | 0.0092 | **0.0874 ms** |
+| 200 / **2000**（终态上限） | 0.0180 | 0.1111 | 0.0638 | 0.0556 | **0.2485 ms** |
+
+单位 ms。优化前**仅 `sweepAll` 一项**就 22.8 ms；现在即使 2000 作业极端规模，**整个 tick** 也只 0.2485 ms（约 92×）。按 1s tick 间隔换算，CPU 占用 **≤0.025%**，无尖刺。
+
+### 内存与句柄（真实 GC soak，piper 独立复测）
+
+| 区间 | 优化前 heap 增长 | 优化后 |
+|---|---|---|
+| 50 → 350 周期 | +0.67 MB | **+0.10 MB** |
+| 350 → 650 周期 | +0.63 MB | **+0.06 MB** |
+
+句柄数全程稳定 3，clearAll 后 heap 回落。根因是 `monitor.fired` Set 只增不减（~2.2KB/周期），已改为终态即释放三表登记，late duplicate 因登记已删而自然忽略（F31 语义不变）。
+
 ## 稳定性与触发方式（2026-11-22）
 
 ### A. 丢状态修复

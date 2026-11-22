@@ -42,12 +42,14 @@ park      todo({action:"update", id, status:"parked", reason:"…"})
 | `/vigil-todo halt` | 强制中断：停止自主推进、杀本会话作业、受影响任务 parked |
 | `/vigil-todo resume` | 解除中断（不重置 turnsUsed） |
 | `/vigil-todo doctor` | 冲突 / sidecar 降级 / halted / purged / 超期 / 无作业 in_progress |
+| `/vt clear` | 清理历史：默认 completed+deleted；也可 `clear completed` / `deleted` / `settled` |
+| `/vt clear all` | 全清需两步：先回显清单，再 `/vt clear all confirm`（running/退避链会拒绝） |
 | `/todos` | 逐条任务（exit code + fp 下钻） |
 | `/bg` | 作业列表；`/bg k <id>` 两步确认中止链；`/bg tail <id>` 看日志尾 |
 
 状态栏常驻显示 `vigil ● N jobs` / `vigil ⚠ N parked` / `vigil ⏸ halted` / `vigil ✓ done/total`，空闲时自动清空。
 
-Tab 补全：`/vigil-todo`、`/vt` 补 `halt`/`resume`/`doctor`；`/bg` 补 `k`/`tail`，再空格补当前作业 id（可中止作业优先，最多 50 条）；`/todos` 无候选。
+Tab 补全：`/vigil-todo`、`/vt` 补 `halt`/`resume`/`doctor`/`clear`（`clear ` 再补四个范围）；`/bg` 补 `k`/`tail`，再空格补当前作业 id（可中止作业优先，最多 50 条）；`/todos` 无候选。
 
 折叠快捷键默认 `ctrl+shift+t`，一键中断默认 `alt+h`（两者都可用 `off` 关闭，需 `/reload`）。
 

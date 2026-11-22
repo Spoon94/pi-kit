@@ -10,7 +10,7 @@ import { finalizeAndProject } from "../src/bind/finalize.js";
 import { halt, isHalted, reapHaltedLeftovers, resume, type HaltDeps } from "../src/bind/halt.js";
 import { catchUpScan, sweepAll, type SweepDeps } from "../src/bind/sweep.js";
 import { replayBranch } from "../src/board/replay.js";
-import { retentionCandidates } from "../src/board/cleanup.js";
+import { applyCleanup, markPurged, planCleanup, retentionCandidates, type ClearScope } from "../src/board/cleanup.js";
 import { selectNext } from "../src/board/selectors.js";
 import { createBoardStore } from "../src/board/store.js";
 import type { BoardState } from "../src/board/types.js";
@@ -79,6 +79,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   let mergeTimer: NodeJS.Timeout | undefined;
   let lastModelAdvanced = false;
   let pendingKill: string | undefined;
+  let pendingClearAll = false;
   const recovered = new Set<string>();
   let wired = false;
   let collapsed = false;
@@ -528,7 +529,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   if (!conflict) {
     registerTools(DEFAULT_GUIDANCE);
 
-    const panelHint = "halt 停 · resume 继续 · doctor 自检 · /todos 全量 · /bg 作业";
+    const panelHint = "halt 停 · resume 继续 · clear 清理 · doctor 自检 · /todos 全量 · /bg 作业";
     const panelHandler = commandHandler((arg, ctx) => {
         if (arg === "halt") {
           halt(haltDeps());
@@ -570,29 +571,69 @@ export default function vigilTodo(pi: ExtensionAPI): void {
               maxConcurrentJobs: getCfg().maxConcurrentJobs }));
           return;
         }
+        if (arg === "clear" || arg.startsWith("clear ")) {
+          const tokens = arg.slice(5).trim().split(/\s+/).filter(Boolean);
+          const scopeToken = tokens[0];
+          const confirmed = scopeToken === "all" && tokens[1] === "confirm";
+          if (scopeToken === "all" && !confirmed) {
+            const board = boards.get(sid);
+            const lines = board.tasks.map((t) => `#${t.id} [${t.status}] ${sanitizeTerminalText(t.subject)}`);
+            output(ctx, `将删除全部 ${board.tasks.length} 个任务（含 pending/in_progress/parked）：\n`
+              + (lines.length ? lines.join("\n") : "(空)")
+              + "\n再次输入 /vt clear all confirm 确认；R18：running/退避链会被拒绝");
+            pendingClearAll = true;
+            return;
+          }
+          if (confirmed && !pendingClearAll) {
+            output(ctx, "先 /vt clear all 查看将删除的清单，再 /vt clear all confirm");
+            return;
+          }
+          const board = boards.get(sid);
+          const plan = planCleanup(board, scopeToken as ClearScope | undefined, confirmed ? true : undefined, jobFacts());
+          if (plan.error) {
+            pendingClearAll = false;
+            output(ctx, plan.error);
+            return;
+          }
+          const next = applyCleanup(board, plan, Date.now());
+          const roots = markPurged(jobs, plan.remove, board.tasks);   // 先 purge 再落快照（与工具层同序）
+          persistBoard(next);
+          pendingClearAll = false;
+          const parts: string[] = [];
+          if (plan.remove.length === 0) parts.push("没有可清理的历史任务");
+          else parts.push(`已清理 ${plan.remove.length} 个任务`);
+          if (plan.skipped.length) {
+            parts.push(`跳过 ${plan.skipped.map((i) => `#${i}`).join(" ")}（绑有 running 作业，先 bg_kill 或 /vt halt）`);
+          }
+          if (roots.length) parts.push(`purged ${roots.length} 条链`);
+          output(ctx, parts.join(" · "));
+          refreshTimer();
+          refreshOverlay();
+          return;
+        }
         output(ctx, `${renderTodos(boards.get(sid), jobs)}\n${panelHint}`);
     });
 
     pi.registerCommand("vigil-todo", {
-      description: "任务面板与控制：无参数看板 + 快捷提示；halt 立即停止全部后台工作；resume 继续；doctor 自检。短别名 /vt",
+      description: "任务面板与控制：无参数看板 + 快捷提示；halt 立即停止全部后台工作；resume 继续；clear 清理历史（all 需 confirm）；doctor 自检。短别名 /vt",
       getArgumentCompletions: panelCompletions,
       handler: panelHandler,
     });
 
     pi.registerCommand("vt", {
-      description: "/vigil-todo 短别名：halt 一键停 · resume 继续 · doctor 自检",
+      description: "/vigil-todo 短别名：halt 一键停 · resume 继续 · clear 清历史 · doctor 自检",
       getArgumentCompletions: panelCompletions,          // 与 /vigil-todo 共用同一份定义，避免漂移
       handler: panelHandler,
     });
 
     pi.registerCommand("todos", {
-      description: "列出全部任务（含 exit code / fp 下钻）。想看后台作业用 /bg",
+      description: "列出全部任务（含 exit code / fp 下钻）。清理历史用 /vt clear；看后台作业用 /bg",
       getArgumentCompletions: todosCompletions,
       handler: commandHandler((_arg, ctx) => output(ctx, renderTodos(boards.get(sid), jobs))),
     });
 
     pi.registerCommand("bg", {
-      description: "后台作业列表；/bg k <id> 两步确认后中止整条链；/bg tail <id> 看日志尾",
+      description: "后台作业列表；/bg k <id> 两步确认后中止整条链；/bg tail <id> 看日志尾；清理任务用 /vt clear",
       getArgumentCompletions: (prefix) => bgCompletions(prefix, jobs),
       handler: commandHandler((arg, ctx) => {
         if (arg.startsWith("k ")) {
@@ -767,6 +808,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
       boards.evict(sid);
       recovered.clear();
       pendingKill = undefined;
+      pendingClearAll = false;
       monitor.clearAll();
       overlay.dispose();
       if (activeCtx === ctx) activeCtx = undefined;

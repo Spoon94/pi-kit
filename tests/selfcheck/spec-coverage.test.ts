@@ -61,9 +61,21 @@ it("§18 的 F106-F111 都在测试文本中出现（R21 / 死锁可见性）", 
 
 it("§19 的 F112-F122 都在测试文本中出现（功能完备性/指引/截断/覆盖门禁）", () => {
   const spec = readFileSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"), "utf8");
-  const section = spec.slice(spec.indexOf("### 19.6"));
+  const start = spec.indexOf("### 19.6");
+  const end = spec.indexOf("## 20.");
+  const section = spec.slice(start, end > start ? end : undefined);
   const ids = [...new Set([...section.matchAll(/\bF(\d+)\b/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
   expect(ids).toEqual([112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122]);
+  const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
+  const missing = ids.filter((n) => !new RegExp(`\\bF${n}\\b`).test(corpus));
+  expect(missing).toEqual([]);
+});
+
+it("§20 的 F123-F132 都在测试文本中出现（/vt clear）", () => {
+  const spec = readFileSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"), "utf8");
+  const section = spec.slice(spec.indexOf("### 20.4"));
+  const ids = [...new Set([...section.matchAll(/\bF(\d+)\b/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
+  expect(ids).toEqual([123, 124, 125, 126, 127, 128, 129, 130, 131, 132]);
   const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
   const missing = ids.filter((n) => !new RegExp(`\\bF${n}\\b`).test(corpus));
   expect(missing).toEqual([]);

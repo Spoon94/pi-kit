@@ -17,15 +17,29 @@ const job = (id: string, o: Partial<Job> = {}): Job => ({
 });
 
 it("T1 面板子命令：空前缀全出，h/r/d 前缀过滤，未知返回 null", () => {
-  expect(panelCompletions("")!.map((c) => c.value)).toEqual(["halt", "resume", "doctor"]);
+  expect(panelCompletions("")!.map((c) => c.value)).toEqual(["halt", "resume", "doctor", "clear"]);
   expect(panelCompletions("h")!.map((c) => c.value)).toEqual(["halt"]);
   expect(panelCompletions("r")!.map((c) => c.value)).toEqual(["resume"]);
   expect(panelCompletions("d")!.map((c) => c.value)).toEqual(["doctor"]);
+  expect(panelCompletions("c")!.map((c) => c.value)).toEqual(["clear"]);
   expect(panelCompletions("H")!.map((c) => c.value)).toEqual(["halt"]);
   expect(panelCompletions("x")).toBeNull();
   expect(panelCompletions(undefined as never)!.map((c) => c.value))
     .toEqual(PANEL_SUBCOMMANDS.map((c) => c.value));
   expect(PANEL_SUBCOMMANDS.find((c) => c.value === "halt")?.description).toContain("park");
+});
+
+it("F131 补全：一级含 clear，clear 前缀出四个范围候选", () => {
+  expect(panelCompletions("")!.map((c) => c.value)).toContain("clear");
+  expect(panelCompletions("clear ")!.map((c) => c.value))
+    .toEqual(["clear completed", "clear deleted", "clear settled", "clear all"]);
+  expect(panelCompletions("clear c")!.map((c) => c.value)).toEqual(["clear completed"]);
+  expect(panelCompletions("clear d")!.map((c) => c.value)).toEqual(["clear deleted"]);
+  expect(panelCompletions("clear s")!.map((c) => c.value)).toEqual(["clear settled"]);
+  expect(panelCompletions("clear a")!.map((c) => c.value)).toEqual(["clear all"]);
+  expect(panelCompletions("clear z")).toBeNull();
+  expect(panelCompletions("clear ")![0].description).toContain("已完成");
+  expect(panelCompletions("clear ")![3].description).toContain("confirm");
 });
 
 it("T2 /bg 子命令与动态 id：k 只列 running/退避，tail 列全部", () => {

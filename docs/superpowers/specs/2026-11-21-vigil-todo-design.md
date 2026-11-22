@@ -1398,3 +1398,50 @@ R1（WIP=1）、R2、R3、R4、R5、R6、R7（park 必带 reason）、R8 **废**
 ### 17.6 顺带修正（保留一行防御）
 
 `classifyOverlap` 的排除条件由 `a.taskId !== b.taskId` 改为 **`a.taskId !== b.taskId || a.sessionId !== b.sessionId`**（同 task **且同 session** 才排除）。当前范围下不会触发，但成本一行，防止范围再变时静默误判。已取证：改前跨会话同 taskId 的写入作业被误排除，`interferers: []`、`verdict: stale`（应为 unknown）。
+
+---
+
+## 18. 依赖环与静默死锁（piper 终审发现，规格原缺口）
+
+### 18.1 取证
+
+原 `rpiv-todo` 有 `detectCycle`（`state/task-graph.ts:11-40`）明确拒环。本实现**丢了这道防线**，且 §6.2 规则表从未列出环检测——规格本身的缺口。
+
+实测（真实 reducer）：
+
+```
+A addBlockedBy[2] 后 B addBlockedBy[1]   → op.kind=update（接受，无报错）
+三节点 A⛓C⛓B⛓A                        → op.kind=update（接受）
+selectNext(三节点环, wipLimit=3)         → null（全部永久不可推进）
+renderDoctor                            → "✓ 未发现问题"
+renderPanel                             → 三个 pending 带 ⛓，观感完全正常
+```
+
+**危害**：模型夜里造一个环，早上回来面板健康、doctor 说没问题，但整条流水线永久卡死。与 §16.8 修掉的 maxTurns 静默停摆同一类失败模式——**系统停摆却报健康**，直接违背北极星。
+
+### 18.2 R21 环检测（工具层强制）
+
+- `create` 的 `blockedBy` 与 `update` 的 `addBlockedBy`，**若会形成环则拒**（含自环，自环已有防线，保留）。
+- 判定：把提议边并入现有图后做 DFS；发现回边即拒。
+- 文案必须给出口：`#2 addBlockedBy[1] would create a cycle (#1 ⛓ #2 ⛓ #1) → todo({action:"update", id:2, removeBlockedBy:[1]})`
+- 复杂度 O(V+E)，任务数 ≤200 时无感；**不得**用「逐对比较」代替真正的图遍历（三节点以上环会漏）。
+
+### 18.3 死锁可见性（doctor + 面板）
+
+即使有 R21，历史快照或外部改写仍可能留下环。故要求**可观测**：
+
+- 条件：存在 `pending` 任务、`wipCount < wipLimit`、容量未满，但 `selectNext` 返回 `undefined`。
+- `doctor` 必须报：`⚠ 有 N 个 pending 但无可推进任务（依赖环或全部被阻塞）→ /todos 查依赖`
+- 面板首行追加 `⚠ 无可推进` 标记（与 `⏸ 达轮数上限` 同一位置策略）。
+- 若检测到真实环，doctor 额外列出环上任务 id。
+
+### 18.4 验收用例
+
+| # | 用例 | 期望 |
+|---|---|---|
+| F106 | A⛓B 后 B addBlockedBy[1] | isError，文案含 cycle 与 removeBlockedBy 出口 |
+| F107 | 三节点环 A⛓C⛓B⛓A 的最后一边 | isError（**逐对比较会漏，必须图遍历**） |
+| F108 | create 批量内互指 | isError（沿用既有兄弟引用拒绝） |
+| F109 | 自环 addBlockedBy[自身] | isError（既有防线不得回归） |
+| F110 | 历史快照带环 + WIP 有位 | doctor 报「无可推进」，面板首行有标记 |
+| F111 | 正常 DAG（菱形依赖） | 不得误报环，next 正常 |

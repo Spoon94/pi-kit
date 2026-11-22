@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -676,6 +676,79 @@ it("haltKey=off 时可关闭一键中断（C4）", async () => {
   await h.emit("session_start", { type: "session_start", reason: "startup" });
   expect(h.shortcuts.size).toBe(1);          // 只剩折叠键
   expect(h.shortcuts.has("alt+h")).toBe(false);
+});
+
+it("T1 /vt 与 /vigil-todo 共用同一份补全定义", async () => {
+  const h = makeHarness(mkdtempSync(join(tmpdir(), "vigil-ext-")), [snapshot(emptyBoard())], true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  const a = h.commandDefs.get("vigil-todo").getArgumentCompletions;
+  const b = h.commandDefs.get("vt").getArgumentCompletions;
+  expect(a).toBe(b);                                    // 同一个函数，杜绝漂移
+  expect(a("").map((c: any) => c.value)).toEqual(["halt", "resume", "doctor"]);
+  expect(a("h").map((c: any) => c.value)).toEqual(["halt"]);
+  expect(a("r").map((c: any) => c.value)).toEqual(["resume"]);
+  expect(a("d").map((c: any) => c.value)).toEqual(["doctor"]);
+  expect(a("x")).toBeNull();
+  for (const p of ["", "h", "r", "d", "x"]) expect(a(p)).toEqual(b(p));
+});
+
+it("T2 /bg 动态补全当前 jobs，且不改 board/sidecar", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const stamp = readStartStamp(process.pid);
+  setupJobs(cwd, [
+    job({ id: "bg_run", label: "训练", status: "running", endedAt: null, exitCode: null,
+      exitCodeKnown: false, pid: process.pid, startStamp: stamp, finalized: false,
+      finalResult: undefined, taskId: 1, sessionId: "S" }),
+    job({ id: "bg_back", label: "退避", status: "failed", retryAt: Date.now() + 60_000,
+      finalized: false, finalResult: undefined, taskId: 2, sessionId: "S" }),
+    job({ id: "bg_done", label: "完成" }),
+    job({ id: "bg_evil", label: "\u001b]0;pwned\u0007\u001b[31mRED" }),
+  ]);
+  const h = makeHarness(cwd, [snapshot(emptyBoard())], true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+
+  const comp = h.commandDefs.get("bg").getArgumentCompletions;
+  expect(comp("").map((c: any) => c.value)).toEqual(["k", "tail"]);
+  expect(comp("k ").map((c: any) => c.label)).toEqual(["bg_run", "bg_back"]);
+  expect(comp("k bg_b").map((c: any) => c.label)).toEqual(["bg_back"]);
+  expect(comp("tail ").map((c: any) => c.label)).toEqual(["bg_run", "bg_back", "bg_done", "bg_evil"]);
+  expect(comp("tail ")[0].value).toBe("tail bg_run");
+  const evil = comp("tail ").find((c: any) => c.label === "bg_evil")!;
+  expect(evil.description).not.toContain("\u001b");
+  expect(evil.description).not.toContain("\u0007");
+  expect(evil.description).toContain("RED");
+
+  const path = join(runDir(cwd), "jobs.json");
+  const before = readFileSync(path, "utf8");
+  comp("k ");
+  comp("tail ");
+  expect(readFileSync(path, "utf8")).toBe(before);      // 纯读：sidecar 字节不变
+  expect(h.commandDefs.get("todos").getArgumentCompletions("")).toBeNull();
+});
+
+it("T2 补全在未初始化 / 空 sid / halted 时不抛", async () => {
+  const h = makeHarness(mkdtempSync(join(tmpdir(), "vigil-ext-")), [snapshot(emptyBoard())], true);
+  vigilTodo(h.api);                                     // 尚未 session_start：store 未 load、sid 空
+  const bg = h.commandDefs.get("bg").getArgumentCompletions;
+  expect(() => bg("")).not.toThrow();
+  expect(bg("").map((c: any) => c.value)).toEqual(["k", "tail"]);
+  expect(bg("k ")).toBeNull();
+  expect(bg("tail ")).toBeNull();
+  expect(h.commandDefs.get("todos").getArgumentCompletions("")).toBeNull();
+  expect(h.commandDefs.get("vt").getArgumentCompletions("h").map((c: any) => c.value)).toEqual(["halt"]);
+
+  const b = emptyBoard();
+  b.counters.halted = true;
+  b.counters.haltedAt = 1;
+  const h2 = makeHarness(mkdtempSync(join(tmpdir(), "vigil-ext-")), [snapshot(b)], true);
+  vigilTodo(h2.api);
+  await h2.emit("session_start", { type: "session_start", reason: "startup" });
+  expect(() => h2.commandDefs.get("bg").getArgumentCompletions("k ")).not.toThrow();
+  expect(() => h2.commandDefs.get("bg").getArgumentCompletions("tail ")).not.toThrow();
+  expect(h2.commandDefs.get("vigil-todo").getArgumentCompletions("r").map((c: any) => c.value))
+    .toEqual(["resume"]);
 });
 
 it("C4 halt 快捷键真实中断并落快照", async () => {

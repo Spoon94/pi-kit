@@ -9,7 +9,7 @@
 | 性能 | §10.2、§16.1 | `src/lib/config.ts`（mtime 缓存）、`src/lib/tail.ts`（字节尾读）、`src/jobs/monitor.ts`（事件优先 + 终态即释放 + 单 timer 条件）、`src/jobs/coalesce.ts`（同步批次合并写）、`src/jobs/store.ts`（终态记录上限）、`src/bind/sweep.ts`（空闲零落盘 + 重验集合一次扫描）、`src/bind/finalize.ts`（同 tick 合并落盘）、`src/board/cleanup.ts`（幂等守卫）、`extensions/vigil-todo.ts`（同批指纹缓存 + 单快照） | `tests/perf/budget.test.ts`（3）、`tests/perf/scale.test.ts`（1）、`tests/perf/burst.test.ts`（1）、`tests/perf/soak.test.ts`（3） |
 | 容灾 | §5.3、§7.1、§16.2 | `src/bind/finalize.ts`（两步 finalize）、`src/bind/sweep.ts`（补驱动/补偿/retention + `boardDirty`）、`src/jobs/store.ts`（原子写/留档/GC/上限/路径校验）、`src/jobs/monitor.ts`（recoverJobs + 恢复退出补走 onJobExit）、`src/wake/deliver.ts`（root 状态权威） | `tests/bind/finalize.test.ts`（12）、`tests/bind/sweep.test.ts`（23）、`tests/jobs/store.test.ts`（9）、`tests/jobs/monitor.test.ts`（7）、`tests/wake/deliver.test.ts`（A3 2） |
 | 可自定义设置 | §16.3 | `src/lib/config.ts`（`DEFAULTS` + `CONFIG_KEYS` 含 min/max + 逐键校验 + `haltKey`）、`docs/configuration.md` | `tests/lib/config.test.ts`（15）、`tests/selfcheck/config-consumed.test.ts`（2） |
-| 易用性 | §6.4、§8、§16.4 | `src/ui/panel.ts`（面板/`/todos`/doctor/状态栏）、`src/wake/compose.ts`（真实调用形态 + 耗时）、`extensions/vigil-todo.ts`（`/vt` 别名、快捷提示、halt 快捷键、命令文案） | `tests/ui/panel.test.ts`（16）、`tests/wake/compose.test.ts`（7）、`tests/tool/register.test.ts`（10）、`tests/integration/extension-entry.test.ts`（C1–C4） |
+| 易用性 | §6.4、§8、§16.4 | `src/ui/panel.ts`（面板/`/todos`/doctor/状态栏）、`src/ui/completions.ts`（子命令 / 动态 job id 补全）、`src/wake/compose.ts`（真实调用形态 + 耗时）、`extensions/vigil-todo.ts`（`/vt` 别名、快捷提示、halt 快捷键、命令文案） | `tests/ui/panel.test.ts`（16）、`tests/ui/completions.test.ts`（6）、`tests/wake/compose.test.ts`（7）、`tests/tool/register.test.ts`（10）、`tests/integration/extension-entry.test.ts`（T1–T3/C1–C4） |
 | 可扩展性 | §14、§16.5、§17.5 | `src/board/types.ts`、`src/board/invariants.ts`（`JobFacts`/`RuleContext`）、`src/bind/{autofill,sweep,finalize,halt}.ts`、`src/wake/deliver.ts`、`src/tool/register.ts`（`ToolDeps`） | `tests/arch/boundaries.test.ts`（3）、`tests/arch/scope.test.ts`（3） |
 | 自验证能力 | §13、§16.6、§18.4 | `src/ui/panel.ts`（`renderDoctor`）、`extensions/vigil-todo.ts`（doctor 汇总 purged/超期/孤儿/环） | `tests/selfcheck/spec-coverage.test.ts`（5）、`tests/selfcheck/config-consumed.test.ts`（2）、`tests/ui/panel.test.ts`（16） |
 | 清理 todo | §16.7 | `src/board/cleanup.ts`（选择性 clear / `purged` / retention）、`src/tool/register.ts`（clear 接线）、`src/bind/sweep.ts`（catch-up 过滤 + retention） | `tests/board/cleanup.test.ts`（17） |
@@ -25,7 +25,7 @@
 
 - 测量命令：`npm run coverage`（v8 provider；排除纯类型文件 `src/jobs/types.ts`）
 - 门禁命令：`npm run coverage:check`，阈值 **行 ≥95% / 分支 ≥90% / 函数 ≥95%**，未达即非零退出
-- 本轮基线（2026-11-22）：**行 99.47% / 分支 93.28% / 函数 98.79%**（410 用例）
+- 本轮基线（2026-11-22）：**行 99.48% / 分支 93.38% / 函数 98.81%**（419 用例）
 - 交付前必跑：`npm test && npm run typecheck && npm run coverage:check`，或一次运行 `npm run verify`
 - perf 稳定性：`fileParallelism:false`（文件串行，避免 perf 与其他测试争 CPU）+ JIT 预热丢弃前两批 + 5 批 p95 取中位数；4 个 CPU burner 负载下连续 5 次全量套件全部通过
 - 门禁实测：正常全量通过；临时移除大量测试后覆盖率下降（本次实验 98.92→97.33 行、92.13→91.71 分支），把阈值人为提高即出现 `ERROR: Coverage for ... does not meet ...` 非零退出；删除 tool/ui 测试会使 `coverage:check` 因自检/阈值一起失败。

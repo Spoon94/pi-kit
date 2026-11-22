@@ -33,6 +33,7 @@ import {
 import { createGuidanceLoader, DEFAULT_GUIDANCE, type ToolGuidance } from "../src/tool/guidance.js";
 import { createOverlayController } from "../src/ui/overlay.js";
 import { WIDGET_KEY, STATUS_KEY, renderDoctor, renderPanel, renderStatus, renderTodos } from "../src/ui/panel.js";
+import { bgCompletions, panelCompletions, todosCompletions } from "../src/ui/completions.js";
 import { clearRenudgeOnSettled, createAckTracker, markSent, resetOnUserInput } from "../src/wake/ack.js";
 import { WAKE_CUSTOM_TYPE, composeWake } from "../src/wake/compose.js";
 import { needsTimer, recoveryWake, settleSend, tryDeliver } from "../src/wake/deliver.js";
@@ -574,21 +575,25 @@ export default function vigilTodo(pi: ExtensionAPI): void {
 
     pi.registerCommand("vigil-todo", {
       description: "任务面板与控制：无参数看板 + 快捷提示；halt 立即停止全部后台工作；resume 继续；doctor 自检。短别名 /vt",
+      getArgumentCompletions: panelCompletions,
       handler: panelHandler,
     });
 
     pi.registerCommand("vt", {
       description: "/vigil-todo 短别名：halt 一键停 · resume 继续 · doctor 自检",
+      getArgumentCompletions: panelCompletions,          // 与 /vigil-todo 共用同一份定义，避免漂移
       handler: panelHandler,
     });
 
     pi.registerCommand("todos", {
       description: "列出全部任务（含 exit code / fp 下钻）。想看后台作业用 /bg",
+      getArgumentCompletions: todosCompletions,
       handler: commandHandler((_arg, ctx) => output(ctx, renderTodos(boards.get(sid), jobs))),
     });
 
     pi.registerCommand("bg", {
       description: "后台作业列表；/bg k <id> 两步确认后中止整条链；/bg tail <id> 看日志尾",
+      getArgumentCompletions: (prefix) => bgCompletions(prefix, jobs),
       handler: commandHandler((arg, ctx) => {
         if (arg.startsWith("k ")) {
           const [id, confirm] = arg.slice(2).trim().split(/\s+/);

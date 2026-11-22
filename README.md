@@ -47,6 +47,8 @@ park      todo({action:"update", id, status:"parked", reason:"…"})
 
 状态栏常驻显示 `vigil ● N jobs` / `vigil ⚠ N parked` / `vigil ⏸ halted` / `vigil ✓ done/total`，空闲时自动清空。
 
+Tab 补全：`/vigil-todo`、`/vt` 补 `halt`/`resume`/`doctor`；`/bg` 补 `k`/`tail`，再空格补当前作业 id（可中止作业优先，最多 50 条）；`/todos` 无候选。
+
 折叠快捷键默认 `ctrl+shift+t`，一键中断默认 `alt+h`（两者都可用 `off` 关闭，需 `/reload`）。
 
 模型侧触发：用户说「后台跑 / 我去睡 / 批量 / 长任务 / 跑一晚上」时，指引要求模型主动建 todo 并 `bg_run`，不必点名工具；随时可用 `/vt halt` 一键刹车。

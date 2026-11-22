@@ -1569,3 +1569,39 @@ renderPanel                             → 三个 pending 带 ⛓，观感完�
 | F130 | 无可清历史 | 明确提示，不静默 |
 | F131 | Tab 补全 | 一级含 clear；`clear ` 前缀只出 **completed/deleted/settled 三个**，无 all |
 | F132 | `/vt clear` 与 `/vigil-todo clear` | 行为完全一致 |
+
+---
+
+## 21. halt 的完整刹车语义（piper 探针发现的泄漏，§16.8 补强）
+
+### 21.1 取证
+
+探针实测（halted=true 时）：
+- `todo update → in_progress` 成功（op.kind=update）
+- `todo create` 成功
+- `bg_run` 的容量准入 `admitNewSpawn` 返回 true（不拦）
+
+而 §16.8.3 的五处闸门（tryDeliver / sweepRespawns / catchUpScan / before_settle / timer）只挡**自主推进**，不挡**在飞 turn 的工具调用**。后果：用户按刹车后，若模型正处于一轮中，它的下一个工具调用仍能起新作业——与 guidelines「`/vt halt` stops everything immediately」及面板提示「halt 停」的承诺不符。**刹车泄漏**。
+
+### 21.2 完整刹车 = 四层
+
+| 层 | 动作 | 状态 |
+|---|---|---|
+| 1 杀作业 | kill 本会话 running + 清退避 | 已有（§16.8.2） |
+| 2 留痕 | 受影响任务 parked(by:"halt") | 已有 |
+| 3 中止在飞 turn | 命令/快捷键 handler 内调 `ctx.abort()`（`ExtensionCommandContext extends ExtensionContext`，`abort(): void`，types.d.ts:262/306） | **新增** |
+| 4 冻结模型写入口 | halted 期间模型面**变更类**工具调用一律 isError：`todo` 的 create/update/delete/clear/verify 与 `bg_run`；**读类放行**（list/get/bg_list），`bg_kill` 放行（清理不是新工作） | **新增** |
+
+- 第 4 层的拒绝文案必须指向 `/vt resume`（§6.4 同规格）。
+- resume 解除第 4 层；不重置 turnsUsed（§16.8.5 不变）。
+- 空闲时 halt 调 abort 必须安全无副作用（F136）。
+- 人工命令面（/vt clear 等）不受第 4 层影响——它是人的通道。
+
+### 21.3 验收用例
+
+| # | 用例 | 期望 |
+|---|---|---|
+| F133 | halted 时 todo create/update/delete/clear/verify 与 bg_run | 全部 isError 且文案含 resume；list/get/bg_list/bg_kill 放行 |
+| F134 | 在飞 turn 中执行 /vt halt | ctx.abort 被调用一次 |
+| F135 | resume 后变更类调用恢复可用 | op 正常 |
+| F136 | 空闲（无在飞 run）halt | 不抛异常，abort 安全 |

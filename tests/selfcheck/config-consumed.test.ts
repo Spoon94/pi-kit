@@ -2,7 +2,7 @@ import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { CONFIG_KEYS } from "../../src/lib/config.js";
+import { CONFIG_KEYS } from "../../src/vigil-todo/lib/config.js";
 
 const ROOT = new URL("../../", import.meta.url).pathname;
 const walk = (dir: string): string[] => {
@@ -25,7 +25,7 @@ const unusedKeys = (files: string[], keys: string[]): string[] => {
 };
 
 it("every CONFIG_KEYS key is really consumed in src/ or extensions/ (excluding its definition in config.ts)", () => {
-  const configFile = join(ROOT, "src/lib/config.ts");
+  const configFile = join(ROOT, "src/vigil-todo/lib/config.ts");
   const files = [...walk(join(ROOT, "src")), ...walk(join(ROOT, "extensions"))]
     .filter((f) => f !== configFile);
   expect(unusedKeys(files, Object.keys(CONFIG_KEYS))).toEqual([]);

@@ -33,15 +33,15 @@ it("every F number in spec §13 appears in test text (spec and tests stay linked
 });
 
 it("the eight-aspect matrix exists and covers all eight rows", () => {
-  const doc = readFileSync(join(ROOT, "docs/quality-matrix.md"), "utf8");
+  const doc = readFileSync(join(ROOT, "docs/vigil-todo/quality-matrix.md"), "utf8");
   for (const k of ["Performance", "Resilience", "Configurability", "Usability", "Extensibility", "Self-verification", "Clearing todos", "Forced halt"]) {
     expect(doc).toContain(k);
   }
 });
 
-it("entry-level F numbers must have event-order assertions under tests/integration/ (G2)", () => {
+it("entry-level F numbers must have event-order assertions under tests/vigil-todo/integration/ (G2)", () => {
   const ENTRY_F = ["F6", "F7", "F8", "F10", "F38", "F61", "F71", "F72", "F74"];
-  const corpus = walk(join(ROOT, "tests/integration"))
+  const corpus = walk(join(ROOT, "tests/vigil-todo/integration"))
     .map((f) => readFileSync(f, "utf8")).join("\n");
   const missing = ENTRY_F.filter((id) => !new RegExp(`\\b${id}\\b`).test(corpus));
   expect(missing).toEqual([]);
@@ -82,7 +82,7 @@ it("§20 F123-F132 all appear in test text (/vt clear)", () => {
 });
 
 it("the sub-agent dispatch doc exists and covers the key boundaries (atomic flow/poller/halt/no auto re-attach)", () => {
-  const doc = readFileSync(join(ROOT, "docs/dispatching-agents.md"), "utf8");
+  const doc = readFileSync(join(ROOT, "docs/vigil-todo/dispatching-agents.md"), "utf8");
   for (const needle of [
     "Two-step atomic flow",
     "Do not manually call",
@@ -93,7 +93,7 @@ it("the sub-agent dispatch doc exists and covers the key boundaries (atomic flow
     "fp:stale",
     'todo({action:"verify", id})',
   ]) expect(doc, needle).toContain(needle);
-  expect(readFileSync(join(ROOT, "README.md"), "utf8")).toContain("docs/dispatching-agents.md");
+  expect(readFileSync(join(ROOT, "README.md"), "utf8")).toContain("docs/vigil-todo/dispatching-agents.md");
 });
 
 it("the spec document has no duplicate top-level sections (F102)", () => {

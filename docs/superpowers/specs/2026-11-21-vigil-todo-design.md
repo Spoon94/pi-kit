@@ -7,8 +7,8 @@
 > 累计十二轮、72 条修订（15+12+6+6+5+5+4+5+4+3+3+3）
 > 待办：**用户尚未批准本 spec**（脑暴流程的用户评审门禁）；用户批准后才可写实现计划
 > 取代：`@juicesharp/rpiv-todo` + `pi-bg-run`；载体 `pi-kit` 的 `extensions/vigil-todo.ts`
-> 前置取证：[`../../p0-findings.md`](../../p0-findings.md)
-> 前身：[`../../design.md`](../../design.md) v0.2（功能清单已废，性能/故障模型仍有效）
+> 前置取证：[`../../vigil-todo/p0-findings.md`](../../vigil-todo/p0-findings.md)
+> 前身：[`../../vigil-todo/design.md`](../../vigil-todo/design.md) v0.2（功能清单已废，性能/故障模型仍有效）
 
 ---
 

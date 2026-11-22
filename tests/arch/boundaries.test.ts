@@ -17,7 +17,7 @@ const importsOf = (f: string): string[] =>
 
 it("board/ must not import pi or extensions (pure state machine)", () => {
   const bad: string[] = [];
-  for (const f of walk(join(ROOT, "src/board"))) {
+  for (const f of walk(join(ROOT, "src/vigil-todo/board"))) {
     for (const spec of importsOf(f)) {
       if (spec.includes("@earendil-works") || spec.includes("extensions/")) bad.push(`${f} → ${spec}`);
     }
@@ -27,7 +27,7 @@ it("board/ must not import pi or extensions (pure state machine)", () => {
 
 it("jobs/ must not import bind/wake/ui/tool (the job subsystem knows nothing about orchestration)", () => {
   const bad: string[] = [];
-  for (const f of walk(join(ROOT, "src/jobs"))) {
+  for (const f of walk(join(ROOT, "src/vigil-todo/jobs"))) {
     for (const spec of importsOf(f)) {
       if (/\/(bind|wake|ui|tool)\//.test(spec)) bad.push(`${f} → ${spec}`);
     }
@@ -37,7 +37,7 @@ it("jobs/ must not import bind/wake/ui/tool (the job subsystem knows nothing abo
 
 it("ui/ must not call write entry points (read-only)", () => {
   const bad: string[] = [];
-  for (const f of walk(join(ROOT, "src/ui"))) {
+  for (const f of walk(join(ROOT, "src/vigil-todo/ui"))) {
     const src = readFileSync(f, "utf8");
     for (const call of [".commit(", ".put(", ".save(", "appendEntry("]) {
       if (src.includes(call)) bad.push(`${f} → ${call}`);

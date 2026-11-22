@@ -15,5 +15,5 @@ it("F121 coverage gate: script, thresholds, and pure-type exclusion all exist", 
   expect(cfg).toContain("lines: 95");
   expect(cfg).toContain("branches: 90");
   expect(cfg).toContain("functions: 95");
-  expect(cfg).toContain("src/jobs/types.ts");
+  expect(cfg).toContain("src/vigil-todo/jobs/types.ts");
 });

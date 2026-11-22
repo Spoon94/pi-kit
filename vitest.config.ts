@@ -11,7 +11,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts", "extensions/**/*.ts"],
-      exclude: ["src/jobs/types.ts"],   // 纯类型文件
+      exclude: ["src/vigil-todo/jobs/types.ts"],   // 纯类型文件
       reporter: ["text", "json-summary"],
       thresholds: { lines: 95, branches: 90, functions: 95 },
     },

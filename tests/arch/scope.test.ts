@@ -24,12 +24,12 @@ it("retired mechanisms cannot return: src/ and extensions/ contain no defer/adop
 });
 
 it("the three retired files really do not exist", () => {
-  for (const p of ["src/jobs/claims.ts", "src/jobs/heartbeat.ts", "src/bind/adopt.ts"]) {
+  for (const p of ["src/vigil-todo/jobs/claims.ts", "src/vigil-todo/jobs/heartbeat.ts", "src/vigil-todo/bind/adopt.ts"]) {
     expect(() => statSync(join(ROOT, p))).toThrow();
   }
 });
 
 it("default WIP is 1 (the model focuses on one todo at a time)", async () => {
-  const { DEFAULTS } = await import("../../src/lib/config.js");
+  const { DEFAULTS } = await import("../../src/vigil-todo/lib/config.js");
   expect(DEFAULTS.wipLimit).toBe(1);
 });

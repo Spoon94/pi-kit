@@ -5,38 +5,38 @@ import type {
   AgentBeforeSettleEventResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext,
   ExtensionToolContext, ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { autofillJob, type AutofillDeps } from "../src/bind/autofill.js";
-import { finalizeAndProject } from "../src/bind/finalize.js";
-import { halt, isHalted, reapHaltedLeftovers, resume, type HaltDeps } from "../src/bind/halt.js";
-import { catchUpScan, sweepAll, type SweepDeps } from "../src/bind/sweep.js";
-import { replayBranch } from "../src/board/replay.js";
-import { applyCleanup, markPurged, planCleanup, retentionCandidates, type ClearScope } from "../src/board/cleanup.js";
-import { selectNext } from "../src/board/selectors.js";
-import { createBoardStore } from "../src/board/store.js";
-import type { BoardState } from "../src/board/types.js";
-import { chainJobs, chainTerminated, terminalJob } from "../src/jobs/chain.js";
-import { escalate, killNow, requestKill } from "../src/jobs/kill.js";
-import { jobFactsOf } from "../src/jobs/facts.js";
-import { createMonitor, recoverJobs, recoveredExit } from "../src/jobs/monitor.js";
-import { createSaveCoalescer, withCoalescedSave, type SaveCoalescer } from "../src/jobs/coalesce.js";
-import { spawnJob, takeChild, trackSpawned, type SpawnRequest } from "../src/jobs/spawn.js";
-import { createJobStore, runDir, type JobStore } from "../src/jobs/store.js";
-import type { Job } from "../src/jobs/types.js";
-import { createConfigLoader } from "../src/lib/config.js";
-import { collectFingerprint } from "../src/lib/fingerprint.js";
-import { sanitizeMultiline, sanitizeTerminalText } from "../src/lib/sanitize.js";
-import { tailLines } from "../src/lib/tail.js";
+import { autofillJob, type AutofillDeps } from "../src/vigil-todo/bind/autofill.js";
+import { finalizeAndProject } from "../src/vigil-todo/bind/finalize.js";
+import { halt, isHalted, reapHaltedLeftovers, resume, type HaltDeps } from "../src/vigil-todo/bind/halt.js";
+import { catchUpScan, sweepAll, type SweepDeps } from "../src/vigil-todo/bind/sweep.js";
+import { replayBranch } from "../src/vigil-todo/board/replay.js";
+import { applyCleanup, markPurged, planCleanup, retentionCandidates, type ClearScope } from "../src/vigil-todo/board/cleanup.js";
+import { selectNext } from "../src/vigil-todo/board/selectors.js";
+import { createBoardStore } from "../src/vigil-todo/board/store.js";
+import type { BoardState } from "../src/vigil-todo/board/types.js";
+import { chainJobs, chainTerminated, terminalJob } from "../src/vigil-todo/jobs/chain.js";
+import { escalate, killNow, requestKill } from "../src/vigil-todo/jobs/kill.js";
+import { jobFactsOf } from "../src/vigil-todo/jobs/facts.js";
+import { createMonitor, recoverJobs, recoveredExit } from "../src/vigil-todo/jobs/monitor.js";
+import { createSaveCoalescer, withCoalescedSave, type SaveCoalescer } from "../src/vigil-todo/jobs/coalesce.js";
+import { spawnJob, takeChild, trackSpawned, type SpawnRequest } from "../src/vigil-todo/jobs/spawn.js";
+import { createJobStore, runDir, type JobStore } from "../src/vigil-todo/jobs/store.js";
+import type { Job } from "../src/vigil-todo/jobs/types.js";
+import { createConfigLoader } from "../src/vigil-todo/lib/config.js";
+import { collectFingerprint } from "../src/vigil-todo/lib/fingerprint.js";
+import { sanitizeMultiline, sanitizeTerminalText } from "../src/vigil-todo/lib/sanitize.js";
+import { tailLines } from "../src/vigil-todo/lib/tail.js";
 import {
   createBgKillTool, createBgListTool, createBgRunTool, createTodoTool, detectToolConflict,
   preflight, type ToolDef, type ToolDeps,
-} from "../src/tool/register.js";
-import { createGuidanceLoader, DEFAULT_GUIDANCE, type ToolGuidance } from "../src/tool/guidance.js";
-import { createOverlayController } from "../src/ui/overlay.js";
-import { WIDGET_KEY, STATUS_KEY, renderDoctor, renderPanel, renderStatus, renderTodos } from "../src/ui/panel.js";
-import { bgCompletions, panelCompletions, todosCompletions } from "../src/ui/completions.js";
-import { clearRenudgeOnSettled, createAckTracker, markSent, resetOnUserInput } from "../src/wake/ack.js";
-import { WAKE_CUSTOM_TYPE, composeWake } from "../src/wake/compose.js";
-import { needsTimer, recoveryWake, settleSend, tryDeliver } from "../src/wake/deliver.js";
+} from "../src/vigil-todo/tool/register.js";
+import { createGuidanceLoader, DEFAULT_GUIDANCE, type ToolGuidance } from "../src/vigil-todo/tool/guidance.js";
+import { createOverlayController } from "../src/vigil-todo/ui/overlay.js";
+import { WIDGET_KEY, STATUS_KEY, renderDoctor, renderPanel, renderStatus, renderTodos } from "../src/vigil-todo/ui/panel.js";
+import { bgCompletions, panelCompletions, todosCompletions } from "../src/vigil-todo/ui/completions.js";
+import { clearRenudgeOnSettled, createAckTracker, markSent, resetOnUserInput } from "../src/vigil-todo/wake/ack.js";
+import { WAKE_CUSTOM_TYPE, composeWake } from "../src/vigil-todo/wake/compose.js";
+import { needsTimer, recoveryWake, settleSend, tryDeliver } from "../src/vigil-todo/wake/deliver.js";
 
 const OWN_SOURCE = "pi-kit";
 const BOARD_CUSTOM_TYPE = "rpiv-todo-state";

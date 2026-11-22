@@ -92,6 +92,43 @@ it("out-of-bounds logPath is not read, preventing exfiltration via sidecar tampe
   expect(text).not.toContain("log tail");
 });
 
+it("P1 core status overflow stops before logs and reports unexpanded chains", () => {
+  const jobs = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_9q0d6s1e}}")));
+  const ids: string[] = [];
+  for (let i = 0; i < 20; i++) {
+    const id = `R${i}`;
+    ids.push(id);
+    jobs.put(j({
+      id, rootId: id, label: "x".repeat(400), status: "failed", exitCode: 1,
+      finalResult: { ok: false, note: "failed", trigger: "external", at: 2 },
+    }));
+  }
+  const text = composeWake(ids, emptyBoard(), jobs, DEFAULTS, undefined);
+  expect(text.length).toBeLessThanOrEqual(4800);
+  expect(text).toContain("chains not fully expanded");
+});
+
+it("P1 a missing terminal job falls back to the root log and an empty log has no tail header", () => {
+  const d = mkdtempSync(join(tmpdir(), "{{SECRET_9q0d6s1e}}"));
+  const log = join(d, "f.log");
+  writeFileSync(log, "tail line");
+  const jobs = createJobStore(d);
+  jobs.put(j({
+    logPath: log, status: "failed", exitCode: 1,
+    finalResult: { ok: false, note: "failed", trigger: "external", at: 2, jobId: "GONE" },
+  }));
+  expect(composeWake(["R"], emptyBoard(), jobs, DEFAULTS, undefined)).toContain("log tail");
+
+  const emptyLog = join(d, "empty.log");
+  writeFileSync(emptyLog, "");
+  jobs.put(j({
+    logPath: emptyLog, status: "failed", exitCode: 1,
+    finalResult: { ok: false, note: "failed", trigger: "external", at: 2 },
+  }));
+  const text = composeWake(["R"], emptyBoard(), jobs, DEFAULTS, undefined);
+  expect(text).not.toContain("log tail");
+});
+
 it("tolerates a missing root and default fields", () => {
   const jobs = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_9q0d6s1e}}")));
   jobs.put(j({ taskId: undefined, exitCode: null, endedAt: null, finalResult: undefined }));

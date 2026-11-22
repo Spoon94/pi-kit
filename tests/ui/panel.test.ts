@@ -15,6 +15,18 @@ const done = (id: number, fp: "fresh" | "unknown" = "fresh"): Task =>
   ({ id, subject: `d${id}`, status: "completed", evidence: [ev({ fp, ref: `R${id}` })] });
 const b = (tasks: Task[]) => ({ ...emptyBoard(), tasks, nextId: tasks.length + 1 });
 const jobs = () => createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_z8p3x1cq}}")));
+const root = (id: string, o: Partial<Job> = {}): Job => ({
+  id, label: id, command: "true", logPath: `/tmp/${id}.log`, cwd: "/tmp", pid: 1,
+  status: "completed", exitCode: 0, exitCodeKnown: true, startedAt: 1, endedAt: 2,
+  fpVerdict: "fresh", interferers: [], rootId: id, attempt: 1, taskId: 1, sessionId: "S",
+  evidenceApplied: true, finalized: true, notifyState: "acked",
+  finalResult: { ok: true, note: "done", trigger: "external", at: 2, reverified: false }, ...o,
+});
+const finals = (...roots: Job[]) => {
+  const s = jobs();
+  for (const r of roots) s.put(r);
+  return s;
+};
 
 it("first line includes done/total and the parked count (F25)", () => {
   const s = b([done(1), { id: 2, subject: "p", status: "parked", park: { reason: "needs a decision", at: 1, from: "pending" } }]);
@@ -23,9 +35,18 @@ it("first line includes done/total and the parked count (F25)", () => {
   expect(rows[0]).toContain("1 parked");
 });
 
-it("completed summary line includes evidence and the fp:? count (F58)", () => {
-  const s = b([done(1), done(2, "unknown"), done(3, "unknown")]);
-  const rows = renderPanel(s, jobs(), DEFAULTS);
+it("completed summary line includes job-side evidence and the fp:? count (F58)", () => {
+  const s = b([
+    { ...done(1), jobs: ["R1"] },
+    { ...done(2, "unknown"), jobs: ["R2"] },
+    { ...done(3, "unknown"), jobs: ["R3"] },
+  ]);
+  const jj = finals(
+    root("R1", { taskId: 1 }),
+    root("R2", { taskId: 2, fpVerdict: "unknown" }),
+    root("R3", { taskId: 3, fpVerdict: "unknown" }),
+  );
+  const rows = renderPanel(s, jj, DEFAULTS);
   const summary = rows.find((r) => r.includes("done ·"));
   expect(summary).toContain("3 done");
   expect(summary).toContain("all exit 0");
@@ -187,10 +208,14 @@ it("panel truncates to width with an ellipsis; /todos is not truncated (F115)", 
 
 it("summary line covers nonzero exit / reverified / verify changed branches", () => {
   const s = b([
-    { id: 1, subject: "a", status: "completed", verifyChanged: true, evidence: [ev({ ok: false, exitCode: 1 })] },
-    { id: 2, subject: "b", status: "completed", evidence: [ev({ note: "reverified" })] },
+    { id: 1, subject: "a", status: "completed", verifyChanged: true, jobs: ["R1"] },
+    { id: 2, subject: "b", status: "completed", jobs: ["R2"] },
   ]);
-  const summary = renderPanel(s, jobs(), DEFAULTS).find((r) => r.includes("done ·")) ?? "";
+  const jj = finals(
+    root("R1", { taskId: 1, status: "failed", exitCode: 1, finalResult: { ok: false, note: "exit 1", trigger: "external", at: 2 } }),
+    root("R2", { taskId: 2, finalResult: { ok: true, note: "done", trigger: "external", at: 2, reverified: true } }),
+  );
+  const summary = renderPanel(s, jj, DEFAULTS).find((r) => r.includes("done ·")) ?? "";
   expect(summary).toContain("nonzero exit");
   expect(summary).toContain("reverified");
   expect(summary).toContain("verify changed");

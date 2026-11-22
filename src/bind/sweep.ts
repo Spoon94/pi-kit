@@ -70,14 +70,44 @@ export function sweepRespawns(d: SweepDeps): number {
   return n;
 }
 
+/**
+ * Roots in this session whose bound task no longer exists (tree rollback, clear, or no taskId at all)
+ * are terminal orphans: purge once on the job side so catch-up and timers stop re-evaluating them.
+ * The process records remain visible to doctor (`orphanJobs`) and can be reclaimed with bg_kill.
+ */
+export function reapOrphanRoots(d: SweepDeps): number {
+  const board = d.boards.get(d.sessionId);
+  const taskIds = new Set(board.tasks.map((t) => t.id));
+  let dirty = false;
+  let marked = 0;
+  for (const root of d.jobs.all()) {
+    if (root.id !== root.rootId || root.sessionId !== d.sessionId || root.purged) continue;
+    if (root.taskId !== undefined && taskIds.has(root.taskId)) continue;
+    marked++;
+    for (const j of d.jobs.all().filter((x) => x.rootId === root.id)) {
+      if (j.purged && j.retryAt == null && j.pendingReverify == null) continue;
+      const next = { ...j, purged: true };
+      delete next.retryAt;
+      delete next.pendingReverify;
+      d.jobs.put(next);
+      dirty = true;
+    }
+  }
+  if (dirty) d.jobs.save();
+  return marked;
+}
+
 /** Root-granularity scan set (spec §5.3). */
 export function catchUpScan(d: SweepDeps): string[] {
   if (d.boards.get(d.sessionId).counters.halted) return [];      // R20: no catch-up delivery after halt
+  const board = d.boards.get(d.sessionId);
+  const taskIds = new Set(board.tasks.map((t) => t.id));
   const out: string[] = [];
   for (const root of d.jobs.all()) {
     if (root.id !== root.rootId) continue;                 // roots only
     if (root.sessionId !== d.sessionId) continue;
     if (root.purged) continue;                             // R19: purged chains are not delivered again
+    if (root.taskId === undefined || !taskIds.has(root.taskId)) continue;   // dangling task: never deliverable
     if (root.finalResult?.trigger === "self") continue;    // R6-5: do not wake self for chains self parked/killed
     if (!root.finalized) continue;
     if (!root.evidenceApplied) { out.push(root.id); continue; }
@@ -93,6 +123,7 @@ export function catchUpScan(d: SweepDeps): string[] {
 export function sweepAll(d: SweepDeps) {
   let boardDirty = false;
   const dd: SweepDeps = { ...d, boardChanged: () => { boardDirty = true; } };
+  reapOrphanRoots(dd);
   for (const id of catchUpScan(dd)) {
     if (projectFinal(id, dd.jobs, dd.boards, dd.sessionId, dd.now)) boardDirty = true;
   }

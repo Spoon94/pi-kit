@@ -8,6 +8,7 @@ import { emptyBoard } from "../../src/board/types.js";
 import { createJobStore } from "../../src/jobs/store.js";
 import type { Job } from "../../src/jobs/types.js";
 import { DEFAULTS } from "../../src/lib/config.js";
+import { needsTimer } from "../../src/wake/deliver.js";
 
 let d: SweepDeps;
 let boards: ReturnType<typeof createBoardStore>;
@@ -212,6 +213,74 @@ it("F123 clearing a stuck pendingReverify counts as one change; a second scan wr
   expect(saves()).toBe(1);
   expect(sweepRespawns(d)).toBe(0);
   expect(saves()).toBe(1);
+});
+
+it("B3 a finalized root with a dangling taskId is purged on the first sweep: no catch-up, no timer, idempotent", () => {
+  jobs.put(j("ghost", {
+    id: "ghost", rootId: "ghost", taskId: 99, attempt: 6,
+    finalized: true, evidenceApplied: true, notifyState: "pending",
+  }));
+  jobs.put(j("ghost-child", { id: "ghost-child", rootId: "ghost", taskId: 99, purged: true, attempt: 5 }));
+  expect(catchUpScan(d)).toEqual([]);                    // guard: dangling task is never deliverable
+  expect(needsTimer(boards.get("S"), jobs, DEFAULTS)).toBe(false);
+  const saves = countSaves(jobs);
+
+  sweepAll(d);
+  expect(jobs.get("ghost")?.purged).toBe(true);
+  expect(catchUpScan(d)).toEqual([]);
+  expect(needsTimer(boards.get("S"), jobs, DEFAULTS)).toBe(false);
+  expect(saves()).toBe(1);
+
+  for (let i = 0; i < 4; i++) sweepAll(d);              // five scans in total
+  expect(saves()).toBe(1);                              // idempotent: no repeated marking
+  expect(catchUpScan(d)).toEqual([]);
+  expect(needsTimer(boards.get("S"), jobs, DEFAULTS)).toBe(false);
+});
+
+it("B3 a root with taskId undefined is treated as an orphan and purged once", () => {
+  jobs.put(j("ghost", {
+    id: "ghost", rootId: "ghost", taskId: undefined,
+    finalized: true, evidenceApplied: true, notifyState: "pending",
+  }));
+  expect(catchUpScan(d)).toEqual([]);
+  sweepAll(d);
+  expect(jobs.get("ghost")?.purged).toBe(true);
+  expect(catchUpScan(d)).toEqual([]);
+  expect(needsTimer(boards.get("S"), jobs, DEFAULTS)).toBe(false);
+});
+
+it("B3 a normal chain whose task exists is not purged and still catch-up projects", () => {
+  jobs.put(j("R", {
+    taskId: 1, finalized: true, evidenceApplied: false, notifyState: "pending",
+    finalResult: { ok: true, note: "done", trigger: "external", at: 2, jobId: "R" },
+  }));
+  const r = sweepAll(d);
+  expect(jobs.get("R")?.purged).toBeUndefined();
+  expect(r.catchUp).toContain("R");
+  expect(jobs.get("R")?.evidenceApplied).toBe(true);
+});
+
+it("parkTask guards undefined / missing / non-in-progress tasks", () => {
+  jobs.put(j("A", { retryAt: 500, taskId: undefined }));
+  jobs.put(j("B", { retryAt: 500, taskId: 99 }));
+  jobs.put(j("C", { retryAt: 500, taskId: 1 }));
+  const b = boards.get("S");
+  b.tasks[0] = { ...b.tasks[0], status: "completed" };
+  boards.commit("S", b);
+  d.respawn = () => ({ ok: false });
+  expect(sweepRespawns(d)).toBe(0);
+  expect(boards.get("S").tasks[0].status).toBe("completed");
+});
+
+it("retention with no candidates and with only running-bound candidates retains nothing", () => {
+  const b = boards.get("S");
+  b.tasks = [{ id: 1, subject: "old", status: "completed", statusSince: 1, jobs: ["J"] }];
+  boards.commit("S", b);
+  jobs.put(j("J", { rootId: "J", taskId: 1, status: "running", endedAt: null }));
+  const cfg = { ...DEFAULTS, taskRetentionMs: 1000 };
+  expect(sweepAll({ ...d, cfg, now: 100_000 }).retained).toBe(0);
+  b.tasks = []; boards.commit("S", b);
+  expect(sweepAll({ ...d, cfg, now: 100_000 }).retained).toBe(0);
 });
 
 it("after delivery failure, the single timer catches up after 10min (F76)", () => {

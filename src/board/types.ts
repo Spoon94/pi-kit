@@ -12,6 +12,7 @@ export interface Evidence {
   known: boolean;
   fp: FpVerdict;
   accepted?: boolean;
+  reverified?: boolean;
   ref?: string;
   note?: string;
 }

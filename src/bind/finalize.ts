@@ -9,11 +9,12 @@ function finalizeChainCore(rootId: string, jobs: JobStore, now: number, note: st
   const root = jobs.get(rootId);
   if (!root || root.finalized) return false;
   const terminal = terminalJob(jobs, rootId) ?? root;
-  const finalNote = ok && isReverifyBranch(terminal, jobs) ? `reverified · ${note}` : note;
+  const reverified = ok && isReverifyBranch(terminal, jobs);
+  const finalNote = reverified ? `reverified · ${note}` : note;
   jobs.put({
     ...root,
     finalized: true,
-    finalResult: { ok, note: finalNote, trigger: root.kill?.requestedBy ?? "external", at: now, jobId: terminal.id },
+    finalResult: { ok, note: finalNote, trigger: root.kill?.requestedBy ?? "external", at: now, jobId: terminal.id, reverified },
   });
   return true;
 }
@@ -38,7 +39,7 @@ function projectFinalCore(rootId: string, jobs: JobStore, boards: BoardStore, se
     ok: root.finalResult.ok, kind: "job", origin: "async", chainFinal: true,
     trigger: root.finalResult.trigger, at: now, known: true,
     fp: terminal.fpVerdict, ref: rootId, note: root.finalResult.note,
-    exitCode: terminal.exitCode,
+    exitCode: terminal.exitCode, reverified: root.finalResult.reverified,
   });
   const tasks = [...board.tasks]; tasks[idx] = task;
   boards.commit(sessionId, { ...board, tasks });

@@ -23,9 +23,11 @@ export function needsTimer(board: BoardState, jobs: JobStore, cfg: VigilConfig):
   }
   if (jobs.all().some((j) => j.status === "running" || j.retryAt != null)) return true;
   if (board.counters.turnsUsed >= cfg.maxTurns) return false;
+  const taskIds = new Set(board.tasks.map((t) => t.id));
   return jobs.all().some((j) =>
     j.id === j.rootId && j.finalized && j.notifyState !== "acked"
-    && !j.purged && j.finalResult?.trigger !== "self");
+    && !j.purged && j.finalResult?.trigger !== "self"
+    && j.taskId !== undefined && taskIds.has(j.taskId));   // dangling task: never deliverable, no timer
 }
 
 /** One-shot recovery wake after resume: constrained by maxTurns, advances next only. */

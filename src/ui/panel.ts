@@ -33,7 +33,7 @@ export function layoutRows(
   state: BoardState, jobs: JobStore, budget: number,
   cfg: VigilConfig = DEFAULTS, now = Date.now(), width = 100,
 ) {
-  const sum = completedSummary(state);
+  const sum = completedSummary(state, jobs);
   const parked = state.tasks.filter((t) => t.status === "parked");
   const atLimit = state.counters.turnsUsed >= cfg.maxTurns;
   const pending = state.tasks.filter((t) => t.status === "pending");

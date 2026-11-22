@@ -149,7 +149,9 @@ it("evidence for a purged root is no longer delivered", () => {
 
 it("timer condition includes unacked notifications (F76)", () => {
   const b = emptyBoard();
-  expect(needsTimer(b, jobs, DEFAULTS)).toBe(true);   // beforeEach root finalized + pending
+  b.tasks = [{ id: 1, subject: "t", status: "completed" }];
+  b.nextId = 2;
+  expect(needsTimer(b, jobs, DEFAULTS)).toBe(true);   // beforeEach root finalized + pending + task exists
   jobs.put(root({ notifyState: "acked" }));
   expect(needsTimer(b, jobs, DEFAULTS)).toBe(false);
   jobs.put(root({ status: "running", endedAt: null }));

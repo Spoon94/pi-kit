@@ -1,91 +1,91 @@
 # pi-kit · vigil-todo
 
-**北极星：走开也放心。** 夜里排一批活去睡，早上回来：该完成的已完成、该停的停在该停处、进度可信。
+**North star: leave with confidence.** Queue a batch of work overnight, go to sleep, and come back to a board where finished work is finished, stopped work sits where it should, and progress is trustworthy.
 
-`vigil-todo` 把任务计划与后台作业合成一条闭环：作业结束自动回填状态、按证据判定完成、失败退避重试、并把唯一下一步送回模型续跑。它取代 `@juicesharp/rpiv-todo` + `pi-bg-run`。
+`vigil-todo` closes the loop between task planning and background jobs: a job exit refills task state, evidence decides completion, failures back off and retry, and the single next step is delivered back to the model. It replaces `@juicesharp/rpiv-todo` + `pi-bg-run`.
 
-## 安装
+## Install
 
-1. **先卸载旧包**（硬前置，见 [docs/migration.md](docs/migration.md)）：
+1. **Remove the old packages first** (hard prerequisite; see [docs/migration.md](docs/migration.md)):
    ```bash
    pi remove @juicesharp/rpiv-todo
    pi remove pi-bg-run
    ```
-   同名工具「先注册者胜且静默」；两个包同时在场会出现半生效状态。
-2. 把本包加入 `~/.pi/agent/settings.json` 的 `packages`（或项目 `.pi/extensions/` 指向 `extensions/vigil-todo.ts`）。
-3. 重启 pi。`/vigil-todo doctor` 应显示 `✓ 未发现问题`。
+   Tool names are first-registrant-wins and silent; having both packages installed produces a half-working state.
+2. Add this package to `packages` in `~/.pi/agent/settings.json` (or point a project `.pi/extensions/` entry at `extensions/vigil-todo.ts`).
+3. Restart pi. `/vigil-todo doctor` should show `✓ No issues found`.
 
-## 工具
+## Tools
 
-| 工具 | 用途 |
+| Tool | Purpose |
 |---|---|
 | `todo` | `create` / `update` / `list` / `get` / `delete` / `clear` / `verify` |
-| `bg_run` | 起后台作业并绑定 `task_id`（仅唯一 `in_progress` 时可省） |
-| `bg_list` | 列出作业状态与退出码 |
-| `bg_kill` | 中止整条重试链（收 rootId 或链上任意 id） |
+| `bg_run` | Start a background job bound to `task_id` (optional only when exactly one `in_progress` task exists) |
+| `bg_list` | List job status and exit codes |
+| `bg_kill` | Cancel an entire retry chain (accepts rootId or any id in the chain) |
 
-`todo` 的动作枚举只新增 `verify`；其余意图全走 `update` + 字段：
+`todo` adds only `verify` to its action enum; all other intents use `update` + fields:
 
 ```
-开工      todo({action:"update", id, status:"in_progress"})
-完成      todo({action:"update", id, status:"completed"})
-接受 stale todo({action:"update", id, status:"completed", accept:"stale"})
-park      todo({action:"update", id, status:"parked", reason:"…"})
-重验      todo({action:"verify", id})
+start    todo({action:"update", id, status:"in_progress"})
+finish   todo({action:"update", id, status:"completed"})
+accept stale todo({action:"update", id, status:"completed", accept:"stale"})
+park     todo({action:"update", id, status:"parked", reason:"…"})
+reverify todo({action:"verify", id})
 ```
 
-## 命令
+## Commands
 
-| 命令 | 作用 |
+| Command | Effect |
 |---|---|
-| `/vigil-todo` 或 `/vt` | 看板 + 一行快捷提示（halt/resume/doctor 不必记） |
-| `/vigil-todo halt` | 强制中断：停止自主推进、杀本会话作业、受影响任务 parked |
-| `/vigil-todo resume` | 解除中断（不重置 turnsUsed） |
-| `/vigil-todo doctor` | 冲突 / sidecar 降级 / halted / purged / 超期 / 无作业 in_progress |
-| `/vt clear` | 清理历史：默认 settled（completed+deleted）；也可 `clear completed` / `deleted` / `settled`。pending/in_progress/parked 永不清 |
-| `/todos` | 逐条任务（exit code + fp 下钻） |
-| `/bg` | 作业列表；`/bg k <id>` 两步确认中止链；`/bg tail <id>` 看日志尾 |
+| `/vigil-todo` or `/vt` | Board + one-line quick help (no need to memorize halt/resume/doctor) |
+| `/vigil-todo halt` | Forced halt: stop autonomous progress, kill this session's jobs, park affected tasks |
+| `/vigil-todo resume` | Resume after a halt (does not reset turnsUsed) |
+| `/vigil-todo doctor` | Conflict / sidecar degraded / halted / purged / overdue / in_progress without a job |
+| `/vt clear` | Clear history: default `settled` (completed+deleted); also `clear completed` / `deleted` / `settled`. pending/in_progress/parked are never cleared |
+| `/todos` | Every task with exit code + fingerprint drill-down |
+| `/bg` | Job list; `/bg k <id>` confirms a two-step chain cancel; `/bg tail <id>` shows the log tail |
 
-状态栏常驻显示 `vigil ● N jobs` / `vigil ⚠ N parked` / `vigil ⏸ halted` / `vigil ✓ done/total`，空闲时自动清空。
+The status bar always shows `vigil ● N jobs` / `vigil ⚠ N parked` / `vigil ⏸ halted` / `vigil ✓ done/total`, and clears when idle.
 
-Tab 补全：`/vigil-todo`、`/vt` 补 `halt`/`resume`/`doctor`/`clear`（`clear ` 再补 completed/deleted/settled 三个范围）；`/bg` 补 `k`/`tail`，再空格补当前作业 id（可中止作业优先，最多 50 条）；`/todos` 无候选。
+Tab completion: `/vigil-todo` and `/vt` complete `halt`/`resume`/`doctor`/`clear` (`clear ` then completes the three scopes completed/deleted/settled); `/bg` completes `k`/`tail`, then current job ids after a space (cancellable jobs first, max 50); `/todos` has no candidates.
 
-折叠快捷键默认 `ctrl+shift+t`，一键中断默认 `alt+h`（两者都可用 `off` 关闭，需 `/reload`）。
+Collapse shortcut defaults to `ctrl+shift+t`; the one-key halt defaults to `alt+h` (both accept `off`; `/reload` required).
 
-模型侧触发：用户说「后台跑 / 我去睡 / 批量 / 长任务 / 跑一晚上」时，指引要求模型主动建 todo 并 `bg_run`，不必点名工具；随时可用 `/vt halt` 一键刹车。
+Model-side trigger: when the user says “run it in the background / I'm going to sleep / batch / long task / run overnight”, the guidance tells the model to create a todo and start `bg_run` without being asked for the tool name. `/vt halt` is always the brake.
 
-## 配置
+## Configuration
 
-优先级：`~/.config/pi-kit/config.json` → `pi.getSettings().vigilTodo` → `pi.getSettings().bgRun`（旧键兼容）→ 默认值。
+Priority: `~/.config/pi-kit/config.json` → `pi.getSettings().vigilTodo` → `pi.getSettings().bgRun` (legacy keys) → defaults.
 
-| 键 | 默认 |
+| Key | Default |
 |---|---|
-| `wipLimit` | 1（模型串行专注一个 todo） |
-| `retries` | 5（总尝试 6） |
-| `retryDelaysMs` | `[0, 30000, 120000, 300000, 600000]`（5 档，最坏累计等待约 17.5 分钟） |
+| `wipLimit` | 1 (the model focuses on one todo at a time) |
+| `retries` | 5 (6 total attempts) |
+| `retryDelaysMs` | `[0, 30000, 120000, 300000, 600000]` (5 tiers; worst-case cumulative wait ≈17.5 min) |
 | `staleReverify` | 1 |
 | `maxTurns` | 50 |
 | `maxConcurrentJobs` | 10 |
-| `completedTtlMs` | 7 天（另有 2000 条终态记录硬上限，防 sidecar 无界增长） |
-| `taskRetentionMs` | 0（关闭自动清理） |
+| `completedTtlMs` | 7 days (plus a hard cap of 2000 terminal records to keep the sidecar bounded) |
+| `taskRetentionMs` | 0 (automatic cleanup off) |
 | `tailLines` / `maxTailBytes` | 20 / 8192 |
 | `maxWidgetLines` | 12 |
 | `wakeMergeMs` | 250 |
 | `notifyRetryMs` | 10min |
-| `collapseKey` / `haltKey` | 折叠键 / 一键中断键（默认 `alt+h`，`off` 关闭） |
+| `collapseKey` / `haltKey` | collapse key / one-key halt key (default `alt+h`, `off` disables) |
 
-## 派发子 agent
+## Dispatching sub-agents
 
-用 `bg_run` 包「派发 + 等报告」的 watcher 时，请写成幂等 poller：两步原子流程、halt 只杀 watcher 的语义落差、残余风险与恢复方式见 [docs/dispatching-agents.md](docs/dispatching-agents.md)。
+When wrapping “dispatch + wait for report” in `bg_run`, write it as an idempotent poller: see [docs/dispatching-agents.md](docs/dispatching-agents.md) for the two-step atomic flow, the halt-only-kills-the-watcher gap, and residual risk/recovery.
 
-## 开发
+## Development
 
 ```bash
 npm install
 npm test        # vitest
 npm run typecheck
-npm run coverage:check   # 行≥95% / 分支≥90% / 函数≥95%
-npm run verify           # 交付前三件套一次跑齐（test + typecheck + coverage:check）
+npm run coverage:check   # lines ≥95% / branches ≥90% / functions ≥95%
+npm run verify           # all three gates: test + typecheck + coverage:check
 ```
 
-架构：`src/board` 纯状态机（不 import pi）→ `src/jobs` 进程子系统 → `src/bind` 唯一跨界写入层 → `src/wake` 投递 → `src/ui` 只读面板。作业事实只由 sidecar（`/tmp/bg-run/<hash(cwd)>/jobs.json`）说，任务可见性只由会话快照说。
+Architecture: `src/board` is a pure state machine (never imports pi) → `src/jobs` is the process subsystem → `src/bind` is the only cross-boundary writer → `src/wake` delivers → `src/ui` is a read-only panel. Job facts come only from the sidecar (`/tmp/bg-run/<hash(cwd)>/jobs.json`); task visibility comes only from session snapshots.

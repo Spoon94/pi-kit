@@ -11,30 +11,30 @@ export interface SweepDeps {
   respawn(req: SpawnRequest): { ok: boolean };
   notify(note: string): void;
   isIdle(): boolean;
-  /** board 被本函数修改后的同步回调；调用方据此持久化快照（A1）。 */
+  /** Sync callback after this function modifies the board; the caller persists the snapshot (A1). */
   boardChanged?: () => void;
 }
 
 export function sweepRespawns(d: SweepDeps): number {
-  if (d.boards.get(d.sessionId).counters.halted) return 0;      // R20：停机后不 respawn
+  if (d.boards.get(d.sessionId).counters.halted) return 0;      // R20: no respawn after halt
   let n = 0;
   let dirty = false;
-  // 重验 job 是否存在与单条 job 无关：一次扫描建集合，避免逐 job 全表扫描（P3 热点）
+  // Whether a reverify job exists is independent of any single job: build the set in one scan, avoiding a full scan per job (P3 hot spot)
   const reverifyRoots = new Set<string>();
   for (const j of d.jobs.all()) if (j.staleReverifyOf != null) reverifyRoots.add(j.rootId);
   for (const job of d.jobs.all()) {
     const root = d.jobs.get(job.rootId);
-    if (job.purged || root?.purged) continue;                 // R19：清掉的链不再 respawn
+    if (job.purged || root?.purged) continue;                 // R19: purged chains are not respawned
     const dueBackoff = job.retryAt != null && job.retryAt <= d.now;
     const hasReverifyJob = reverifyRoots.has(job.rootId);
     const dueReverify = root?.pendingReverify === true && !root.finalized && job.id === root.id && !hasReverifyJob;
     if (root?.pendingReverify === true && hasReverifyJob && !root.finalized && job.id === root.id) {
-      d.jobs.put({ ...root, pendingReverify: false });    // 重验 job 已存在 ⇒ 标记已完成使命
+      d.jobs.put({ ...root, pendingReverify: false });    // reverify job already exists ⇒ mark its mission done
       dirty = true;
     }
     if (!dueBackoff && !dueReverify) continue;
-    // 恢复重验继承链上最大 attempt：后续失败重试只补到 1+retries，
-    // 保证总 job 数不超过 1+retries+staleReverify（链上界证明见 chain.ts）。
+    // Reverify resume inherits the chain's max attempt: later retries only add up to 1+retries,
+    // so total jobs never exceed 1+retries+staleReverify (chain bound proof in chain.ts).
     const lastAttempt = dueReverify
       ? d.jobs.all().filter((j) => j.rootId === job.rootId).reduce((m, j) => Math.max(m, j.attempt), job.attempt)
       : job.attempt;
@@ -52,7 +52,7 @@ export function sweepRespawns(d: SweepDeps): number {
       d.jobs.put(next);
       dirty = true;
       n++;
-    } else if (dueBackoff) {      // spawn_error：不重试、清退避、绑定任务 parked（F32）
+    } else if (dueBackoff) {      // spawn_error: no retry, clear backoff, park the bound task (F32)
       const cur = d.jobs.get(job.id)!;
       const next = { ...cur };
       delete next.retryAt;
@@ -61,24 +61,24 @@ export function sweepRespawns(d: SweepDeps): number {
       if (job.sessionId === d.sessionId) parkTask(d, job.taskId, "spawn failed");
     } else if (dueReverify) {
       const cur = d.jobs.get(job.id)!;
-      d.jobs.put({ ...cur, pendingReverify: false });     // 额度尽/无槽 ⇒ 不悬置
+      d.jobs.put({ ...cur, pendingReverify: false });     // quota exhausted/no slot ⇒ leave nothing pending
       dirty = true;
-      if (job.sessionId === d.sessionId) parkTask(d, job.taskId, "无空闲槽位重验");
+      if (job.sessionId === d.sessionId) parkTask(d, job.taskId, "no free slot for reverify");
     }
   }
   if (dirty) d.jobs.save();
   return n;
 }
 
-/** root 粒度扫描集（规格 §5.3）。 */
+/** Root-granularity scan set (spec §5.3). */
 export function catchUpScan(d: SweepDeps): string[] {
-  if (d.boards.get(d.sessionId).counters.halted) return [];      // R20：停机后不补发
+  if (d.boards.get(d.sessionId).counters.halted) return [];      // R20: no catch-up delivery after halt
   const out: string[] = [];
   for (const root of d.jobs.all()) {
-    if (root.id !== root.rootId) continue;                 // 只看 root
+    if (root.id !== root.rootId) continue;                 // roots only
     if (root.sessionId !== d.sessionId) continue;
-    if (root.purged) continue;                             // R19：清掉的链不再补发
-    if (root.finalResult?.trigger === "self") continue;    // R6-5：自己 park/kill 的链不叫醒自己
+    if (root.purged) continue;                             // R19: purged chains are not delivered again
+    if (root.finalResult?.trigger === "self") continue;    // R6-5: do not wake self for chains self parked/killed
     if (!root.finalized) continue;
     if (!root.evidenceApplied) { out.push(root.id); continue; }
     if (root.notifyState === "acked") continue;
@@ -102,7 +102,7 @@ export function sweepAll(d: SweepDeps) {
   return { respawned, catchUp, retained, boardDirty };
 }
 
-/** 无 job 记录的终结路径：失败后直接把绑定任务 parked。 */
+/** Terminal path with no job record: park the bound task directly after failure. */
 function parkTask(d: SweepDeps, taskId: number | undefined, reason: string): void {
   if (taskId === undefined) return;
   const board = d.boards.get(d.sessionId);
@@ -119,7 +119,7 @@ function parkTask(d: SweepDeps, taskId: number | undefined, reason: string): voi
   d.boardChanged?.();
 }
 
-/** taskRetentionMs > 0 时清 completed/deleted，走与手动 settled 相同路径（§16.7.5）。 */
+/** When taskRetentionMs > 0, clear completed/deleted via the same path as manual settled (§16.7.5). */
 function applyRetention(d: SweepDeps): number {
   if (!d.cfg.taskRetentionMs || d.cfg.taskRetentionMs <= 0) return 0;
   const board = d.boards.get(d.sessionId);

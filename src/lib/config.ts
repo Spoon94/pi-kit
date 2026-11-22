@@ -43,7 +43,7 @@ export const CONFIG_KEYS: Record<keyof VigilConfig, { type: "int" | "int[]" | "s
 const posInt = (v: unknown, min: number, max?: number): number | undefined =>
   typeof v === "number" && Number.isInteger(v) && v >= min && (max === undefined || v <= max) ? v : undefined;
 
-/** file > settings.vigilTodo > legacy.bgRun > DEFAULTS；非法/超限值逐项退回默认。 */
+/** file > settings.vigilTodo > legacy.bgRun > DEFAULTS; invalid/out-of-range values fall back to defaults item by item. */
 export function resolveConfig(s: { file?: unknown; settings?: unknown; legacy?: unknown }): VigilConfig {
   const layers = [s.legacy, s.settings, s.file].filter(isBag);
   const pick = (k: keyof VigilConfig): unknown => {
@@ -70,7 +70,7 @@ export function resolveConfig(s: { file?: unknown; settings?: unknown; legacy?: 
   return out;
 }
 
-/** stat 与读取分离：stat 每渲染都跑，文件读取/解析只在 mtime 或 settings 变化时发生。 */
+/** Separate stat from read: stat runs on every render; file read/parse only when mtime or settings change. */
 export function createConfigLoader(input: {
   stat(): { mtimeMs: number; settingsKey: string };
   read(): { file?: unknown; settings?: unknown; legacy?: unknown };

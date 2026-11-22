@@ -21,7 +21,7 @@ export function detectToolConflict(
   return !(t.sourceInfo?.source ?? "").includes(ownSource);
 }
 
-/** L1：尽力而为的友好提示，跳过嵌套调用与非 todo 工具。 */
+/** L1: best-effort friendly hint; skips nested calls and non-todo tools. */
 export function preflight(
   event: { toolName: string; input?: unknown; parentToolCallId?: string },
   state: BoardState, ctx: RuleContext,
@@ -89,11 +89,11 @@ export function createTodoTool(deps: ToolDeps, guidance: ToolGuidance = DEFAULT_
         if (!target) return errResult(`#${p.id} not found`);
         if (!target.verify) return errResult(`#${target.id} has no verify command → todo({action:"update", id:${target.id}, verify:{kind:"command", command:"…"}})`);
         const r = await deps.runVerify(target.verify.command);
-        // await 后必须重读：期间可能有人工 park、并发证据或删除，旧快照不得覆盖
+        // Must re-read after await: a manual park, concurrent evidence, or delete may have happened; never overwrite with the old snapshot
         const state = deps.board();
         const task = state.tasks.find((t) => t.id === p.id);
         if (!task || task.status === "deleted") {
-          return errResult(`#${p.id} 在 verify 期间被删除；证据丢弃，不复活任务`);
+          return errResult(`#${p.id} was deleted during verify; evidence discarded, task not revived`);
         }
         const next: Task = { ...task };
         appendEvidence(next, {
@@ -107,7 +107,7 @@ export function createTodoTool(deps: ToolDeps, guidance: ToolGuidance = DEFAULT_
         deps.commit(board);
         deps.appendEntry("rpiv-todo-state", result.details);
         if (r.exitCode === null) {
-          const message = `验证命令未能执行（无 bash 上下文或命令失败），已记为不可信证据 → todo({action:"verify", id:${task.id}}) 重试`;
+          const message = `Verify command could not run (no bash context or command failed); logged as untrusted evidence → todo({action:"verify", id:${task.id}}) to retry`;
           result.isError = true;
           result.content = [{ type: "text", text: `Error: ${message}` }];
           (result.details as { error?: string }).error = message;
@@ -137,7 +137,7 @@ export function createTodoTool(deps: ToolDeps, guidance: ToolGuidance = DEFAULT_
         deps.commit(r.state);
         deps.appendEntry("rpiv-todo-state", result.details);
         if (r.op.kind === "update" && p.status === "parked") {
-          // 规格 §7.2：park 在同一同步块内取消整条重试链
+          // Spec §7.2: park cancels the whole retry chain in the same synchronous block
           const roots = new Set(deps.jobs.all().filter((j) => j.taskId === p.id).map((j) => j.rootId));
           for (const root of roots) deps.kill(root, "self");
         }
@@ -177,19 +177,19 @@ export function createBgRunTool(deps: ToolDeps, guidance: ToolGuidance = DEFAULT
       if (taskId === undefined) {
         const active = state.tasks.filter((t) => t.status === "in_progress");
         if (active.length === 1) taskId = active[0].id;
-        else return errResult("task_id required（仅唯一 in_progress 时可省）");
+        else return errResult("task_id required (may be omitted only when exactly one task is in_progress)");
       }
       const task = state.tasks.find((t) => t.id === taskId);
       if (!task) return errResult(`#${taskId} not found`);
       if (task.status !== "pending" && task.status !== "in_progress") {
-        return errResult(`#${taskId} is ${task.status}; 不能起作业`);
+        return errResult(`#${taskId} is ${task.status}; cannot start a job`);
       }
       if (task.status === "pending") {
         const reason = checkStructure(state, task, { id: task.id, status: "in_progress" }, deps.ruleCtx());
         if (reason) return errResult(reason);
       }
       if (!admitNewSpawn(deps.jobs, deps.cfg.maxConcurrentJobs)) {
-        return errResult(`capacity full (${deps.cfg.maxConcurrentJobs}/${deps.cfg.maxConcurrentJobs} jobs) → bg_kill 释放，或稍后再试（任务保持 pending，未被 park）`);
+        return errResult(`capacity full (${deps.cfg.maxConcurrentJobs}/${deps.cfg.maxConcurrentJobs} jobs) → bg_kill to free a slot, or retry later (task stays pending, not parked)`);
       }
       const spawned = deps.spawn({
         command, label,
@@ -199,7 +199,7 @@ export function createBgRunTool(deps: ToolDeps, guidance: ToolGuidance = DEFAULT
       const boundElsewhere = state.tasks.find((t) => t.id !== task.id && (t.jobs ?? []).includes(spawned.jobId!));
       if (boundElsewhere) {
         deps.kill(spawned.jobId, "self");
-        return errResult(`${spawned.jobId} is already bound to #${boundElsewhere.id}; 一个 job 只能绑一个任务`);
+        return errResult(`${spawned.jobId} is already bound to #${boundElsewhere.id}; a job can bind to only one task`);
       }
       try {
         const next: Task = { ...task, jobs: [...(task.jobs ?? []), spawned.jobId] };
@@ -217,7 +217,7 @@ export function createBgRunTool(deps: ToolDeps, guidance: ToolGuidance = DEFAULT
         return { content: [{ type: "text", text: sanitizeMultiline(`Started ${spawned.jobId} for #${task.id}`) }], details: result.details };
       } catch (e) {
         deps.kill(spawned.jobId, "self");
-        return errResult(`bind failed: ${String(e)}; 已 kill ${spawned.jobId}`);
+        return errResult(`bind failed: ${String(e)}; killed ${spawned.jobId}`);
       }
     },
   };
@@ -256,7 +256,7 @@ export function createBgKillTool(deps: ToolDeps, guidance: ToolGuidance = DEFAUL
       const target = deps.jobs.get(id);
       if (!target) return errResult(`${id} not found`);
       if (target.status !== "running" && target.retryAt == null) {
-        return errResult(`${id} is ${target.status}; 无需中止`);
+        return errResult(`${id} is ${target.status}; nothing to abort`);
       }
       if (target.kill) {
         return errResult(`kill already requested for ${target.rootId} (${target.kill.requestedBy})`);

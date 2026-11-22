@@ -40,15 +40,15 @@ const expectClean = (out: string): void => {
 };
 
 const cases: [string, () => string | Promise<string>][] = [
-  ["面板 pending subject", () => {
+  ["panel pending subject", () => {
     const s = board([{ id: 1, subject: EVIL, status: "pending" }]);
     return layoutRows(s, blank(), 12).rows.join("\n");
   }],
-  ["面板 parked reason", () => {
+  ["panel parked reason", () => {
     const s = board([{ id: 1, subject: "p", status: "parked", park: { reason: EVIL, at: 1, from: "pending" } }]);
     return layoutRows(s, blank(), 12).rows.join("\n");
   }],
-  ["面板 in_progress subject/activeForm", () => {
+  ["panel in_progress subject/activeForm", () => {
     const s = board([{ id: 1, subject: EVIL, status: "in_progress", activeForm: EVIL }]);
     return layoutRows(s, blank(), 12).rows.join("\n");
   }],
@@ -60,8 +60,8 @@ const cases: [string, () => string | Promise<string>][] = [
     const s = board([{ id: 1, subject: "p", status: "parked", park: { reason: EVIL, at: 1, from: "pending" } }]);
     return renderTodos(s, blank());
   }],
-  ["doctor degraded 文案", () => renderDoctor(emptyBoard(), blank(), false, EVIL)],
-  ["唤醒消息 label/note/日志尾/next", () => {
+  ["doctor degraded text", () => renderDoctor(emptyBoard(), blank(), false, EVIL)],
+  ["wake message label/note/log tail/next", () => {
     const dir = mkdtempSync(join(tmpdir(), "vigil-sec-wake-"));
     const log = join(dir, "x.log");
     writeFileSync(log, `${EVIL} log`);
@@ -71,11 +71,11 @@ const cases: [string, () => string | Promise<string>][] = [
     const b = board([{ id: 1, subject: EVIL, status: "pending" }]);
     return composeWake(["R"], b, jobs, DEFAULTS, b.tasks[0]);
   }],
-  ["todo list 结果文本", () => {
+  ["todo list result text", () => {
     const s = board([{ id: 1, subject: EVIL, status: "pending" }]);
     return buildResult({ action: "list" }, s, { kind: "list" }).content[0].text;
   }],
-  ["todo delete 结果文本", () => {
+  ["todo delete result text", () => {
     const s = board([{ id: 1, subject: EVIL, status: "pending" }]);
     return buildResult({ action: "delete", id: 1 }, s, { kind: "delete", id: 1, subject: EVIL }).content[0].text;
   }],
@@ -84,13 +84,13 @@ const cases: [string, () => string | Promise<string>][] = [
     jobs.put(job({ id: "R", label: EVIL, command: EVIL }));
     return (await createBgListTool(deps(jobs)).execute({})).content[0].text;
   }],
-  ["bg_kill 结果中的 id/链", async () => {
+  ["id/chain in the bg_kill result", async () => {
     const jobs = blank();
     jobs.put(job({ id: EVIL, rootId: EVIL }));
     return (await createBgKillTool(deps(jobs)).execute({ job_id: EVIL })).content[0].text;
   }],
 ];
 
-it.each(cases)("恶意控制字符不进入终端输出：%s", async (_name, render) => {
+it.each(cases)("malicious control characters never reach terminal output: %s", async (_name, render) => {
   expectClean(await render());
 });

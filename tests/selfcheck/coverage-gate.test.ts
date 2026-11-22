@@ -4,7 +4,7 @@ import { expect, it } from "vitest";
 
 const ROOT = new URL("../../", import.meta.url).pathname;
 
-it("F121 覆盖率门禁：脚本、阈值与纯类型排除均存在", () => {
+it("F121 coverage gate: script, thresholds, and pure-type exclusion all exist", () => {
   const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
     scripts: Record<string, string>;
   };

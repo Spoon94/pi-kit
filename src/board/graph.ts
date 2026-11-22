@@ -1,9 +1,9 @@
 import type { BoardState } from "./types.js";
 
 /**
- * R21：依赖环检测。把 extra 提议边并入现有 blockedBy 图后做 DFS（三色标记），
- * 遇到灰色回边即返回环上的 id（首尾重复），无环返回 undefined。
- * 复杂度 O(V+E)；不做逐对比较。
+ * R21: dependency cycle detection. Merge extra proposed edges into the existing blockedBy graph,
+ * then DFS (three-color marking); a gray back-edge returns the ids on the cycle (head == tail);
+ * undefined when acyclic. Complexity O(V+E); no pairwise comparison.
  */
 export function detectCycle(
   state: BoardState,
@@ -16,7 +16,7 @@ export function detectCycle(
     adj.set(t.id, [...new Set(raw.filter((d) => ids.has(d)))]);
   }
 
-  const color = new Map<number, 0 | 1 | 2>();   // 0 白 / 1 灰 / 2 黑
+  const color = new Map<number, 0 | 1 | 2>();   // 0 white / 1 gray / 2 black
   const stack: number[] = [];
 
   const visit = (id: number): number[] | undefined => {
@@ -47,5 +47,5 @@ export function detectCycle(
   return undefined;
 }
 
-/** 环的可读形式：#1 ⛓ #2 ⛓ #1 */
+/** Readable cycle form: #1 ⛓ #2 ⛓ #1 */
 export const formatCycle = (cycle: number[]): string => cycle.map((id) => `#${id}`).join(" ⛓ ");

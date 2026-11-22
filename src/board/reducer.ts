@@ -67,7 +67,7 @@ export function applyMutation(state: BoardState, p: MutationParams, ctx: RuleCon
     const nextState: BoardState = {
       ...state, tasks: [...state.tasks, ...created], nextId: state.nextId + created.length,
     };
-    // R21：create 的 blockedBy 并入图后做 DFS 环检测
+    // R21: merge create's blockedBy into the graph, then DFS cycle detection
     const cycle = detectCycle(nextState);
     if (cycle) {
       const head = created.find((t) => cycle.includes(t.id)) ?? created[0];
@@ -91,20 +91,20 @@ export function applyMutation(state: BoardState, p: MutationParams, ctx: RuleCon
   if (p.action === "get") return { state, op: { kind: "get", task: cur } };
 
   for (const f of READONLY_FIELDS) {
-    if (p[f] !== undefined) return err(state, `${f} is read-only; 由扩展写入，模型不可传`);
+    if (p[f] !== undefined) return err(state, `${f} is read-only; written by the extension, the model cannot pass it`);
   }
 
   if (p.action === "delete") {
     if (cur.status === "deleted") return err(state, `#${cur.id} is already deleted`);
     if (cur.status !== "completed" && ((cur.jobs?.length ?? 0) > 0 || (cur.evidence?.length ?? 0) > 0)) {
-      return err(state, `#${cur.id} has jobs/evidence; 用 status:"parked" 代替删除`);
+      return err(state, `#${cur.id} has jobs/evidence; use status:"parked" instead of deleting`);
     }
     const tasks = [...state.tasks];
     tasks[idx] = { ...cur, status: "deleted", statusSince: ctx.now };
     return { state: { ...state, tasks }, op: { kind: "delete", id: cur.id, subject: cur.subject } };
   }
 
-  // update / verify 的结构性校验
+  // structural checks for update / verify
   const structural = checkStructure(state, cur, p as never, ctx);
   if (structural) return err(state, structural);
 
@@ -124,9 +124,9 @@ export function applyMutation(state: BoardState, p: MutationParams, ctx: RuleCon
   if ((p.status === "completed" || p.status === "parked")
     && p.verify !== undefined && p.verify.command !== cur.verify?.command) {
     if (p.status === "parked") {
-      return err(state, `#${cur.id} cannot change verify and park in one update → 先 park，再单独 todo({action:"update", id:${cur.id}, verify:…})`);
+      return err(state, `#${cur.id} cannot change verify and park in one update → park first, then todo({action:"update", id:${cur.id}, verify:…}) separately`);
     }
-    return err(state, `#${cur.id} cannot change verify and complete in one update → 先改 verify，再 todo({action:"verify", id:${cur.id}})，最后 completed`);
+    return err(state, `#${cur.id} cannot change verify and complete in one update → change verify first, then todo({action:"verify", id:${cur.id}}), then completed`);
   }
   if (p.status === "completed") {
     const gate = completionGate(cur, ctx.facts, p.accept);
@@ -167,7 +167,7 @@ export function applyMutation(state: BoardState, p: MutationParams, ctx: RuleCon
       if (t.status === "deleted") return err(state, `addBlockedBy: #${d} is deleted`);
       if (!deps.includes(d)) deps.push(d);
     }
-    // R21：addBlockedBy 的提议边并入图后做 DFS 环检测（三节点以上环不能靠逐对比较）
+    // R21: merge addBlockedBy's proposed edges into the graph, then DFS cycle detection (cycles of 3+ nodes defeat pairwise checks)
     if (p.addBlockedBy?.length) {
       const cycle = detectCycle(state, { taskId: cur.id, deps });
       if (cycle) {

@@ -46,7 +46,7 @@ function makeContractPi() {
     refreshTools: guarded("refreshTools", () => {}),
   };
 
-  // 未知方法一律抛错：契约测试要能抓到新出现的宿主 API 用法
+  // Any unknown method throws: the contract test must catch newly introduced host API usage
   const api = new Proxy(base, {
     get(target, prop) {
       if (typeof prop !== "string" || prop === "then") return (target as any)[prop];
@@ -83,7 +83,7 @@ afterEach(() => {
   else process.env.XDG_CONFIG_HOME = oldConfigHome;
 });
 
-it("工厂体加载期只调用注册类 API，action 类必须等到 session_start（BLOCKER）", async () => {
+it("Factory body calls only registration APIs at load time; action APIs must wait for session_start (BLOCKER)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-load-"));
   const home = mkdtempSync(join(tmpdir(), "vigil-load-cfg-"));
   mkdirSync(join(home, "pi-kit"), { recursive: true });
@@ -96,18 +96,18 @@ it("工厂体加载期只调用注册类 API，action 类必须等到 session_st
   h.ctx.sessionManager.getCwd = () => cwd;
   h.ctx.sessionManager.getSessionDir = () => join(cwd, ".sessions");
 
-  // 加载期：initialized=false，任何 action 调用都会抛错
+  // Load time: initialized=false, so any action call throws
   expect(() => vigilTodo(h.api as never)).not.toThrow();
   expect(h.actionCalls).toEqual([]);
   expect(h.registered.tools).toEqual(["todo", "bg_run", "bg_list", "bg_kill"]);
   expect(h.registered.commands).toEqual(["vigil-todo", "vt", "todos", "bg"]);
-  expect(h.registered.shortcuts).toEqual([]);            // 快捷键延到 session_start
+  expect(h.registered.shortcuts).toEqual([]);            // shortcuts deferred to session_start
   expect(h.registered.handlers.has("session_start")).toBe(true);
 
-  // runtime 初始化后，session_start 才能使用 action 类
+  // After runtime initialization, session_start can use action APIs
   h.state.initialized = true;
   await h.emit("session_start", { type: "session_start", reason: "startup" });
   expect(h.actionCalls).toContain("getAllTools");
   expect(h.actionCalls).toContain("getSettings");
-  expect(h.registered.shortcuts).toHaveLength(2);        // 折叠 + 一键中断
+  expect(h.registered.shortcuts).toHaveLength(2);        // collapse + one-tap halt
 });

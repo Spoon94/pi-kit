@@ -14,10 +14,11 @@ export type DeliverResult =
 
 let wakeSeq = 0;
 
-/** timer 存在条件：优先内部推进；只有通知时按实际可投递性过滤，避免永不可投递的 root 造成永久 timer。 */
+/** Timer condition: internal progress takes priority; for notifications only, filter by actual
+ *  deliverability so never-deliverable roots do not keep a timer alive forever. */
 export function needsTimer(board: BoardState, jobs: JobStore, cfg: VigilConfig): boolean {
   if (board.counters.halted) {
-    // 停机时唯一还需要 timer 的理由：running 作业的退出探活（含恢复作业）
+    // While halted, the only remaining reason to keep a timer: exit liveness checks for running jobs (including recovered jobs)
     return jobs.all().some((j) => j.status === "running");
   }
   if (jobs.all().some((j) => j.status === "running" || j.retryAt != null)) return true;
@@ -27,7 +28,7 @@ export function needsTimer(board: BoardState, jobs: JobStore, cfg: VigilConfig):
     && !j.purged && j.finalResult?.trigger !== "self");
 }
 
-/** resume 后的一次性恢复唤醒：受 maxTurns 约束，只推进 next。 */
+/** One-shot recovery wake after resume: constrained by maxTurns, advances next only. */
 export function recoveryWake(i: DeliverInput): DeliverResult {
   if (i.board.counters.halted) return { kind: "none" };
   const c = i.board.counters;
@@ -41,7 +42,7 @@ export function recoveryWake(i: DeliverInput): DeliverResult {
   };
 }
 
-/** sendMessage 即使声明 void 也可能返回 Promise；吞掉 rejection，保留 sent 状态给 catch-up。 */
+/** sendMessage may return a Promise even when declared void; swallow rejection and keep sent state for catch-up. */
 export function settleSend(result: unknown, onError?: (e: unknown) => void): void {
   if (result && typeof (result as { then?: unknown }).then === "function") {
     void (result as Promise<unknown>).then(undefined, (e) => onError?.(e));
@@ -49,14 +50,15 @@ export function settleSend(result: unknown, onError?: (e: unknown) => void): voi
 }
 
 export function tryDeliver(i: DeliverInput): DeliverResult {
-  if (i.board.counters.halted) return { kind: "none" };           // R20：人的刹车早于一切
+  if (i.board.counters.halted) return { kind: "none" };           // R20: the human brake precedes everything
   const c = i.board.counters;
-  if (c.turnsUsed >= i.cfg.maxTurns) return { kind: "none" };      // ★ 第一行硬闸门
+  if (c.turnsUsed >= i.cfg.maxTurns) return { kind: "none" };      // ★ first-line hard gate
 
   const pending = i.board.tasks.flatMap((t) => t.evidence ?? [])
     .filter((e) => e.origin === "async" && e.chainFinal && e.trigger !== "self")
     .filter((e) => {
-      // per-root 的 sidecar 状态是权威；watermark 只是优化，时钟回拨后不得挡住从未投递的链（A3）
+      // per-root sidecar state is authoritative; the watermark is only an optimization and
+      // must not block never-delivered chains after a clock rollback (A3)
       const withinWatermark = e.at > c.wakeWatermark;
       if (typeof e.ref !== "string") return withinWatermark;
       const root = i.jobs.get(e.ref);

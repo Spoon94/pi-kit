@@ -13,8 +13,8 @@ const walk = (dir: string): string[] => {
   return out;
 };
 
-// §17.2 范围收缩后已废的验收编号（defer / 收养 / 心跳 / 认领 / 两集合）
-// F96/F99 是 §17.2 列表漏列的心跳/收养用例，随模块删除，一并排除。
+// Acceptance numbers retired by the §17.2 scope contraction (defer / adoption / heartbeat / claims / two-set).
+// F96/F99 were heartbeat/adoption cases missing from the §17.2 list; they were removed with the modules.
 const RETIRED = new Set([
   18, 27, 28, 34, 39, 62, 78,
   88, 92, 93, 94, 95, 96, 97, 98, 99, 100, 104, 105,
@@ -22,9 +22,9 @@ const RETIRED = new Set([
   56, 57, 63, 75, 79,
 ]);
 
-it("规格 §13 的每个 F 编号都在测试文本中出现（规格与测试不脱节）", () => {
+it("every F number in spec §13 appears in test text (spec and tests stay linked)", () => {
   const spec = readFileSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"), "utf8");
-  const table = spec.slice(spec.indexOf("## 13. 验收用例"), spec.indexOf("## 14."));
+  const table = spec.slice(spec.indexOf("## 13."), spec.indexOf("## 14."));
   const ids = [...new Set([...table.matchAll(/\bF(\d+)\b/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
   expect(ids.length).toBeGreaterThanOrEqual(105);
   const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
@@ -32,14 +32,14 @@ it("规格 §13 的每个 F 编号都在测试文本中出现（规格与测试�
   expect(missing).toEqual([]);
 });
 
-it("八方面矩阵文档存在且覆盖 8 行", () => {
+it("the eight-aspect matrix exists and covers all eight rows", () => {
   const doc = readFileSync(join(ROOT, "docs/quality-matrix.md"), "utf8");
-  for (const k of ["性能", "容灾", "可自定义", "易用性", "可扩展性", "自验证", "清理", "强制中断"]) {
+  for (const k of ["Performance", "Resilience", "Configurability", "Usability", "Extensibility", "Self-verification", "Clearing todos", "Forced halt"]) {
     expect(doc).toContain(k);
   }
 });
 
-it("入口级 F 编号必须在 tests/integration/ 有事件顺序断言（G2）", () => {
+it("entry-level F numbers must have event-order assertions under tests/integration/ (G2)", () => {
   const ENTRY_F = ["F6", "F7", "F8", "F10", "F38", "F61", "F71", "F72", "F74"];
   const corpus = walk(join(ROOT, "tests/integration"))
     .map((f) => readFileSync(f, "utf8")).join("\n");
@@ -47,7 +47,7 @@ it("入口级 F 编号必须在 tests/integration/ 有事件顺序断言（G2）
   expect(missing).toEqual([]);
 });
 
-it("§18 的 F106-F111 都在测试文本中出现（R21 / 死锁可见性）", () => {
+it("§18 F106-F111 all appear in test text (R21 / deadlock visibility)", () => {
   const spec = readFileSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"), "utf8");
   const start = spec.indexOf("### 18.4");
   const end = spec.indexOf("## 19.");
@@ -59,7 +59,7 @@ it("§18 的 F106-F111 都在测试文本中出现（R21 / 死锁可见性）", 
   expect(missing).toEqual([]);
 });
 
-it("§19 的 F112-F122 都在测试文本中出现（功能完备性/指引/截断/覆盖门禁）", () => {
+it("§19 F112-F122 all appear in test text (completeness/guidance/truncation/coverage gate)", () => {
   const spec = readFileSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"), "utf8");
   const start = spec.indexOf("### 19.6");
   const end = spec.indexOf("## 20.");
@@ -71,7 +71,7 @@ it("§19 的 F112-F122 都在测试文本中出现（功能完备性/指引/截�
   expect(missing).toEqual([]);
 });
 
-it("§20 的 F123-F132 都在测试文本中出现（/vt clear）", () => {
+it("§20 F123-F132 all appear in test text (/vt clear)", () => {
   const spec = readFileSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"), "utf8");
   const section = spec.slice(spec.indexOf("### 20.4"));
   const ids = [...new Set([...section.matchAll(/\bF(\d+)\b/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
@@ -81,22 +81,22 @@ it("§20 的 F123-F132 都在测试文本中出现（/vt clear）", () => {
   expect(missing).toEqual([]);
 });
 
-it("派发子 agent 文档存在且覆盖关键边界（原子流程/poller/halt 语义/不自动重挂）", () => {
+it("the sub-agent dispatch doc exists and covers the key boundaries (atomic flow/poller/halt/no auto re-attach)", () => {
   const doc = readFileSync(join(ROOT, "docs/dispatching-agents.md"), "utf8");
   for (const needle of [
-    "两步原子流程",
-    "不要手动先",
-    "幂等 poller 模式",
-    "杀不了独立 agent 本体",
-    "不做自动重挂",
-    "重复派活",
+    "Two-step atomic flow",
+    "Do not manually call",
+    "Idempotent poller pattern",
+    "cannot kill the independent agent itself",
+    "No automatic re-attach",
+    "duplicate the dispatch",
     "fp:stale",
     'todo({action:"verify", id})',
   ]) expect(doc, needle).toContain(needle);
   expect(readFileSync(join(ROOT, "README.md"), "utf8")).toContain("docs/dispatching-agents.md");
 });
 
-it("规格文档无重复顶层章节（F102）", () => {
+it("the spec document has no duplicate top-level sections (F102)", () => {
   const spec = readFileSync(join(ROOT, "docs/superpowers/specs/2026-11-21-vigil-todo-design.md"), "utf8");
   const sections = [...spec.matchAll(/^## (\d+)\./gm)].map((m) => m[1]);
   expect(sections.length).toBeGreaterThan(10);

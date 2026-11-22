@@ -15,7 +15,7 @@ import { WAKE_CUSTOM_TYPE } from "../../src/wake/compose.js";
 type Handler = (event: any, ctx: any) => unknown;
 
 const job = (o: Partial<Job> = {}): Job => ({
-  id: "R", label: "回归", command: "npm test", logPath: "/tmp/r.log", cwd: "/tmp", pid: 1,
+  id: "R", label: "regression", command: "npm test", logPath: "/tmp/r.log", cwd: "/tmp", pid: 1,
   status: "completed", exitCode: 0, exitCodeKnown: true, startedAt: 1, endedAt: 2,
   fpVerdict: "fresh", interferers: [], rootId: "R", attempt: 1, taskId: 1, sessionId: "S",
   evidenceApplied: true, finalized: true, notifyState: "pending",
@@ -156,11 +156,11 @@ afterEach(() => {
   else process.env.XDG_CONFIG_HOME = oldConfigHome;
 });
 
-it("F8：catch-up 在 session_start 立即补发一次，正常通道与重启都不重复（BLOCKER #2）", async () => {
+it("F8: catch-up re-sends once immediately at session_start; neither the normal channel nor a restart duplicates it (BLOCKER #2)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   setupJobs(cwd, [job()]);
   const b = completedWithEvidence(["R"], (s) => {
-    s.tasks.push({ id: 2, subject: "写文档", status: "pending" });
+    s.tasks.push({ id: 2, subject: "write docs", status: "pending" });
     s.nextId = 3;
   });
   const branch: unknown[] = [snapshot(b)];
@@ -171,22 +171,22 @@ it("F8：catch-up 在 session_start 立即补发一次，正常通道与重启�
   expect(h.sent).toHaveLength(1);
   expect(h.sent[0].message.content).toContain("next: #2");
   const snaps = branch.filter((e: any) => e?.type === "custom" && e.customType === "rpiv-todo-state") as any[];
-  expect(snaps.at(-1)?.data.counters.turnsUsed).toBe(1);   // catch-up 也计入保险丝（MAJOR #3）
+  expect(snaps.at(-1)?.data.counters.turnsUsed).toBe(1);   // catch-up also counts against the fuse (MAJOR #3)
 
-  // catch-up 不推进 watermark；正常通道必须靠 per-root 去重挡住同一证据
+  // catch-up does not advance the watermark; the normal channel must dedupe the same evidence per root
   await h.emit("agent_start", { type: "agent_start" });
   await h.emit("tool_execution_start", { type: "tool_execution_start", toolName: "bg_run", args: {}, toolCallId: "t1" });
   const boundary = await h.emit("agent_before_settle", { type: "agent_before_settle" });
   expect(boundary).toBeUndefined();
 
-  // 重启（同 sidecar/分支）：sent 不满足 10min ⇒ 不补发
+  // Restart (same sidecar/branch): sent within 10min ⇒ no resend
   const h2 = makeHarness(cwd, branch, true);
   vigilTodo(h2.api);
   await h2.emit("session_start", { type: "session_start", reason: "resume" });
   expect(h2.sent).toHaveLength(0);
 });
 
-it("catch-up 对 10 条已终结链也只发一条（per-root 去重）", async () => {
+it("catch-up sends only one message even for 10 settled chains (per-root dedup)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const refs = Array.from({ length: 10 }, (_, i) => `R${i + 1}`);
   setupJobs(cwd, refs.map((id, i) => job({ id, rootId: id, taskId: i + 1, finalResult: { ok: true, note: "done", trigger: "external", at: 2, jobId: id } })));
@@ -201,18 +201,18 @@ it("catch-up 对 10 条已终结链也只发一条（per-root 去重）", async 
   expect(h.sent[0].message.details.jobs).toHaveLength(10);
 });
 
-it("F7/F61：boundary 投递 + 紧随 agent_start ack；同证据不重复，重启不补发", async () => {
+it("F7/F61: boundary delivery + ack on the following agent_start; same evidence is not repeated, restart does not resend", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   setupJobs(cwd, [job()]);
   const b = completedWithEvidence(["R"], (s) => {
-    s.tasks.push({ id: 2, subject: "写文档", status: "pending" });
+    s.tasks.push({ id: 2, subject: "write docs", status: "pending" });
     s.nextId = 3;
   });
   const branch: unknown[] = [snapshot(b)];
   const h = makeHarness(cwd, branch, false);
   vigilTodo(h.api);
   await h.emit("session_start", { type: "session_start", reason: "startup" });
-  expect(h.sent).toHaveLength(0);            // 非 idle，catch-up 跳过
+  expect(h.sent).toHaveLength(0);            // Not idle; catch-up skipped
 
   const boundary = await h.emit("agent_before_settle", { type: "agent_before_settle" });
   expect(boundary?.continue).toBe(true);
@@ -233,14 +233,14 @@ it("F7/F61：boundary 投递 + 紧随 agent_start ack；同证据不重复，重
   const h2 = makeHarness(cwd, branch, true);
   vigilTodo(h2.api);
   await h2.emit("session_start", { type: "session_start", reason: "resume" });
-  expect(h2.sent).toHaveLength(0);           // acked 重启不补发
+  expect(h2.sent).toHaveLength(0);           // acked; restart does not resend
 });
 
-it("F71：boundary 被丢弃后 settle 清除等待，catch-up 绕过 watermark 补发一次", async () => {
+it("F71: dropped boundary clears the wait at settle; catch-up bypasses the watermark and resends once", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   setupJobs(cwd, [job()]);
   const b = completedWithEvidence(["R"], (s) => {
-    s.tasks.push({ id: 2, subject: "写文档", status: "pending" });
+    s.tasks.push({ id: 2, subject: "write docs", status: "pending" });
     s.nextId = 3;
   });
   const branch: unknown[] = [snapshot(b)];
@@ -252,7 +252,7 @@ it("F71：boundary 被丢弃后 settle 清除等待，catch-up 绕过 watermark 
   expect(boundary?.continue).toBe(true);
 
   await h.emit("agent_settled", { type: "agent_settled" });
-  await h.emit("agent_start", { type: "agent_start" });   // 无关 agent_start 不得误 ack
+  await h.emit("agent_start", { type: "agent_start" });   // Unrelated agent_start must not ack by mistake
   const store = createJobStore(runDir(cwd));
   store.load();
   expect(store.get("R")?.notifyState).toBe("sent");
@@ -267,10 +267,10 @@ it("F71：boundary 被丢弃后 settle 清除等待，catch-up 绕过 watermark 
   expect(h2.sent).toHaveLength(1);
 });
 
-it("resume 命令显式 sweep 并受预算约束地唤醒 next（BLOCKER #10）", async () => {
+it("resume command explicitly sweeps and wakes next within budget (BLOCKER #10)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const b = emptyBoard();
-  b.tasks = [{ id: 1, subject: "继续", status: "pending" }];
+  b.tasks = [{ id: 1, subject: "continue", status: "pending" }];
   b.nextId = 2;
   b.counters.halted = true;
   b.counters.haltedAt = 10;
@@ -284,12 +284,12 @@ it("resume 命令显式 sweep 并受预算约束地唤醒 next（BLOCKER #10）"
   expect(h.sent[0].message.content).toContain("next: #1");
 });
 
-it("F6：真实作业 exit → onJobExit → 250ms 合并窗口单次投递（MINOR #5）", async () => {
+it("F6: real job exit → onJobExit → single delivery in the 250ms merge window (MINOR #5)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   setupJobs(cwd, []);
   const b = emptyBoard();
   b.tasks = [
-    { id: 1, subject: "跑", status: "in_progress", inProgressSince: 0 },
+    { id: 1, subject: "run", status: "in_progress", inProgressSince: 0 },
     { id: 2, subject: "next", status: "pending" },
   ];
   b.nextId = 3;
@@ -303,13 +303,13 @@ it("F6：真实作业 exit → onJobExit → 250ms 合并窗口单次投递（MI
   await waitForFinalized(cwd, 1);
 
   await vi.advanceTimersByTimeAsync(249);
-  expect(h.sent).toHaveLength(0);              // 合并窗口未到
+  expect(h.sent).toHaveLength(0);              // merge window not reached
   await vi.advanceTimersByTimeAsync(1);
-  expect(h.sent).toHaveLength(1);              // ≤1s，且只一次
+  expect(h.sent).toHaveLength(1);              // ≤1s and exactly once
   expect(h.sent[0].message.content).toContain("next: #2");
 });
 
-it("F38：10 个真实作业在 250ms 窗口内合并为一条投递（MINOR #5）", async () => {
+it("F38: 10 real jobs merge into one delivery within the 250ms window (MINOR #5)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   setupJobs(cwd, []);
   const b = emptyBoard();
@@ -332,7 +332,7 @@ it("F38：10 个真实作业在 250ms 窗口内合并为一条投递（MINOR #5�
   expect(h.sent[0].message.details.jobs).toHaveLength(10);
 });
 
-it("F10：同 cwd 两会话的通知各回各家（MINOR #8）", async () => {
+it("F10: notifications for two sessions in the same cwd go to the right session each (MINOR #8)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   setupJobs(cwd, [
     job({ id: "A", rootId: "A", sessionId: "SA" }),
@@ -350,7 +350,7 @@ it("F10：同 cwd 两会话的通知各回各家（MINOR #8）", async () => {
   expect(hB.sent[0].message.details.jobs).toEqual(["B"]);
 });
 
-it("F72/F74：6 次失败只投递一次，chainFinal 恰一条且带日志尾（MINOR #7）", async () => {
+it("F72/F74: 6 failures deliver once, exactly one chainFinal with the log tail (MINOR #7)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const storeDir = runDir(cwd);
   mkdirSync(storeDir, { recursive: true });
@@ -365,7 +365,7 @@ it("F72/F74：6 次失败只投递一次，chainFinal 恰一条且带日志尾�
   })));
   const b = emptyBoard();
   b.tasks = [{
-    id: 1, subject: "跑", status: "in_progress", jobs: ["R"], inProgressSince: 0,
+    id: 1, subject: "run", status: "in_progress", jobs: ["R"], inProgressSince: 0,
     evidence: [100, 200, 300].map((at) => ({
       ok: false, kind: "job" as const, origin: "async" as const, chainFinal: false,
       at, known: true, fp: "unknown" as const, ref: "R",
@@ -385,7 +385,7 @@ it("F72/F74：6 次失败只投递一次，chainFinal 恰一条且带日志尾�
   expect(finals).toHaveLength(1);
 });
 
-it("/bg k 需二次确认，/bg tail 可看日志尾（§8.4）", async () => {
+it("/bg k requires two-step confirmation; /bg tail shows the log tail (§8.4)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const storeDir = runDir(cwd);
   mkdirSync(storeDir, { recursive: true });
@@ -411,7 +411,7 @@ it("/bg k 需二次确认，/bg tail 可看日志尾（§8.4）", async () => {
   expect(h.notifications.join("\n")).toContain("line3");
 });
 
-it("恢复作业并入单 timer，不产生每作业 3s 轮询（MAJOR #4）", async () => {
+it("Recovered jobs share a single timer; no 3s poll per job (MAJOR #4)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const stamp = readStartStamp(process.pid);
   setupJobs(cwd, [job({
@@ -420,17 +420,17 @@ it("恢复作业并入单 timer，不产生每作业 3s 轮询（MAJOR #4）", a
     taskId: 1, sessionId: "S",
   })]);
   const b = emptyBoard();
-  b.tasks = [{ id: 1, subject: "跑", status: "in_progress", jobs: ["R"], inProgressSince: 0 }];
+  b.tasks = [{ id: 1, subject: "run", status: "in_progress", jobs: ["R"], inProgressSince: 0 }];
   b.nextId = 2;
   const h = makeHarness(cwd, [snapshot(b)], true);
   vigilTodo(h.api);
   await h.emit("session_start", { type: "session_start", reason: "startup" });
-  expect(vi.getTimerCount()).toBe(1);   // 只有扩展的单 timer
-  await vi.advanceTimersByTimeAsync(1000);   // 非 halted 的正常探活 tick 也走 runSweep/gc
+  expect(vi.getTimerCount()).toBe(1);   // Only the extension's single timer
+  await vi.advanceTimersByTimeAsync(1000);   // A normal liveness tick while not halted also runs runSweep/gc
   expect(vi.getTimerCount()).toBe(1);
 });
 
-it("halted 时 recovered 探活仍执行，残留退出不被拖到 resume 后（MINOR）", async () => {
+it("When halted, recovered liveness probes still run; leftover exits are not deferred until resume (MINOR)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const child = spawn("sleep", ["30"], { stdio: "ignore" });
   try {
@@ -448,7 +448,7 @@ it("halted 时 recovered 探活仍执行，残留退出不被拖到 resume 后�
     const h = makeHarness(cwd, [snapshot(b)], true);
     vigilTodo(h.api);
     await h.emit("session_start", { type: "session_start", reason: "startup" });
-    expect(vi.getTimerCount()).toBe(1);   // halted + running ⇒ 仍需单 timer 探活
+    expect(vi.getTimerCount()).toBe(1);   // halted + running ⇒ still needs the single timer
 
     child.kill("SIGKILL");
     await new Promise<void>((res) => child.once("exit", () => res()));
@@ -463,7 +463,7 @@ it("halted 时 recovered 探活仍执行，残留退出不被拖到 resume 后�
   }
 });
 
-it("命令输出清洗恶意 label/command/subject（MINOR #1）", async () => {
+it("Command output sanitizes malicious label/command/subject (MINOR #1)", async () => {
   const evil = "\u001b]0;pwned\u0007\u001b[31mRED";
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const storeDir = runDir(cwd);
@@ -491,7 +491,7 @@ it("命令输出清洗恶意 label/command/subject（MINOR #1）", async () => {
   expect(out).toContain("RED");
 });
 
-it("/bg tail 拒绝 runDir 外的 logPath（MINOR #2）", async () => {
+it("/bg tail refuses a logPath outside runDir (MINOR #2)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const secret = join(cwd, "secret.txt");
   writeFileSync(secret, "TOPSECRET");
@@ -504,18 +504,18 @@ it("/bg tail 拒绝 runDir 外的 logPath（MINOR #2）", async () => {
   await h.emit("session_start", { type: "session_start", reason: "startup" });
   await h.runCommand("bg", "tail R");
   const out = h.notifications.join("\n");
-  expect(out).toContain("sidecar 可疑");
+  expect(out).toContain("suspicious sidecar");
   expect(out).not.toContain("TOPSECRET");
 });
 
-it("F119：/vigil-todo halt 与 resume 命令入口真实生效", async () => {
+it("F119: /vigil-todo halt and resume command entry points take real effect", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   setupJobs(cwd, [job({
     id: "R", status: "failed", exitCode: 1, endedAt: 2, taskId: 1, sessionId: "S",
     retryAt: Date.now() + 60_000, finalized: false, evidenceApplied: true, finalResult: undefined,
   })]);
   const b = emptyBoard();
-  b.tasks = [{ id: 1, subject: "训练", status: "in_progress", jobs: ["R"], inProgressSince: 0 }];
+  b.tasks = [{ id: 1, subject: "training", status: "in_progress", jobs: ["R"], inProgressSince: 0 }];
   b.nextId = 2;
   const branch: unknown[] = [snapshot(b)];
   const h = makeHarness(cwd, branch, true);
@@ -530,17 +530,17 @@ it("F119：/vigil-todo halt 与 resume 命令入口真实生效", async () => {
   expect(store.get("R")?.retryAt).toBeUndefined();
   expect(lastSnap().counters.halted).toBe(true);
   expect(lastSnap().tasks[0].status).toBe("parked");
-  expect(lastSnap().tasks[0].park?.reason).toContain("强制中断");
+  expect(lastSnap().tasks[0].park?.reason).toContain("halted by user");
 
   await h.runCommand("vigil-todo", "resume");
   expect(lastSnap().counters.halted).toBeUndefined();
   expect(lastSnap().tasks[0].status).toBe("pending");
   expect(lastSnap().tasks[0].park).toBeUndefined();
-  expect(h.notifications.join("\n")).toContain("已恢复自主推进");
-  expect(h.notifications.join("\n")).toContain("1 个中断任务回到 pending");
+  expect(h.notifications.join("\n")).toContain("Autonomous progress resumed");
+  expect(h.notifications.join("\n")).toContain("1 halted tasks back to pending");
 });
 
-it("F120：配置文件的 guidance 覆盖工具 promptSnippet/promptGuidelines", async () => {
+it("F120: config file guidance overrides tool promptSnippet/promptGuidelines", async () => {
   const home = mkdtempSync(join(tmpdir(), "vigil-ext-cfg-"));
   mkdirSync(join(home, "pi-kit"), { recursive: true });
   writeFileSync(join(home, "pi-kit", "config.json"), JSON.stringify({
@@ -556,7 +556,7 @@ it("F120：配置文件的 guidance 覆盖工具 promptSnippet/promptGuidelines"
   expect(h.toolDefs.get("todo")?.promptGuidelines).toEqual(["CUSTOM LINE"]);
 });
 
-it("扩展全事件与命令路径（覆盖率补强）", async () => {
+it("All extension events and command paths (coverage reinforcement)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const storeDir = runDir(cwd);
   mkdirSync(storeDir, { recursive: true });
@@ -566,7 +566,7 @@ it("扩展全事件与命令路径（覆盖率补强）", async () => {
   writeFileSync(emptyLog, "");
   setupJobs(cwd, [
     job({
-      id: "R", label: "训练", command: "train", logPath: log, status: "failed", exitCode: 1, endedAt: 2,
+      id: "R", label: "training", command: "train", logPath: log, status: "failed", exitCode: 1, endedAt: 2,
       finalized: true, evidenceApplied: true, notifyState: "acked", taskId: 1, sessionId: "S",
     }),
     job({
@@ -643,7 +643,7 @@ it("扩展全事件与命令路径（覆盖率补强）", async () => {
   expect(h.notifications.length).toBeGreaterThan(0);
 });
 
-it("启动冲突自检：旧包占位时 notify error 且不 wire", async () => {
+it("Startup conflict self-check: old package occupying the tool notifies an error and does not wire", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const h = makeHarness(cwd, [snapshot(emptyBoard())], true, "S", {
     hasUI: true,
@@ -651,11 +651,11 @@ it("启动冲突自检：旧包占位时 notify error 且不 wire", async () => 
   });
   vigilTodo(h.api);
   await h.emit("session_start", { type: "session_start", reason: "startup" });
-  expect(h.notifications.join("\n")).toContain("其他扩展");
-  expect(h.notifications.join("\n")).toContain("不注册事件处理器");
+  expect(h.notifications.join("\n")).toContain("another extension");
+  expect(h.notifications.join("\n")).toContain("registers no event handlers");
 });
 
-it("collapseKey=off 只关折叠键，haltKey 默认仍注册（C4）", async () => {
+it("collapseKey=off disables only the collapse key; haltKey still registered by default (C4)", async () => {
   const home = mkdtempSync(join(tmpdir(), "vigil-ext-cfg-"));
   mkdirSync(join(home, "pi-kit"), { recursive: true });
   writeFileSync(join(home, "pi-kit", "config.json"), JSON.stringify({ collapseKey: "off" }));
@@ -668,7 +668,7 @@ it("collapseKey=off 只关折叠键，haltKey 默认仍注册（C4）", async ()
   expect([...h.shortcuts.keys()]).toEqual(["alt+h"]);
 });
 
-it("haltKey=off 时可关闭一键中断（C4）", async () => {
+it("haltKey=off disables one-tap halt (C4)", async () => {
   const home = mkdtempSync(join(tmpdir(), "vigil-ext-cfg-"));
   mkdirSync(join(home, "pi-kit"), { recursive: true });
   writeFileSync(join(home, "pi-kit", "config.json"), JSON.stringify({ haltKey: "off" }));
@@ -677,17 +677,17 @@ it("haltKey=off 时可关闭一键中断（C4）", async () => {
   const h = makeHarness(mkdtempSync(join(tmpdir(), "vigil-ext-")), [snapshot(emptyBoard())], true);
   vigilTodo(h.api);
   await h.emit("session_start", { type: "session_start", reason: "startup" });
-  expect(h.shortcuts.size).toBe(1);          // 只剩折叠键
+  expect(h.shortcuts.size).toBe(1);          // only the collapse key remains
   expect(h.shortcuts.has("alt+h")).toBe(false);
 });
 
-it("T1 /vt 与 /vigil-todo 共用同一份补全定义", async () => {
+it("T1 /vt and /vigil-todo share the same completion definition", async () => {
   const h = makeHarness(mkdtempSync(join(tmpdir(), "vigil-ext-")), [snapshot(emptyBoard())], true);
   vigilTodo(h.api);
   await h.emit("session_start", { type: "session_start", reason: "startup" });
   const a = h.commandDefs.get("vigil-todo").getArgumentCompletions;
   const b = h.commandDefs.get("vt").getArgumentCompletions;
-  expect(a).toBe(b);                                    // 同一个函数，杜绝漂移
+  expect(a).toBe(b);                                    // the same function, so they cannot drift
   expect(a("").map((c: any) => c.value)).toEqual(["halt", "resume", "doctor", "clear"]);
   expect(a("h").map((c: any) => c.value)).toEqual(["halt"]);
   expect(a("r").map((c: any) => c.value)).toEqual(["resume"]);
@@ -698,16 +698,16 @@ it("T1 /vt 与 /vigil-todo 共用同一份补全定义", async () => {
   for (const p of ["", "h", "r", "d", "x"]) expect(a(p)).toEqual(b(p));
 });
 
-it("T2 /bg 动态补全当前 jobs，且不改 board/sidecar", async () => {
+it("T2 /bg dynamically completes current jobs without modifying board/sidecar", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const stamp = readStartStamp(process.pid);
   setupJobs(cwd, [
-    job({ id: "bg_run", label: "训练", status: "running", endedAt: null, exitCode: null,
+    job({ id: "bg_run", label: "training", status: "running", endedAt: null, exitCode: null,
       exitCodeKnown: false, pid: process.pid, startStamp: stamp, finalized: false,
       finalResult: undefined, taskId: 1, sessionId: "S" }),
-    job({ id: "bg_back", label: "退避", status: "failed", retryAt: Date.now() + 60_000,
+    job({ id: "bg_back", label: "backoff", status: "failed", retryAt: Date.now() + 60_000,
       finalized: false, finalResult: undefined, taskId: 2, sessionId: "S" }),
-    job({ id: "bg_done", label: "完成" }),
+    job({ id: "bg_done", label: "completed" }),
     job({ id: "bg_evil", label: "\u001b]0;pwned\u0007\u001b[31mRED" }),
   ]);
   const h = makeHarness(cwd, [snapshot(emptyBoard())], true);
@@ -729,13 +729,13 @@ it("T2 /bg 动态补全当前 jobs，且不改 board/sidecar", async () => {
   const before = readFileSync(path, "utf8");
   comp("k ");
   comp("tail ");
-  expect(readFileSync(path, "utf8")).toBe(before);      // 纯读：sidecar 字节不变
+  expect(readFileSync(path, "utf8")).toBe(before);      // pure read: sidecar bytes unchanged
   expect(h.commandDefs.get("todos").getArgumentCompletions("")).toBeNull();
 });
 
-it("T2 补全在未初始化 / 空 sid / halted 时不抛", async () => {
+it("T2 completions do not throw when uninitialized / empty sid / halted", async () => {
   const h = makeHarness(mkdtempSync(join(tmpdir(), "vigil-ext-")), [snapshot(emptyBoard())], true);
-  vigilTodo(h.api);                                     // 尚未 session_start：store 未 load、sid 空
+  vigilTodo(h.api);                                     // not yet session_start: store not loaded, sid empty
   const bg = h.commandDefs.get("bg").getArgumentCompletions;
   expect(() => bg("")).not.toThrow();
   expect(bg("").map((c: any) => c.value)).toEqual(["k", "tail"]);
@@ -756,7 +756,7 @@ it("T2 补全在未初始化 / 空 sid / halted 时不抛", async () => {
     .toEqual(["resume"]);
 });
 
-it("F123 /vt clear 默认只清 completed+deleted，保留 pending/in_progress/parked 并落快照", async () => {
+it("F123 /vt clear by default clears only completed+deleted, keeps pending/in_progress/parked and writes a snapshot", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const b = emptyBoard();
   b.tasks = [
@@ -764,7 +764,7 @@ it("F123 /vt clear 默认只清 completed+deleted，保留 pending/in_progress/p
     { id: 2, subject: "gone", status: "deleted", statusSince: 1 },
     { id: 3, subject: "pending", status: "pending" },
     { id: 4, subject: "running", status: "in_progress", inProgressSince: 0 },
-    { id: 5, subject: "parked", status: "parked", park: { reason: "等拍板", at: 1, from: "pending" } },
+    { id: 5, subject: "parked", status: "parked", park: { reason: "waiting decision", at: 1, from: "pending" } },
   ];
   b.nextId = 6;
   const branch: unknown[] = [snapshot(b)];
@@ -774,12 +774,12 @@ it("F123 /vt clear 默认只清 completed+deleted，保留 pending/in_progress/p
   const before = branch.filter((e: any) => e?.customType === "rpiv-todo-state").length;
 
   await h.runCommand("vt", "clear");
-  expect(h.notifications.at(-1)).toContain("已清理 2");
+  expect(h.notifications.at(-1)).toContain("cleared 2 tasks");
   expect(replayBranch(branch as never[]).tasks.map((t) => t.id)).toEqual([3, 4, 5]);
   expect(branch.filter((e: any) => e?.customType === "rpiv-todo-state").length).toBe(before + 1);
 });
 
-it("F124 /vt clear completed / deleted 各自只清一类", async () => {
+it("F124 /vt clear completed / deleted each clears only one kind", async () => {
   const mk = async (scope: string) => {
     const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
     const b = emptyBoard();
@@ -797,17 +797,17 @@ it("F124 /vt clear completed / deleted 各自只清一类", async () => {
   };
   const completed = await mk("completed");
   expect(completed.replay.tasks.map((t) => t.id)).toEqual([2]);
-  expect(completed.h.notifications.at(-1)).toContain("已清理 1");
+  expect(completed.h.notifications.at(-1)).toContain("cleared 1 tasks");
   const deleted = await mk("deleted");
   expect(deleted.replay.tasks.map((t) => t.id)).toEqual([1]);
 });
 
-it("F125 /vt clear all 被拒：列出允许的三个范围，不删除", async () => {
+it("F125 /vt clear all is rejected: lists the three allowed scopes, deletes nothing", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const b = emptyBoard();
   b.tasks = [
     { id: 1, subject: "done", status: "completed", statusSince: 1 },
-    { id: 2, subject: "待办", status: "pending" },
+    { id: 2, subject: "todo item", status: "pending" },
   ];
   b.nextId = 3;
   const branch: unknown[] = [snapshot(b)];
@@ -818,13 +818,13 @@ it("F125 /vt clear all 被拒：列出允许的三个范围，不删除", async 
 
   await h.runCommand("vt", "clear all");
   const out = h.notifications.at(-1)!;
-  expect(out).toContain("clear all 不支持");
+  expect(out).toContain("clear all is not supported");
   expect(out).toContain("completed / deleted / settled");
   expect(replayBranch(branch as never[]).tasks).toHaveLength(2);
   expect(branch.filter((e: any) => e?.customType === "rpiv-todo-state").length).toBe(before);
 });
 
-it("F126 /vt clear all confirm 同样被拒，confirm 也不提供", async () => {
+it("F126 /vt clear all confirm is likewise rejected; confirm is not offered either", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const b = emptyBoard();
   b.tasks = [{ id: 1, subject: "done", status: "completed", statusSince: 1 }];
@@ -836,20 +836,20 @@ it("F126 /vt clear all confirm 同样被拒，confirm 也不提供", async () =>
 
   await h.runCommand("vt", "clear all confirm");
   const out = h.notifications.at(-1)!;
-  expect(out).toContain("clear all 不支持");
+  expect(out).toContain("clear all is not supported");
   expect(out).toContain("completed / deleted / settled");
   expect(replayBranch(branch as never[]).tasks).toHaveLength(1);
 });
 
-it("F127 board 含 pending/in_progress/parked 时 /vt clear 三者全保留，只清 completed+deleted", async () => {
+it("F127 with pending/in_progress/parked on the board, /vt clear keeps all three and clears only completed+deleted", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const b = emptyBoard();
   b.tasks = [
     { id: 1, subject: "done", status: "completed", statusSince: 1 },
     { id: 2, subject: "gone", status: "deleted", statusSince: 1 },
-    { id: 3, subject: "待办", status: "pending" },
-    { id: 4, subject: "在跑", status: "in_progress", inProgressSince: 0 },
-    { id: 5, subject: "等人", status: "parked", park: { reason: "等拍板", at: 1, from: "pending" } },
+    { id: 3, subject: "todo item", status: "pending" },
+    { id: 4, subject: "running task", status: "in_progress", inProgressSince: 0 },
+    { id: 5, subject: "waiting", status: "parked", park: { reason: "waiting decision", at: 1, from: "pending" } },
   ];
   b.nextId = 6;
   const branch: unknown[] = [snapshot(b)];
@@ -858,7 +858,7 @@ it("F127 board 含 pending/in_progress/parked 时 /vt clear 三者全保留，�
   await h.emit("session_start", { type: "session_start", reason: "startup" });
 
   await h.runCommand("vt", "clear");
-  expect(h.notifications.at(-1)).toContain("已清理 2");
+  expect(h.notifications.at(-1)).toContain("cleared 2 tasks");
   const replayed = replayBranch(branch as never[]).tasks;
   expect(replayed.map((t) => [t.id, t.status])).toEqual([
     [3, "pending"], [4, "in_progress"], [5, "parked"],
@@ -867,15 +867,15 @@ it("F127 board 含 pending/in_progress/parked 时 /vt clear 三者全保留，�
   expect(last.tasks.map((t: any) => t.id)).toEqual([3, 4, 5]);
 });
 
-it("parked / pending 在任何允许范围下都不被清", async () => {
+it("parked / pending are never cleared under any allowed scope", async () => {
   const run = async (scope: string) => {
     const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
     const b = emptyBoard();
     b.tasks = [
       { id: 1, subject: "done", status: "completed", statusSince: 1 },
       { id: 2, subject: "gone", status: "deleted", statusSince: 1 },
-      { id: 3, subject: "待办", status: "pending" },
-      { id: 4, subject: "等人", status: "parked", park: { reason: "等拍板", at: 1, from: "pending" } },
+      { id: 3, subject: "todo item", status: "pending" },
+      { id: 4, subject: "waiting", status: "parked", park: { reason: "waiting decision", at: 1, from: "pending" } },
     ];
     b.nextId = 5;
     const branch: unknown[] = [snapshot(b)];
@@ -892,7 +892,7 @@ it("parked / pending 在任何允许范围下都不被清", async () => {
   }
 });
 
-it("未知范围被拒并列出允许范围", async () => {
+it("Unknown scope is rejected and the allowed scopes are listed", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const b = emptyBoard();
   b.tasks = [{ id: 1, subject: "done", status: "completed", statusSince: 1 }];
@@ -903,12 +903,12 @@ it("未知范围被拒并列出允许范围", async () => {
   await h.emit("session_start", { type: "session_start", reason: "startup" });
   await h.runCommand("vt", "clear weird");
   const out = h.notifications.at(-1)!;
-  expect(out).toContain("clear weird 不支持");
+  expect(out).toContain("clear weird is not supported");
   expect(out).toContain("completed / deleted / settled");
   expect(replayBranch(branch as never[]).tasks).toHaveLength(1);
 });
 
-it("F128 清理后 catch-up 不再投影/补发已 purge 的链", async () => {
+it("F128 after cleanup, catch-up no longer projects/resends purged chains", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   setupJobs(cwd, [job({
     id: "R", taskId: 1, sessionId: "S", notifyState: "sent", notifySentAt: 0,
@@ -938,7 +938,7 @@ it("F128 清理后 catch-up 不再投影/补发已 purge 的链", async () => {
   expect(replayBranch(branch as never[]).tasks).toEqual([]);
 });
 
-it("F129 绑 running 作业的任务在任意范围跳过并在输出列出 id", async () => {
+it("F129 tasks bound to running jobs are skipped in any scope and their ids are listed in the output", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const stamp = readStartStamp(process.pid);
   setupJobs(cwd, [job({
@@ -948,7 +948,7 @@ it("F129 绑 running 作业的任务在任意范围跳过并在输出列出 id",
   })]);
   const b = emptyBoard();
   b.tasks = [
-    { id: 1, subject: "在跑", status: "completed", jobs: ["R"], statusSince: 1 },
+    { id: 1, subject: "running task", status: "completed", jobs: ["R"], statusSince: 1 },
     { id: 2, subject: "done", status: "completed", statusSince: 1 },
   ];
   b.nextId = 3;
@@ -959,25 +959,25 @@ it("F129 绑 running 作业的任务在任意范围跳过并在输出列出 id",
 
   await h.runCommand("vt", "clear completed");
   const out = h.notifications.at(-1)!;
-  expect(out).toContain("已清理 1");
+  expect(out).toContain("cleared 1 tasks");
   expect(out).toContain("#1");
   expect(out).toContain("running");
   expect(replayBranch(branch as never[]).tasks.map((t) => t.id)).toEqual([1]);
 });
 
-it("F130 无可清历史时明确提示，不静默", async () => {
+it("F130 explicitly reports when there is no history to clear, never silently", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const b = emptyBoard();
-  b.tasks = [{ id: 1, subject: "待办", status: "pending" }];
+  b.tasks = [{ id: 1, subject: "todo item", status: "pending" }];
   b.nextId = 2;
   const h = makeHarness(cwd, [snapshot(b)], true);
   vigilTodo(h.api);
   await h.emit("session_start", { type: "session_start", reason: "startup" });
   await h.runCommand("vt", "clear");
-  expect(h.notifications.at(-1)).toContain("没有可清理的历史任务");
+  expect(h.notifications.at(-1)).toContain("no history tasks to clear");
 });
 
-it("F132 /vt clear 与 /vigil-todo clear 行为完全一致", async () => {
+it("F132 /vt clear and /vigil-todo clear behave identically", async () => {
   const mk = async (name: string) => {
     const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
     const b = emptyBoard();
@@ -1001,14 +1001,14 @@ it("F132 /vt clear 与 /vigil-todo clear 行为完全一致", async () => {
   expect(a.tasks.map((t) => t.id)).toEqual([3]);
 });
 
-it("C4 halt 快捷键真实中断并落快照", async () => {
+it("C4 halt shortcut really halts and writes a snapshot", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   setupJobs(cwd, [job({
     id: "R", status: "failed", exitCode: 1, endedAt: 2, taskId: 1, sessionId: "S",
     retryAt: Date.now() + 60_000, finalized: false, evidenceApplied: true, finalResult: undefined,
   })]);
   const b = emptyBoard();
-  b.tasks = [{ id: 1, subject: "跑", status: "in_progress", jobs: ["R"], inProgressSince: 0 }];
+  b.tasks = [{ id: 1, subject: "run", status: "in_progress", jobs: ["R"], inProgressSince: 0 }];
   b.nextId = 2;
   const branch: unknown[] = [snapshot(b)];
   const h = makeHarness(cwd, branch, true);
@@ -1021,7 +1021,7 @@ it("C4 halt 快捷键真实中断并落快照", async () => {
   expect(last.tasks[0].status).toBe("parked");
 });
 
-it("C1/C3/C6：/vt 等价 /vigil-todo，无参数带快捷提示，命令描述自文档化", async () => {
+it("C1/C3/C6: /vt is equivalent to /vigil-todo; no args shows quick hints; command description is self-documenting", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const b = emptyBoard();
   b.tasks = [{ id: 1, subject: "a", status: "pending" }];
@@ -1036,20 +1036,20 @@ it("C1/C3/C6：/vt 等价 /vigil-todo，无参数带快捷提示，命令描述�
   expect((branch.filter((e: any) => e?.customType === "rpiv-todo-state") as any[]).at(-1)?.data.counters.halted).toBe(true);
   await h.runCommand("vt", "resume");
   await h.runCommand("vt", "");
-  expect(h.notifications.at(-1)).toContain("halt 停");
-  expect(h.notifications.at(-1)).toContain("resume 继续");
-  expect(h.notifications.at(-1)).toContain("clear 清理");
+  expect(h.notifications.at(-1)).toContain("halt stop");
+  expect(h.notifications.at(-1)).toContain("resume continue");
+  expect(h.notifications.at(-1)).toContain("clear purge");
   await h.runCommand("vigil-todo", "");
-  expect(h.notifications.at(-1)).toContain("doctor 自检");
+  expect(h.notifications.at(-1)).toContain("doctor self-check");
 
-  expect(h.commandDefs.get("vigil-todo").description).toContain("halt 立即停止");
+  expect(h.commandDefs.get("vigil-todo").description).toContain("halt stops all background work immediately");
   expect(h.commandDefs.get("vigil-todo").description).toContain("/vt");
   expect(h.commandDefs.get("vt").description).toContain("/vigil-todo");
   expect(h.commandDefs.get("todos").description).toContain("/bg");
   expect(h.commandDefs.get("bg").description).toContain("/bg k <id>");
 });
 
-it("C2 状态栏随看板刷新，空闲清空，shutdown 移除", async () => {
+it("C2 status bar refreshes with the board, clears when idle, removed at shutdown", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const b = emptyBoard();
   b.tasks = [
@@ -1081,10 +1081,10 @@ it("C2 状态栏随看板刷新，空闲清空，shutdown 移除", async () => {
   vigilTodo(h2.api);
   await h2.emit("session_start", { type: "session_start", reason: "startup" });
   expect(h2.statuses.at(-1)).toBe("vigil ● 1 job");
-  expect(vi.getTimerCount()).toBe(1);       // 状态栏复用既有 tick，不新增定时器
+  expect(vi.getTimerCount()).toBe(1);       // the status bar reuses the existing tick; no new timer
 });
 
-it("配置缺失/损坏/不可序列化 settings 时仍能启动", async () => {
+it("Starts even when config is missing, corrupt, or settings are unserializable", async () => {
   const broken = mkdtempSync(join(tmpdir(), "vigil-ext-cfg-"));
   mkdirSync(join(broken, "pi-kit"), { recursive: true });
   writeFileSync(join(broken, "pi-kit", "config.json"), "{broken");
@@ -1103,7 +1103,7 @@ it("配置缺失/损坏/不可序列化 settings 时仍能启动", async () => {
   expect(h2.toolDefs.size).toBe(4);
 });
 
-it("XDG 未设置时回退 HOME/.config", async () => {
+it("Falls back to HOME/.config when XDG is unset", async () => {
   const oldHome = process.env.HOME;
   const oldXdg = process.env.XDG_CONFIG_HOME;
   const home = mkdtempSync(join(tmpdir(), "vigil-ext-home-"));
@@ -1123,7 +1123,7 @@ it("XDG 未设置时回退 HOME/.config", async () => {
   }
 });
 
-it("非法 collapseKey 注册失败不致命", async () => {
+it("Invalid collapseKey registration failure is not fatal", async () => {
   const home = mkdtempSync(join(tmpdir(), "vigil-ext-cfg-"));
   mkdirSync(join(home, "pi-kit"), { recursive: true });
   writeFileSync(join(home, "pi-kit", "config.json"), JSON.stringify({ collapseKey: "!bad" }));
@@ -1136,7 +1136,7 @@ it("非法 collapseKey 注册失败不致命", async () => {
   expect(h.shortcuts.size).toBe(0);
 });
 
-it("sendMessage 抛错时 notify 并等待 catch-up", async () => {
+it("notify and wait for catch-up when sendMessage throws", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   setupJobs(cwd, [job({ id: "R", notifyState: "pending" })]);
   const b = emptyBoard();
@@ -1149,10 +1149,10 @@ it("sendMessage 抛错时 notify 并等待 catch-up", async () => {
   vigilTodo(h.api);
   await h.emit("session_start", { type: "session_start", reason: "startup" });
   expect(h.sent).toHaveLength(0);
-  expect(h.notifications.join("\n")).toContain("唤醒发送失败");
+  expect(h.notifications.join("\n")).toContain("wake send failed");
 });
 
-it("catch-up 达 maxTurns 不发；halted boundary 不续跑", async () => {
+it("catch-up does not send at maxTurns; halted boundary does not continue", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   setupJobs(cwd, [job({ id: "R", notifyState: "pending" })]);
   const b = emptyBoard();
@@ -1178,7 +1178,7 @@ it("catch-up 达 maxTurns 不发；halted boundary 不续跑", async () => {
   expect(await h2.emit("agent_before_settle", { type: "agent_before_settle" })).toBeUndefined();
 });
 
-it("spawn 失败时 bg_run 返回 isError", async () => {
+it("bg_run returns isError when spawn fails", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const b = emptyBoard();
   b.tasks = [{ id: 1, subject: "a", status: "pending" }];
@@ -1191,7 +1191,7 @@ it("spawn 失败时 bg_run 返回 isError", async () => {
   expect(r.isError).toBe(true);
 });
 
-it("halt 杀 running 作业（escalate 路径）", async () => {
+it("halt kills running jobs (escalate path)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const child = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
   const pid = child.pid!;
@@ -1219,7 +1219,7 @@ it("halt 杀 running 作业（escalate 路径）", async () => {
   }
 });
 
-it("shutdown 清理单 timer 与合并 timer", async () => {
+it("shutdown clears the single timer and merge timer", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   setupJobs(cwd, []);
   const b = emptyBoard();
@@ -1235,7 +1235,7 @@ it("shutdown 清理单 timer 与合并 timer", async () => {
   expect(vi.getTimerCount()).toBe(0);
 });
 
-it("A1 respawn 失败的 park 落入分支快照，重放读回 parked（磁盘级）", async () => {
+it("A1 respawn-failure park lands in the branch snapshot; replay reads back parked (disk level)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   setupJobs(cwd, [job({
     id: "R", rootId: "R", command: "", status: "failed", exitCode: 1, endedAt: 2,
@@ -1243,7 +1243,7 @@ it("A1 respawn 失败的 park 落入分支快照，重放读回 parked（磁盘�
     finalResult: undefined, taskId: 1, sessionId: "S",
   })]);
   const b = emptyBoard();
-  b.tasks = [{ id: 1, subject: "跑", status: "in_progress", jobs: ["R"], inProgressSince: 0 }];
+  b.tasks = [{ id: 1, subject: "run", status: "in_progress", jobs: ["R"], inProgressSince: 0 }];
   b.nextId = 2;
   const branch: unknown[] = [snapshot(b)];
   const h = makeHarness(cwd, branch, true);
@@ -1258,12 +1258,12 @@ it("A1 respawn 失败的 park 落入分支快照，重放读回 parked（磁盘�
   expect(store.get("R")?.retryAt).toBeUndefined();
 });
 
-it("A2 非 owner 残留作业退出：fpEnd 落盘（autofill/finalize 均 early-return）", async () => {
+it("A2 non-owner leftover job exit: fpEnd persisted (autofill/finalize both early-return)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   setupJobs(cwd, [job({
     id: "R", pid: 999_999, status: "running", endedAt: null, exitCode: null, exitCodeKnown: false,
     finalized: false, finalResult: undefined, taskId: undefined, sessionId: "OTHER",
-    cwd: process.cwd(), fpStart: "abc",     // 真实 git 工作区，fpEnd 可采集
+    cwd: process.cwd(), fpStart: "abc",     // real git workspace; fpEnd can be collected
   })]);
   const h = makeHarness(cwd, [snapshot(emptyBoard())], true, "S");
   vigilTodo(h.api);
@@ -1275,7 +1275,7 @@ it("A2 非 owner 残留作业退出：fpEnd 落盘（autofill/finalize 均 early
   expect(typeof store.get("R")?.fpEnd).toBe("string");
 });
 
-it("B3 shutdown 不杀作业（跨重启语义），但记录完整、下一实例可 halt 到进程消失", async () => {
+it("B3 shutdown does not kill jobs (cross-restart semantics), but records are complete; the next instance can halt until the process disappears", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const child = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
   const pid = child.pid!;
@@ -1291,7 +1291,7 @@ it("B3 shutdown 不杀作业（跨重启语义），但记录完整、下一实�
     await h.emit("session_start", { type: "session_start", reason: "startup" });
     await h.emit("session_shutdown", { type: "session_shutdown", reason: "quit" });
 
-    // 不是孤儿：仍由 sidecar 的 pid + startStamp 跟踪
+    // not an orphan: still tracked by the sidecar's pid + startStamp
     expect(() => process.kill(pid, 0)).not.toThrow();
     const store = createJobStore(runDir(cwd));
     store.load();
@@ -1310,7 +1310,7 @@ it("B3 shutdown 不杀作业（跨重启语义），但记录完整、下一实�
   }
 });
 
-it("finalizeTerminated 对 killed 链写 note=killed", async () => {
+it("finalizeTerminated writes note=killed for a killed chain", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   setupJobs(cwd, [job({
     id: "R", status: "killed", exitCode: null, exitCodeKnown: false, endedAt: 2,

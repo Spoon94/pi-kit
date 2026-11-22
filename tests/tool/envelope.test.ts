@@ -9,25 +9,25 @@ const list = (params: Record<string, unknown>, state = board([
   { id: 3, subject: "c", status: "deleted" },
 ])) => buildResult({ action: "list", ...params }, state, { kind: "list" }).content[0].text;
 
-it("拒绝带 isError 与 details.error（F29）", () => {
+it("Rejects with isError and details.error (F29)", () => {
   const r = buildResult({ action: "update", id: 1 }, emptyBoard(), { kind: "error", message: "boom" });
   expect(r.isError).toBe(true);
   expect(r.details.error).toBe("boom");
   expect(r.content[0].text).toContain("boom");
 });
 
-it("成功不带 isError，details 含 counters", () => {
+it("Success has no isError and details contains counters", () => {
   const r = buildResult({ action: "create", subject: "a" }, emptyBoard(), { kind: "create", ids: [1] });
   expect(r.isError).toBeUndefined();
   expect(r.details.counters).toEqual({ turnsUsed: 0, wakeWatermark: 0, renudgeBudget: 0 });
 });
 
-describe("F112/F113 list 过滤", () => {
-  it("默认隐藏 deleted，includeDeleted 才显示", () => {
+describe("F112/F113 list filtering", () => {
+  it("Deleted hidden by default; shown only with includeDeleted", () => {
     expect(list({})).not.toContain("#3");
     expect(list({ includeDeleted: true })).toContain("#3");
   });
-  it("status 过滤生效，可与 includeDeleted 组合", () => {
+  it("status filter works and combines with includeDeleted", () => {
     expect(list({ status: "completed" })).toContain("#2");
     expect(list({ status: "completed" })).not.toContain("#1");
     expect(list({ status: "deleted" })).toBe("No tasks");
@@ -36,8 +36,8 @@ describe("F112/F113 list 过滤", () => {
   });
 });
 
-describe("F114 get 完整详情", () => {
-  it("含 description/owner/verify/blockedBy/blocks/evidence/lastFailure/park", () => {
+describe("F114 get full details", () => {
+  it("Includes description/owner/verify/blockedBy/blocks/evidence/lastFailure/park", () => {
     const state = board([
       {
         id: 1, subject: "x", status: "parked", description: "the description", owner: "me",
@@ -58,7 +58,7 @@ describe("F114 get 完整详情", () => {
     ]) expect(text, needle).toContain(needle);
   });
 
-  it("最小任务只输出首行；证据变体与只读时间字段", () => {
+  it("Minimal task prints only the first line; evidence variants and read-only time fields", () => {
     const minimal: Task = { id: 1, subject: "x", status: "in_progress" };
     expect(buildResult({ action: "get", id: 1 }, board([minimal]), { kind: "get", task: minimal }).content[0].text)
       .toBe("#1 [in_progress] x");
@@ -82,7 +82,7 @@ describe("F114 get 完整详情", () => {
     expect(text).not.toContain("at=3 note=");
   });
 
-  it("action 缺省与 update 文案分支", () => {
+  it("action omitted and update message branches", () => {
     expect(buildResult({}, emptyBoard(), { kind: "list" }).content[0].text).toBe("No tasks");
     const state = board([{ id: 1, subject: "a", status: "pending" }]);
     expect(buildResult({ action: "update", id: 1 }, state,

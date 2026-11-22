@@ -1,4 +1,4 @@
-/** 统一的耗时格式：s / m s / h m。 */
+/** Uniform elapsed-time format: s / m s / h m. */
 export function formatElapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
   if (total < 60) return `${total}s`;

@@ -13,7 +13,7 @@ const ctx = (): RuleContext => ({
   facts: { hasRunning: () => false, hasBackoff: () => false, startedAt: () => undefined, exists: () => true },
 });
 
-it("200 任务下 mutation p95 中位数 < 3ms（5 批 × 1000，预热后）", () => {
+it("with 200 tasks, median mutation p95 < 3ms (5 batches × 1000, after warmup)", () => {
   let s = emptyBoard();
   for (let i = 0; i < 200; i++) s = applyMutation(s, { action: "create", subject: `t${i}` }, ctx()).state;
   const batchP95 = (): number => {
@@ -26,14 +26,14 @@ it("200 任务下 mutation p95 中位数 < 3ms（5 批 × 1000，预热后）", 
     times.sort((a, b) => a - b);
     return times[Math.floor(times.length * 0.95)];
   };
-  // JIT 预热，丢弃前两批
+  // JIT warmup: discard the first two batches
   for (let i = 0; i < 2; i++) batchP95();
-  // 5 批 p95 取中位数，降低单次调度尖峰敏感度
+  // take the median of 5 batch p95s to reduce sensitivity to one-off scheduling spikes
   const batches = Array.from({ length: 5 }, () => batchP95()).sort((a, b) => a - b);
   expect(batches[2]).toBeLessThan(3);
 });
 
-it("1 万条分支 replay < 30ms", () => {
+it("replaying 10k branch entries < 30ms", () => {
   const snap = { action: "update", params: {}, tasks: [{ id: 1, subject: "a", status: "pending" }], nextId: 2 };
   const entries = Array.from({ length: 10_000 }, () => ({ type: "custom", customType: "rpiv-todo-state", data: snap }));
   const t0 = performance.now();
@@ -41,7 +41,7 @@ it("1 万条分支 replay < 30ms", () => {
   expect(performance.now() - t0).toBeLessThan(30);
 });
 
-it("100MB 日志取 20 行 < 5ms（只读尾部）", () => {
+it("reading 20 lines from a 100MB log < 5ms (tail only)", () => {
   const p = join(mkdtempSync(join(tmpdir(), "{{SECRET_f1k8q2zd}}")), "huge.log");
   writeFileSync(p, Buffer.alloc(100 * 1024 * 1024, "x"));
   writeFileSync(p, "\nlast line\n", { flag: "a" });

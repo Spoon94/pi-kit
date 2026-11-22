@@ -5,27 +5,27 @@ import { expect, it } from "vitest";
 import { createSaveCoalescer, withCoalescedSave } from "../../src/jobs/coalesce.js";
 import { createJobStore } from "../../src/jobs/store.js";
 
-it("批次内多次 save 合并为一次同步写", () => {
+it("multiple saves within a batch coalesce into one synchronous write", () => {
   let writes = 0;
   const c = createSaveCoalescer(() => { writes++; });
   c.begin(); c.save(); c.save(); c.save();
   expect(writes).toBe(0);
   c.end();
   expect(writes).toBe(1);
-  c.end();                                  // 多余的 end 不写
+  c.end();                                  // extra end does not write
   expect(writes).toBe(1);
 });
 
-it("批次外 save 保持同步落盘（durability 不变）", () => {
+it("save outside a batch still writes synchronously (durability unchanged)", () => {
   let writes = 0;
   const c = createSaveCoalescer(() => { writes++; });
   c.save();
   expect(writes).toBe(1);
-  c.flush();                                // 无 dirty，不重复写
+  c.flush();                                // no dirty state, no duplicate write
   expect(writes).toBe(1);
 });
 
-it("嵌套批次只在最外层结束时落盘", () => {
+it("nested batches write only when the outermost batch ends", () => {
   let writes = 0;
   const c = createSaveCoalescer(() => { writes++; });
   c.begin(); c.begin(); c.save(); c.end();
@@ -34,7 +34,7 @@ it("嵌套批次只在最外层结束时落盘", () => {
   expect(writes).toBe(1);
 });
 
-it("写失败保留 dirty，下次 flush 重试", () => {
+it("a failed write keeps dirty so the next flush retries", () => {
   let writes = 0;
   const c = createSaveCoalescer(() => { writes++; if (writes === 1) throw new Error("disk"); });
   expect(() => c.save()).toThrow("disk");
@@ -44,7 +44,7 @@ it("写失败保留 dirty，下次 flush 重试", () => {
   expect(writes).toBe(2);
 });
 
-it("withCoalescedSave 只替换 save，其他方法保持原行为", () => {
+it("withCoalescedSave replaces only save; other methods keep their behavior", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "vigil-coalesce-")));
   let writes = 0;
   const c = createSaveCoalescer(() => { writes++; });

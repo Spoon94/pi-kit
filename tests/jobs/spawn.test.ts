@@ -7,13 +7,13 @@ import { createMonitor } from "../../src/jobs/monitor.js";
 
 const dir = () => mkdtempSync(join(tmpdir(), "vigil-spawn-"));
 
-it("记录 cwd 与 startStamp，退出码真实（F48 基础）", async () => {
+it("records cwd and startStamp; exit code is real (F48 basics)", async () => {
   const d = dir();
   const r = spawnJob({ command: "pwd", cwd: d }, d, 1);
   expect(r.ok).toBe(true);
   if (!r.ok) return;
   expect(r.job.cwd).toBe(d);
-  expect(r.job.exitCodeKnown).toBe(false);   // 尚未退出
+  expect(r.job.exitCodeKnown).toBe(false);   // not yet exited
   expect(r.job.rootId).toBe(r.job.id);
   const mon = createMonitor();
   const code = await new Promise<number | null>((res) => mon.watch(r.job, (j) => res(j.exitCode)));
@@ -22,7 +22,7 @@ it("记录 cwd 与 startStamp，退出码真实（F48 基础）", async () => {
   mon.clearAll();
 });
 
-it("失败命令得到非零真实退出码", async () => {
+it("a failing command yields a real non-zero exit code", async () => {
   const d = dir();
   const r = spawnJob({ command: "exit 7", cwd: d }, d, 1);
   if (!r.ok) throw new Error(r.error);
@@ -34,26 +34,26 @@ it("失败命令得到非零真实退出码", async () => {
   mon.clearAll();
 });
 
-it("空命令直接失败，不产生 job", () => {
+it("empty command fails immediately and produces no job", () => {
   const d = dir();
   expect(spawnJob({ command: "   ", cwd: d }, d, 1).ok).toBe(false);
 });
 
-it("fpStart 由调用方在 spawn 前采集并原样记录（BLOCKER）", () => {
+it("fpStart is captured by the caller before spawn and recorded verbatim (BLOCKER)", () => {
   const d = dir();
   const r = spawnJob({ command: "true", cwd: d, fpStart: "PRE-SPAWN" }, d, 1);
   if (!r.ok) throw new Error(r.error);
   expect(r.job.fpStart).toBe("PRE-SPAWN");
 });
 
-it("无效 cwd 只返回错误，不产生未处理 error 事件（BLOCKER）", async () => {
+it("invalid cwd returns an error only, without an unhandled error event (BLOCKER)", async () => {
   const d = dir();
   const r = spawnJob({ command: "true", cwd: "/nonexistent-vigil-cwd" }, d, 1);
   expect(r.ok).toBe(false);
   await new Promise((res) => setTimeout(res, 50));
 });
 
-it("B3 登记失败即放弃子进程（异常路径不产生无主进程）", () => {
+it("B3 abandons the child process when registration fails (exception path leaves no orphan process)", () => {
   const d = dir();
   const r = spawnJob({ command: "sleep 30", cwd: d }, d, 1);
   if (!r.ok) throw new Error(r.error);
@@ -70,14 +70,14 @@ it("B3 登记失败即放弃子进程（异常路径不产生无主进程）", (
   expect(abandoned).toEqual([r.job.id]);
   expect(watched).toBe(false);
   takeChild(r.job.id);
-  if (r.child.pid) { try { process.kill(-r.child.pid, "SIGKILL"); } catch { /* 已清理 */ } }
+  if (r.child.pid) { try { process.kill(-r.child.pid, "SIGKILL"); } catch { /* already cleaned up */ } }
 });
 
-it("readStartStamp 对无效 pid 返回 undefined", () => {
+it("readStartStamp returns undefined for an invalid pid", () => {
   expect(readStartStamp(999_999)).toBeUndefined();
 });
 
-it("缺省 label 用命令前缀；日志目录不可写时返回错误", () => {
+it("default label uses the command prefix; an unwritable log directory returns an error", () => {
   const d = dir();
   const r = spawnJob({ command: "echo hi", cwd: d }, d, 1);
   if (!r.ok) throw new Error(r.error);

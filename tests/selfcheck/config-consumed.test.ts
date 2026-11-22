@@ -15,7 +15,7 @@ const walk = (dir: string): string[] => {
   return out;
 };
 
-/** 剥掉 // 行注释与 /* *\/ 块注释后再匹配，避免“注释里写了键名”被当作消费。 */
+/** Strip // line comments and /* *\/ block comments before matching, so a key name in a comment is not treated as consumption. */
 const stripComments = (s: string): string =>
   s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/[^\n]*/g, "$1");
 
@@ -24,14 +24,14 @@ const unusedKeys = (files: string[], keys: string[]): string[] => {
   return keys.filter((key) => !new RegExp(`\\b${key}\\b`).test(corpus));
 };
 
-it("CONFIG_KEYS 每个键都在 src/ 或 extensions/ 被真实消费（排除 config.ts 定义处）", () => {
+it("every CONFIG_KEYS key is really consumed in src/ or extensions/ (excluding its definition in config.ts)", () => {
   const configFile = join(ROOT, "src/lib/config.ts");
   const files = [...walk(join(ROOT, "src")), ...walk(join(ROOT, "extensions"))]
     .filter((f) => f !== configFile);
   expect(unusedKeys(files, Object.keys(CONFIG_KEYS))).toEqual([]);
 });
 
-it("注释里的键名不算消费（反例，MINOR）", () => {
+it("a key name in a comment does not count as consumption (counterexample, MINOR)", () => {
   const dir = mkdtempSync(join(tmpdir(), "vigil-cfg-scan-"));
   const f = join(dir, "x.ts");
   writeFileSync(f, "// wipLimit\n/* maxTurns */\nconst used = 1;\n");

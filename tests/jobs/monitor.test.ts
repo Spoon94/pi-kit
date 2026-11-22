@@ -13,7 +13,7 @@ const base = (o: Partial<Job> = {}): Job => ({
   evidenceApplied: false, notifyState: "pending", ...o,
 });
 
-it("同一 job 的 exit 与 close 只回调一次（F31 / Review Focus 3）", async () => {
+it("exit and close for the same job call back only once (F31 / Review Focus 3)", async () => {
   const mon = createMonitor();
   let calls = 0;
   const j = base();
@@ -25,7 +25,7 @@ it("同一 job 的 exit 与 close 只回调一次（F31 / Review Focus 3）", as
   mon.clearAll();
 });
 
-it("终结后释放 per-job 登记：late duplicate 仍被忽略（B1/F31）", () => {
+it("per-job registration is released after termination: late duplicates are still ignored (B1/F31)", () => {
   const mon = createMonitor();
   let calls = 0;
   const j = base();
@@ -34,12 +34,12 @@ it("终结后释放 per-job 登记：late duplicate 仍被忽略（B1/F31）", (
   mon.__emitForTest(j.id, 0);
   expect(calls).toBe(1);
   expect(mon.pending()).toBe(0);
-  mon.__emitForTest(j.id, 0);          // close/error 双触发晚到
+  mon.__emitForTest(j.id, 0);          // late close/error double trigger
   expect(calls).toBe(1);
   mon.clearAll();
 });
 
-it("watch 收到已退出的 child ⇒ microtask 内回调一次", async () => {
+it("watch with an already-exited child → callback fires once within a microtask", async () => {
   const mon = createMonitor();
   let calls = 0;
   const fake = { exitCode: 0, signalCode: null, once: () => {}, off: () => {}, unref: () => {} };
@@ -50,7 +50,7 @@ it("watch 收到已退出的 child ⇒ microtask 内回调一次", async () => {
   mon.clearAll();
 });
 
-it("恢复态不伪造退出码（F5）", () => {
+it("recovered state does not fake an exit code (F5)", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "vigil-rec-")));
   s.put(base());
   recoverJobs(s, 1000);
@@ -61,14 +61,14 @@ it("恢复态不伪造退出码（F5）", () => {
   expect(j.endedAt).toBe(1000);
 });
 
-it("recoverJobs 返回改动条数，无变化为 0（P2 落盘守卫）", () => {
+it("recoverJobs returns the number of changes, 0 when nothing changes (P2 write guard)", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "vigil-rec-")));
   s.put(base());
   expect(recoverJobs(s, 1000)).toBe(1);
   expect(recoverJobs(s, 2000)).toBe(0);
 });
 
-it("recoveredExit：进程消失 ⇒ 终态且退出码未知（单 timer 探活）", () => {
+it("recoveredExit: process gone → terminal state with unknown exit code (single liveness timer)", () => {
   const j = base({ pid: 999_999, status: "running", endedAt: null });
   const out = recoveredExit(j, 1000);
   expect(out?.status).toBe("failed");
@@ -76,13 +76,13 @@ it("recoveredExit：进程消失 ⇒ 终态且退出码未知（单 timer 探活
   expect(out?.endedAt).toBe(1000);
 });
 
-it("recoveredExit：pid 存活但 startStamp 变化视为消失（pid 复用）", () => {
+it("recoveredExit: pid alive but startStamp changed counts as gone (pid reuse)", () => {
   const j = base({ pid: process.pid, startStamp: "old", status: "running", endedAt: null });
   expect(recoveredExit(j, 1000, () => "new")?.status).toBe("failed");
   expect(recoveredExit(j, 1000, () => "old")).toBeUndefined();
 });
 
-it("无 child 的 watch 不再创建每作业 3s timer", () => {
+it("watch without a child no longer creates a 3s timer per job", () => {
   vi.useFakeTimers();
   try {
     const mon = createMonitor();

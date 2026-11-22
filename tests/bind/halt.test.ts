@@ -27,14 +27,14 @@ const j = (id: string, o: Partial<Job> = {}): Job => ({
 beforeEach(() => {
   boards = createBoardStore(); jobs = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_h2q7w9ae}}")));
   const b = emptyBoard();
-  b.tasks = [{ id: 1, subject: "训练", status: "in_progress", inProgressSince: 0, jobs: ["A"] },
-             { id: 2, subject: "别的", status: "pending" }];
+  b.tasks = [{ id: 1, subject: "training", status: "in_progress", inProgressSince: 0, jobs: ["A"] },
+             { id: 2, subject: "other", status: "pending" }];
   b.nextId = 3; boards.commit("S", b);
   killed = [];
   d = { boards, jobs, now: 1000, sessionId: "S", kill: (id) => { killed.push(id); }, notify: () => {} };
 });
 
-it("halt 置 halted 并落快照（跨重启保持）", () => {
+it("halt sets halted and writes a snapshot (survives restarts)", () => {
   jobs.put(j("A"));
   halt(d);
   expect(isHalted(boards.get("S"))).toBe(true);
@@ -42,7 +42,7 @@ it("halt 置 halted 并落快照（跨重启保持）", () => {
   expect(replayBranch([{ type: "custom", customType: "rpiv-todo-state", data: snap }]).counters.halted).toBe(true);
 });
 
-it("halt 杀本会话作业并清退避（全局取消）", () => {
+it("halt kills this session's jobs and clears backoff (global cancel)", () => {
   jobs.put(j("A")); jobs.put(j("B", { status: "failed", exitCode: 1, endedAt: 2, retryAt: 5000, taskId: 2 }));
   const r = halt(d);
   expect(killed.sort()).toEqual(["A", "B"]);
@@ -50,29 +50,29 @@ it("halt 杀本会话作业并清退避（全局取消）", () => {
   expect(r.killed).toBe(2);
 });
 
-it("halt 不杀别的会话的作业（项目共享边界）", () => {
+it("halt does not kill another session's jobs (project-sharing boundary)", () => {
   jobs.put(j("A")); jobs.put(j("OTHER", { sessionId: "OTHER" }));
   halt(d);
   expect(killed).toEqual(["A"]);
 });
 
-it("受影响任务 parked 且不写 lastFailure", () => {
+it("affected tasks are parked without writing lastFailure", () => {
   jobs.put(j("A"));
   halt(d);
   const t = boards.get("S").tasks[0];
   expect(t.status).toBe("parked");
-  expect(t.park?.reason).toContain("强制中断");
+  expect(t.park?.reason).toContain("halted by user");
   expect(t.park?.by).toBe("halt");
   expect(t.lastFailure).toBeUndefined();
 });
 
-it("halt 幂等，重复调用只补杀残留", () => {
+it("halt is idempotent; repeated calls only reap leftovers", () => {
   jobs.put(j("A"));
   expect(halt(d).alreadyHalted).toBe(false);
   expect(halt(d).alreadyHalted).toBe(true);
 });
 
-it("halted 时 tryDeliver 第一行返回 none（早于 maxTurns）", () => {
+it("while halted, tryDeliver returns none on the first line (before maxTurns)", () => {
   jobs.put(j("A", { status: "completed", exitCode: 0, exitCodeKnown: true, endedAt: 2, finalized: true, evidenceApplied: true }));
   const b = boards.get("S");
   b.tasks[0].evidence = [{ ok: true, kind: "job", origin: "async", chainFinal: true, at: 500, known: true, fp: "fresh", ref: "A" }];
@@ -82,7 +82,7 @@ it("halted 时 tryDeliver 第一行返回 none（早于 maxTurns）", () => {
   expect(tryDeliver({ board: boards.get("S"), jobs, cfg: DEFAULTS, now: 2000, trigger: "async", modelAdvanced: true, capacityFull: false }).kind).toBe("none");
 });
 
-it("halted 时 sweepRespawns 不 respawn（复活防护）", () => {
+it("while halted, sweepRespawns does not respawn (resurrection guard)", () => {
   jobs.put(j("A", { status: "failed", exitCode: 1, endedAt: 2, retryAt: 100 }));
   halt(d);
   let calls = 0;
@@ -91,13 +91,13 @@ it("halted 时 sweepRespawns 不 respawn（复活防护）", () => {
   expect(calls).toBe(0);
 });
 
-it("halted 时 catchUpScan 为空（复活防护）", () => {
+it("while halted, catchUpScan is empty (resurrection guard)", () => {
   jobs.put(j("A", { status: "completed", exitCode: 0, endedAt: 2, finalized: true, evidenceApplied: true, notifyState: "sent", notifySentAt: 0 }));
   halt(d);
   expect(catchUpScan({ boards, jobs, cfg: DEFAULTS, now: 900_000, sessionId: "S", respawn: () => ({ ok: true }), notify: () => {}, isIdle: () => true })).toEqual([]);
 });
 
-it("resume 解除 halted 但不重置 turnsUsed（不得绕过保险丝）", () => {
+it("resume clears halted but does not reset turnsUsed (must not bypass the fuse)", () => {
   const b = boards.get("S"); b.counters.turnsUsed = 49; boards.commit("S", b);
   halt(d);
   expect(resume(d)).toBe(true);
@@ -105,16 +105,16 @@ it("resume 解除 halted 但不重置 turnsUsed（不得绕过保险丝）", () 
   expect(boards.get("S").counters.turnsUsed).toBe(49);
 });
 
-it("未 halted 时 resume 返回 false", () => {
+it("resume returns false when not halted", () => {
   expect(resume(d)).toBe(false);
 });
 
-it("resume 把 halt parked 恢复为 pending，模型 park 的任务不动", () => {
+it("resume restores halt-parked tasks to pending and leaves model-parked tasks alone", () => {
   jobs.put(j("A"));
   const b = boards.get("S");
   b.tasks[1] = {
-    id: 2, subject: "模型决定", status: "parked",
-    park: { reason: "需要人拍板", at: 5, from: "pending" },
+    id: 2, subject: "model decision", status: "parked",
+    park: { reason: "needs a decision", at: 5, from: "pending" },
   };
   b.tasks[0] = { ...b.tasks[0], inProgressSince: 0 };
   boards.commit("S", b);
@@ -130,11 +130,11 @@ it("resume 把 halt parked 恢复为 pending，模型 park 的任务不动", () 
   expect(tasks[0].inProgressSince).toBeUndefined();
   expect(tasks[0].statusSince).toBe(1000);
   expect(tasks[1].status).toBe("parked");
-  expect(tasks[1].park?.reason).toBe("需要人拍板");
-  expect(note).toContain("1 个中断任务回到 pending");
+  expect(tasks[1].park?.reason).toBe("needs a decision");
+  expect(note).toContain("1 halted tasks back to pending");
 });
 
-it("多个 halt 任务全回 pending；resume 幂等；WIP 仍受约束；halt 快照可重放", () => {
+it("multiple halt tasks all return to pending; resume is idempotent; WIP still holds; halt snapshot replays", () => {
   const b = boards.get("S");
   b.tasks = [
     { id: 1, subject: "a", status: "in_progress", inProgressSince: 0, jobs: ["A"] },
@@ -159,13 +159,13 @@ it("多个 halt 任务全回 pending；resume 幂等；WIP 仍受约束；halt �
   expect(after.tasks.filter((t) => t.status === "in_progress")).toHaveLength(0);
   expect(after.tasks.every((t) => t.park === undefined)).toBe(true);
   expect(after.counters.halted).toBeUndefined();
-  expect(selectNext(after, 1, false)?.id).toBe(1);      // 一次只交回一个 next，WIP 不被突破
+  expect(selectNext(after, 1, false)?.id).toBe(1);      // hand back only one next at a time, never breaking WIP
 
-  expect(resume(d)).toBe(false);                        // 幂等
+  expect(resume(d)).toBe(false);                        // idempotent
   expect(boards.get("S").tasks.every((t) => t.status === "pending")).toBe(true);
 });
 
-it("resume 达轮数上限时文案说明不会推进（MINOR）", () => {
+it("resume at the turn limit says it will not advance (MINOR)", () => {
   const b = boards.get("S");
   b.counters.turnsUsed = DEFAULTS.maxTurns;
   boards.commit("S", b);
@@ -173,15 +173,15 @@ it("resume 达轮数上限时文案说明不会推进（MINOR）", () => {
   d.notify = (n) => { note = n; };
   halt(d);
   expect(resume(d)).toBe(true);
-  expect(note).toContain("达轮数上限");
-  expect(note).toContain("发任意消息归零");
+  expect(note).toContain("Turn limit reached");
+  expect(note).toContain("send any message to reset it");
 });
 
-it("halt 后崩溃残留作业由启动 sweep 补杀", () => {
+it("leftover jobs after a halt crash are reaped by startup sweep", () => {
   jobs.put(j("A"));
   halt(d);
   killed.length = 0;
-  jobs.put(j("A"));                       // 模拟崩溃后 sidecar 仍是 running
+  jobs.put(j("A"));                       // simulate the sidecar still saying running after a crash
   expect(reapHaltedLeftovers(d)).toBe(1);
   expect(killed).toEqual(["A"]);
 });

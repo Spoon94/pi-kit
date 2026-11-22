@@ -25,29 +25,29 @@ beforeEach(() => {
   b.nextId = 2; boards.commit("S", b);
 });
 
-it("链未终结时不 finalize", () => {
+it("does not finalize while the chain is not terminated", () => {
   jobs.put(j("R", { status: "running", endedAt: null }));
   expect(finalizeChain("R", jobs, 10, "x", false)).toBe(false);
 });
 
-it("终结后 finalize 幂等，重复调用仍恰一条（F82）", () => {
+it("finalize is idempotent after termination and repeated calls still yield exactly one (F82)", () => {
   jobs.put(j("R"));
-  expect(finalizeChain("R", jobs, 10, "6 次均失败", false)).toBe(true);
+  expect(finalizeChain("R", jobs, 10, "failed after 6 attempts", false)).toBe(true);
   expect(finalizeChain("R", jobs, 20, "again", false)).toBe(false);
-  expect(jobs.get("R")?.finalResult?.note).toBe("6 次均失败");
+  expect(jobs.get("R")?.finalResult?.note).toBe("failed after 6 attempts");
 });
 
-it("投影产生唯一 chainFinal 证据（F87）", () => {
+it("projection produces a single chainFinal evidence (F87)", () => {
   jobs.put(j("R"));
   finalizeChain("R", jobs, 10, "done", true);
   expect(projectFinal("R", jobs, boards, "S", 30)).toBe(true);
   const ev = boards.get("S").tasks[0].evidence ?? [];
   expect(ev.filter((e) => e.chainFinal)).toHaveLength(1);
-  expect(ev[0].at).toBe(30);                       // R8-5：投影时刻
+  expect(ev[0].at).toBe(30);                       // R8-5: projection time
   expect(projectFinal("R", jobs, boards, "S", 40)).toBe(false);
 });
 
-it("evidence 环形溢出后仍不重复投影（F83）", () => {
+it("evidence ring overflow still does not project twice (F83)", () => {
   jobs.put(j("R"));
   finalizeChain("R", jobs, 10, "done", true);
   projectFinal("R", jobs, boards, "S", 30);
@@ -60,21 +60,21 @@ it("evidence 环形溢出后仍不重复投影（F83）", () => {
   expect(projectFinal("R", jobs, boards, "S", 200)).toBe(false);
 });
 
-it("别的会话不写 owner board（F84）", () => {
+it("another session does not write the owner board (F84)", () => {
   jobs.put(j("R"));
   finalizeChain("R", jobs, 10, "done", true);
   expect(projectFinal("R", jobs, boards, "OTHER", 30)).toBe(false);
   expect(boards.get("S").tasks[0].evidence ?? []).toHaveLength(0);
 });
 
-it("trigger 从 sidecar 的 kill.requestedBy 读取（F81/F86）", () => {
+it("trigger is read from the sidecar's kill.requestedBy (F81/F86)", () => {
   jobs.put(j("R", { status: "killed", kill: { requestedBy: "self", at: 5 } }));
   finalizeChain("R", jobs, 10, "killed", false);
   projectFinal("R", jobs, boards, "S", 30);
   expect(boards.get("S").tasks[0].evidence?.[0].trigger).toBe("self");
 });
 
-it("无 job 记录的终结路径也能合成证据（F77/F78）", () => {
+it("a terminal path with no job record can still synthesize evidence (F77/F78)", () => {
   jobs.put(j("R", { status: "failed", retryAt: undefined }));
   const r = finalizeAndProject("R", jobs, boards, "S", 50, "spawn failed", false);
   expect(r.finalized).toBe(true);
@@ -82,7 +82,7 @@ it("无 job 记录的终结路径也能合成证据（F77/F78）", () => {
   expect(boards.get("S").tasks[0].evidence?.[0].ref).toBe("R");
 });
 
-it("迟投影 at=now 不被 watermark 遮蔽（F91）", () => {
+it("late projection at=now is not hidden by the watermark (F91)", () => {
   jobs.put(j("R"));
   finalizeChain("R", jobs, 10, "done", true);
   const b = boards.get("S"); b.counters.wakeWatermark = 100; boards.commit("S", b);
@@ -90,7 +90,7 @@ it("迟投影 at=now 不被 watermark 遮蔽（F91）", () => {
   expect(boards.get("S").tasks[0].evidence?.[0].at).toBe(200);
 });
 
-it("投影读末次 job 的退出码/指纹（重试成功不显示 exit 1）（BLOCKER）", () => {
+it("projection reads the last job's exit code/fingerprint (a successful retry must not show exit 1) (BLOCKER)", () => {
   jobs.put(j("R", { status: "failed", exitCode: 1, endedAt: 2 }));
   jobs.put(j("R2", { id: "R2", rootId: "R", retryOf: "R", status: "completed", exitCode: 0, endedAt: 10, fpVerdict: "fresh" }));
   finalizeChain("R", jobs, 20, "done", true);
@@ -101,7 +101,7 @@ it("投影读末次 job 的退出码/指纹（重试成功不显示 exit 1）（
   expect(ev?.fp).toBe("fresh");
 });
 
-it("重验成功生成 reverified 标记并投影 fresh（BLOCKER）", () => {
+it("a successful reverify produces a reverified note and projects fresh (BLOCKER)", () => {
   jobs.put(j("R", { status: "completed", exitCode: 0, endedAt: 2, fpVerdict: "stale" }));
   jobs.put(j("R2", { id: "R2", rootId: "R", retryOf: "R", staleReverifyOf: "R",
     status: "completed", exitCode: 0, endedAt: 10, fpVerdict: "fresh" }));
@@ -113,7 +113,7 @@ it("重验成功生成 reverified 标记并投影 fresh（BLOCKER）", () => {
   expect(ev?.note).toContain("reverified");
 });
 
-it("F123 finalizeAndProject 合并为一次落盘，重复调用零落盘（P2）", () => {
+it("F123 finalizeAndProject merges into one save and repeated calls save nothing (P2)", () => {
   jobs.put(j("R"));
   let saves = 0;
   const save = jobs.save.bind(jobs);
@@ -124,7 +124,7 @@ it("F123 finalizeAndProject 合并为一次落盘，重复调用零落盘（P2�
   expect(saves).toBe(1);
 });
 
-it("同毫秒终结时按链写入顺序取末次 job（MAJOR #4）", () => {
+it("same-millisecond termination uses the last job in chain write order (MAJOR #4)", () => {
   jobs.put(j("R", { status: "failed", exitCode: 1, endedAt: 2 }));
   jobs.put(j("R2", { id: "R2", rootId: "R", retryOf: "R", status: "completed", exitCode: 0, endedAt: 2, fpVerdict: "fresh" }));
   finalizeChain("R", jobs, 20, "done", true);

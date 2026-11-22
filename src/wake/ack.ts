@@ -2,7 +2,7 @@ import type { BoardCounters } from "../board/types.js";
 import type { JobStore } from "../jobs/store.js";
 import { WAKE_CUSTOM_TYPE } from "./compose.js";
 
-/** 只写 root 记录（规格 §5.3 类型约束）。 */
+/** Write root records only (spec §5.3 type constraint). */
 export function markSent(jobs: JobStore, roots: string[], wakeId: string, now: number): void {
   for (const id of roots) {
     const j = jobs.get(id);
@@ -38,7 +38,8 @@ export function ackPendingBoundary(jobs: JobStore, sessionId: string): number {
 export const resetOnUserInput = (c: BoardCounters): BoardCounters => ({ ...c, turnsUsed: 0 });
 export const clearRenudgeOnSettled = (c: BoardCounters): BoardCounters => ({ ...c, renudgeBudget: 0 });
 
-/** boundary 投递后等待紧随的 agent_start；entries 被丢弃则永远等不到 ⇒ 留 sent 由 catch-up 兜。 */
+/** After boundary delivery, wait for the immediately following agent_start; if entries are
+ *  dropped, it never comes ⇒ leave sent for catch-up to cover. */
 export function createAckTracker() {
   let pendingBoundary: { wakeId: string; roots: string[] } | undefined;
   return {
@@ -49,7 +50,7 @@ export function createAckTracker() {
       pendingBoundary = undefined;
       return ackByWakeId(jobs, wakeId);
     },
-    /** 无续跑的 settle：boundary entries 被丢弃，清掉等待，避免下次无关 agent_start 误 ack。 */
+    /** Settle without continuation: boundary entries were dropped; clear the wait so the next unrelated agent_start does not ack by mistake. */
     onSettled(): void {
       pendingBoundary = undefined;
     },

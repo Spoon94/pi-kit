@@ -13,7 +13,7 @@ const walk = (dir: string): string[] => {
   return out;
 };
 
-it("已废机制不得回潮：src/ 与 extensions/ 无 defer/adopt/heartbeat/claims/adoptedAway", () => {
+it("retired mechanisms cannot return: src/ and extensions/ contain no defer/adopt/heartbeat/claims/adoptedAway", () => {
   const banned = [/\bdefer\b/i, /\badopt\w*/i, /\bheartbeat\w*/i, /\bclaims?\b/i, /adoptedAway/];
   const hits: string[] = [];
   for (const f of [...walk(join(ROOT, "src")), ...walk(join(ROOT, "extensions"))]) {
@@ -23,13 +23,13 @@ it("已废机制不得回潮：src/ 与 extensions/ 无 defer/adopt/heartbeat/cl
   expect(hits).toEqual([]);
 });
 
-it("三个已废文件确实不存在", () => {
+it("the three retired files really do not exist", () => {
   for (const p of ["src/jobs/claims.ts", "src/jobs/heartbeat.ts", "src/bind/adopt.ts"]) {
     expect(() => statSync(join(ROOT, p))).toThrow();
   }
 });
 
-it("WIP 默认归 1（模型串行专注一个 todo）", async () => {
+it("default WIP is 1 (the model focuses on one todo at a time)", async () => {
   const { DEFAULTS } = await import("../../src/lib/config.js");
   expect(DEFAULTS.wipLimit).toBe(1);
 });

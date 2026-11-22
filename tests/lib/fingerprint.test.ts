@@ -24,7 +24,7 @@ const j = (id: string, o: Partial<Job> = {}): Job => ({
   rootId: id, attempt: 1, evidenceApplied: false, notifyState: "pending", ...o,
 });
 
-it("git 目录可采集；改动后指纹变化", () => {
+it("git directory is collectable; the fingerprint changes after modification", () => {
   const d = gitDir();
   const a = collectFingerprint(d);
   expect(a).toBeDefined();
@@ -32,23 +32,23 @@ it("git 目录可采集；改动后指纹变化", () => {
   expect(collectFingerprint(d)).not.toBe(a);
 });
 
-it("非 git 目录返回 undefined（F35）", () => {
+it("non-git directory returns undefined (F35)", () => {
   expect(collectFingerprint(mkdtempSync(join(tmpdir(), "{{SECRET_5k34n5lr}}")))).toBeUndefined();
 });
 
-it("指纹未变 → fresh", () => {
+it("fingerprint unchanged → fresh", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_7a5hk2xj}}")));
   const a = j("A"); s.put(a);
   expect(verdictAt(a, s)).toBe("fresh");
 });
 
-it("独占期间变了 → stale（F64 前置）", () => {
+it("changed during the exclusive period → stale (F64 prerequisite)", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_7a5hk2xj}}")));
   const a = j("A", { fpEnd: "B" }); s.put(a);
   expect(verdictAt(a, s)).toBe("stale");
 });
 
-it("同 task 且同 session 的并行作业不算干扰（F56）", () => {
+it("parallel jobs with the same task and same session do not count as interference (F56)", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_7a5hk2xj}}")));
   const a = j("A", { fpEnd: "B", taskId: 7, sessionId: "S" }); s.put(a);
   s.put(j("B", { taskId: 7, sessionId: "S", startedAt: 150, endedAt: 250, fpStart: "A", fpEnd: "B" }));
@@ -56,7 +56,7 @@ it("同 task 且同 session 的并行作业不算干扰（F56）", () => {
   expect(verdictAt(a, s)).toBe("stale");
 });
 
-it("跨会话同 taskId 的写入作业不被误排除（§17.6）", () => {
+it("a writing job with the same taskId from another session is not wrongly excluded (§17.6)", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_7a5hk2xj}}")));
   const a = j("A", { taskId: 1, sessionId: "SA", fpEnd: "B" }); s.put(a);
   s.put(j("B", { taskId: 1, sessionId: "SB", startedAt: 150, endedAt: 250, fpStart: "A", fpEnd: "C" }));
@@ -64,23 +64,23 @@ it("跨会话同 taskId 的写入作业不被误排除（§17.6）", () => {
   expect(verdictAt(a, s)).toBe("unknown");
 });
 
-it("并发作业期间 fpStart===fpEnd 不算干扰（F57）", () => {
+it("fpStart===fpEnd during a concurrent job does not count as interference (F57)", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_7a5hk2xj}}")));
   const a = j("A", { fpEnd: "B", taskId: 7, sessionId: "S" }); s.put(a);
   s.put(j("B", { taskId: 8, sessionId: "S", startedAt: 150, endedAt: 250, fpStart: "A", fpEnd: "A" }));
   expect(classifyOverlap(a, s).interferers).toEqual([]);
 });
 
-it("有写入的并发作业 → unknown（F58）", () => {
+it("concurrent job with writes → unknown (F58)", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_7a5hk2xj}}")));
   const a = j("A", { fpEnd: "B", taskId: 7, sessionId: "S" }); s.put(a);
   s.put(j("B", { taskId: 8, sessionId: "S", startedAt: 150, endedAt: 250, fpStart: "A", fpEnd: "C" }));
   expect(classifyOverlap(a, s).interferers).toEqual(["B"]);
   expect(verdictAt(a, s)).toBe("unknown");
-  expect(fpReason(a)).toContain("无法归因");
+  expect(fpReason(a)).toContain("unattributable");
 });
 
-it("并发作业缺 fpEnd → interferers ⇒ unknown（F63/F75）", () => {
+it("concurrent job missing fpEnd → interferers ⇒ unknown (F63/F75)", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_7a5hk2xj}}")));
   const a = j("A", { fpEnd: "B", taskId: 7, sessionId: "S" }); s.put(a);
   s.put(j("B", { taskId: 8, sessionId: "S", startedAt: 150, endedAt: null, status: "running", fpEnd: undefined }));
@@ -88,7 +88,7 @@ it("并发作业缺 fpEnd → interferers ⇒ unknown（F63/F75）", () => {
   expect(verdictAt(a, s)).toBe("unknown");
 });
 
-it("写入与未结束同时存在仍是 unknown，不误判 stale（F79）", () => {
+it("writes and unfinished jobs together still yield unknown, not stale (F79)", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_7a5hk2xj}}")));
   const a = j("A", { fpEnd: "B", taskId: 7, sessionId: "S" }); s.put(a);
   s.put(j("B", { taskId: 8, sessionId: "S", startedAt: 150, endedAt: 250, fpStart: "A", fpEnd: "C" }));
@@ -97,7 +97,7 @@ it("写入与未结束同时存在仍是 unknown，不误判 stale（F79）", ()
   expect(verdictAt(a, s)).toBe("unknown");
 });
 
-it("采集失败（fpStart/fpEnd 缺失）→ unknown，不当 fresh（Review Focus 4）", () => {
+it("collection failure (missing fpStart/fpEnd) → unknown, not fresh (Review Focus 4)", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_7a5hk2xj}}")));
   const a = j("A", { fpStart: undefined, fpEnd: undefined }); s.put(a);
   expect(verdictAt(a, s)).toBe("unknown");

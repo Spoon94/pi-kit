@@ -2,7 +2,7 @@ export const GUIDANCE_TOOLS = ["todo", "bg_run", "bg_list", "bg_kill"] as const;
 export type GuidanceTool = (typeof GUIDANCE_TOOLS)[number];
 
 export interface ToolGuidance {
-  /** 全局兜底 snippet（向后兼容；per-tool snippets 优先）。 */
+  /** Global fallback snippet (backward compatible; per-tool snippets take priority). */
   promptSnippet: string;
   promptGuidelines: string[];
   snippets: Record<GuidanceTool, string>;
@@ -33,7 +33,7 @@ const guidanceOf = (layer: unknown): unknown => isBag(layer) ? layer.guidance : 
 const cookie = (v: unknown): string | undefined =>
   typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
 
-/** 与 resolveConfig 同一优先级链：file > settings.vigilTodo > legacy.bgRun > 默认。 */
+/** Same priority chain as resolveConfig: file > settings.vigilTodo > legacy.bgRun > default. */
 export function resolveGuidance(s: { file?: unknown; settings?: unknown; legacy?: unknown }): ToolGuidance {
   const layers = [guidanceOf(s.legacy), guidanceOf(s.settings), guidanceOf(s.file)].filter(isBag);
 
@@ -53,7 +53,7 @@ export function resolveGuidance(s: { file?: unknown; settings?: unknown; legacy?
       const per = layers[i].snippets;
       const perTool = isBag(per) ? cookie(per[tool]) : undefined;
       if (perTool !== undefined) chosen = perTool;
-      else chosen = cookie(layers[i].promptSnippet);   // 该层全局作为该工具兜底
+      else chosen = cookie(layers[i].promptSnippet);   // this layer's global falls back for that tool
     }
     snippets[tool] = chosen ?? DEFAULT_GUIDANCE.snippets[tool];
   }
@@ -73,7 +73,7 @@ export function resolveGuidance(s: { file?: unknown; settings?: unknown; legacy?
   return { promptSnippet: global ?? DEFAULT_GUIDANCE.promptSnippet, promptGuidelines, snippets };
 }
 
-/** 与 createConfigLoader 相同的 stat/read 缓存契约。 */
+/** Same stat/read cache contract as createConfigLoader. */
 export function createGuidanceLoader(input: {
   stat(): { mtimeMs: number; settingsKey: string };
   read(): { file?: unknown; settings?: unknown; legacy?: unknown };

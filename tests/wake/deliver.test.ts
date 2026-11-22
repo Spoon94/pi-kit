@@ -35,7 +35,7 @@ beforeEach(() => {
   jobs.put(root());
 });
 
-it("有未投递 chainFinal → 投递并推进 watermark（F59）", () => {
+it("undelivered chainFinal → deliver and advance watermark (F59)", () => {
   const r = tryDeliver(input());
   expect(r.kind).toBe("deliver");
   if (r.kind !== "deliver") return;
@@ -45,53 +45,53 @@ it("有未投递 chainFinal → 投递并推进 watermark（F59）", () => {
   expect(r.roots).toEqual(["R"]);
 });
 
-it("同一证据第二次不再投递（F59/F7）", () => {
+it("the same evidence is not delivered a second time (F59/F7)", () => {
   const a = tryDeliver(input());
   if (a.kind !== "deliver") throw new Error("expected deliver");
-  markSent(jobs, a.roots, a.wakeId, 100);        // 生产路径：投递后必写 sent
+  markSent(jobs, a.roots, a.wakeId, 100);        // production path: must write sent after delivering
   board = { ...board, counters: a.counters };
   expect(tryDeliver(input({ trigger: "boundary", modelAdvanced: true })).kind).toBe("none");
 });
 
-it("时钟回拨：watermark 高于证据 at，但 root 从未投递 ⇒ 仍投递（A3）", () => {
+it("clock skew: watermark above evidence at, but root was never delivered ⇒ still deliver (A3)", () => {
   board.counters.wakeWatermark = 5000;
   const r = tryDeliver(input());
   expect(r.kind).toBe("deliver");
   if (r.kind !== "deliver") return;
-  expect(r.counters.wakeWatermark).toBe(500);    // 水印取 max，不回退
+  expect(r.counters.wakeWatermark).toBe(500);    // watermark takes max and never regresses
   markSent(jobs, r.roots, r.wakeId, 100);
   board = { ...board, counters: r.counters };
   expect(tryDeliver(input()).kind).toBe("none");
 });
 
-it("未知 ref 仍受 watermark 约束（A3 保守）", () => {
+it("unknown ref still bounded by watermark (conservative A3)", () => {
   board.counters.wakeWatermark = 5000;
   board.tasks[0].evidence = [ev({ ref: "GHOST", at: 400 })];
   expect(tryDeliver(input()).kind).toBe("none");
 });
 
-it("tool 证据不进 undelivered（F44）", () => {
+it("tool evidence does not enter undelivered (F44)", () => {
   board.tasks[0].evidence = [ev({ origin: "tool", kind: "command" })];
   expect(tryDeliver(input()).kind).toBe("none");
 });
 
-it("per-job 非 chainFinal 证据不投递（F74/F87）", () => {
+it("per-job non-chainFinal evidence is not delivered (F74/F87)", () => {
   board.tasks[0].evidence = [ev({ chainFinal: false }), ev({ chainFinal: false, at: 400 })];
   expect(tryDeliver(input()).kind).toBe("none");
 });
 
-it("trigger:self 不投递（F81）", () => {
+it("trigger:self does not deliver (F81)", () => {
   board.tasks[0].evidence = [ev({ trigger: "self" })];
   expect(tryDeliver(input()).kind).toBe("none");
 });
 
-it("turnsUsed 达上限第一行硬停（F24/F43）", () => {
+it("turnsUsed at limit hard-stops on the first line (F24/F43)", () => {
   board.counters.turnsUsed = DEFAULTS.maxTurns;
   expect(tryDeliver(input()).kind).toBe("none");
   expect(tryDeliver(input({ trigger: "boundary", modelAdvanced: false })).kind).toBe("none");
 });
 
-it("模型无动作 + next 存在 → re-nudge 恰一次（F23）", () => {
+it("no model action + next exists → re-nudge exactly once (F23)", () => {
   const a = tryDeliver(input());
   if (a.kind !== "deliver") throw new Error("expected deliver");
   markSent(jobs, a.roots, a.wakeId, 100);
@@ -105,7 +105,7 @@ it("模型无动作 + next 存在 → re-nudge 恰一次（F23）", () => {
   expect(tryDeliver(input({ trigger: "boundary", modelAdvanced: false })).kind).toBe("none");
 });
 
-it("模型已推进则不 re-nudge（F23）", () => {
+it("if the model advanced, do not re-nudge (F23)", () => {
   const a = tryDeliver(input());
   if (a.kind !== "deliver") throw new Error("expected deliver");
   markSent(jobs, a.roots, a.wakeId, 100);
@@ -113,16 +113,16 @@ it("模型已推进则不 re-nudge（F23）", () => {
   expect(tryDeliver(input({ trigger: "boundary", modelAdvanced: true })).kind).toBe("none");
 });
 
-it("WIP 满时 next 为空且文案不写开干（F40）", () => {
+it("when WIP is full, next is empty and the text does not say to start (F40)", () => {
   board.tasks[1].status = "in_progress";
   board.tasks.push({ id: 3, subject: "c", status: "in_progress" }, { id: 4, subject: "d", status: "in_progress" });
   const r = tryDeliver(input());
   if (r.kind !== "deliver") throw new Error("expected deliver");
-  expect(r.text).toContain("WIP 满");
-  expect(r.text).not.toContain("开干");
+  expect(r.text).toContain("WIP full");
+  expect(r.text).not.toContain("Start:");
 });
 
-it("多条 chainFinal 合并为一条（F38）", () => {
+it("multiple chainFinal entries merge into one (F38)", () => {
   board.tasks[0].evidence = [ev({ ref: "R" }), ev({ ref: "R2", at: 501 })];
   jobs.put(root({ id: "R2", rootId: "R2" }));
   const r = tryDeliver(input());
@@ -130,24 +130,24 @@ it("多条 chainFinal 合并为一条（F38）", () => {
   expect(r.roots.sort()).toEqual(["R", "R2"]);
 });
 
-it("root 已 sent 后正常通道不重复投递（BLOCKER）", () => {
+it("after root is sent, the normal path does not redeliver (BLOCKER)", () => {
   markSent(jobs, ["R"], "w1", 100);
   expect(tryDeliver(input()).kind).toBe("none");
 });
 
-it("root 已 acked 后正常通道不重复投递", () => {
+it("after root is acked, the normal path does not redeliver", () => {
   markSent(jobs, ["R"], "w1", 100);
   const s = jobs;
   s.put({ ...s.get("R")!, notifyState: "acked" });
   expect(tryDeliver(input()).kind).toBe("none");
 });
 
-it("purged root 的证据不再投递", () => {
+it("evidence for a purged root is no longer delivered", () => {
   jobs.put(root({ purged: true }));
   expect(tryDeliver(input()).kind).toBe("none");
 });
 
-it("timer 条件纳入未 ack 通知（F76）", () => {
+it("timer condition includes unacked notifications (F76)", () => {
   const b = emptyBoard();
   expect(needsTimer(b, jobs, DEFAULTS)).toBe(true);   // beforeEach root finalized + pending
   jobs.put(root({ notifyState: "acked" }));
@@ -155,12 +155,12 @@ it("timer 条件纳入未 ack 通知（F76）", () => {
   jobs.put(root({ status: "running", endedAt: null }));
   expect(needsTimer(b, jobs, DEFAULTS)).toBe(true);
   b.counters.halted = true;
-  expect(needsTimer(b, jobs, DEFAULTS)).toBe(true);   // halted 但 running 仍需退出探活
+  expect(needsTimer(b, jobs, DEFAULTS)).toBe(true);   // halted, but running still needs liveness checks to exit
   jobs.put(root({ notifyState: "acked" }));
-  expect(needsTimer(b, jobs, DEFAULTS)).toBe(false);  // halted 且无 running ⇒ 0 timer
+  expect(needsTimer(b, jobs, DEFAULTS)).toBe(false);  // halted and no running ⇒ 0 timers
 });
 
-it("self / purged / maxTurns 后不再养 timer（MAJOR #1）", () => {
+it("no timer is kept after self / purged / maxTurns (MAJOR #1)", () => {
   const b = emptyBoard();
   jobs.put(root({ finalResult: { ok: false, note: "killed", trigger: "self", at: 2 } }));
   expect(needsTimer(b, jobs, DEFAULTS)).toBe(false);
@@ -170,10 +170,10 @@ it("self / purged / maxTurns 后不再养 timer（MAJOR #1）", () => {
   b.counters.turnsUsed = DEFAULTS.maxTurns;
   expect(needsTimer(b, jobs, DEFAULTS)).toBe(false);
   jobs.put(root({ status: "running", endedAt: null }));
-  expect(needsTimer(b, jobs, DEFAULTS)).toBe(true);  // 内部重试仍需 timer
+  expect(needsTimer(b, jobs, DEFAULTS)).toBe(true);  // internal retry still needs a timer
 });
 
-it("resume 恢复唤醒受预算约束且推进 next（BLOCKER）", () => {
+it("resume recovery wake is budget-bound and advances next (BLOCKER)", () => {
   const r = recoveryWake(input());
   expect(r.kind).toBe("deliver");
   if (r.kind !== "deliver") return;
@@ -187,7 +187,7 @@ it("resume 恢复唤醒受预算约束且推进 next（BLOCKER）", () => {
   expect(recoveryWake(input()).kind).toBe("none");
 });
 
-it("settleSend 吞掉异步 rejection（BLOCKER）", async () => {
+it("settleSend swallows async rejections (BLOCKER)", async () => {
   let err: unknown;
   settleSend(Promise.reject(new Error("boom")), (e) => { err = e; });
   await new Promise((res) => setTimeout(res, 0));

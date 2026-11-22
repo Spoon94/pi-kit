@@ -9,7 +9,7 @@ import { sanitizeMultiline, sanitizeTerminalText } from "../lib/sanitize.js";
 export const WIDGET_KEY = "vigil-todo";
 export const STATUS_KEY = "vigil-todo-status";
 
-/** 状态栏常驻指示（C2）；无任务无作业时清空，不占位。 */
+/** Persistent status-line indicator (C2); empty when there are no tasks or jobs, taking no space. */
 export function renderStatus(state: BoardState, jobs: JobStore): string | undefined {
   if (state.counters.halted) return "vigil ⏸ halted";
   const active = jobs.all().filter((j) => j.status === "running" || j.retryAt != null).length;
@@ -22,7 +22,7 @@ export function renderStatus(state: BoardState, jobs: JobStore): string | undefi
   return `vigil ✓ ${done}/${visible.length}`;
 }
 
-/** 面板行按显示宽度（保守按字符数）截断，加省略号；/todos 全量视图不截断。 */
+/** Truncate panel rows to display width (conservatively by char count) with an ellipsis; the full /todos view does not truncate. */
 export function truncateToWidth(value: string, width: number): string {
   const chars = Array.from(value);
   if (chars.length <= width) return value;
@@ -44,16 +44,16 @@ export function layoutRows(
   const active = wipCount(state);
   const oversold = active > cfg.wipLimit;
   const head = `● vigil-todo ${sum.done}/${sum.total}${parked.length ? ` · ⚠ ${parked.length} parked` : ""}`
-    + `${atLimit ? ` · ⏸ 达轮数上限 (${state.counters.turnsUsed}/${cfg.maxTurns})` : ""}`
-    + `${oversold ? ` · ⚠ WIP 超卖 (${active}/${cfg.wipLimit})` : ""}`
-    + `${stuck ? " · ⚠ 无可推进" : ""}`;
+    + `${atLimit ? ` · ⏸ turn limit reached (${state.counters.turnsUsed}/${cfg.maxTurns})` : ""}`
+    + `${oversold ? ` · ⚠ WIP oversold (${active}/${cfg.wipLimit})` : ""}`
+    + `${stuck ? " · ⚠ nothing actionable" : ""}`;
   const rows: string[] = [head];
   let used = 1;
   const summaryParts = [
     `${sum.done} done`,
-    sum.evidenceRolled ? "⚠ 证据已滚动" : (sum.allExit0 ? "all exit 0" : "有非零退出"),
+    sum.evidenceRolled ? "⚠ evidence rolled" : (sum.allExit0 ? "all exit 0" : "nonzero exit"),
   ];
-  if (sum.fpUnknown) summaryParts.push(`⚠ ${sum.fpUnknown} 条 fp:?`);
+  if (sum.fpUnknown) summaryParts.push(`⚠ ${sum.fpUnknown} with fp:?`);
   if (sum.reverified) summaryParts.push(`↺ ${sum.reverified} reverified`);
   if (sum.verifyChanged) summaryParts.push(`${sum.verifyChanged} verify changed`);
   if (sum.done > 0 && used < budget) { rows.push(`├─ ✓ ${summaryParts.join(" · ")}`); used++; }
@@ -106,18 +106,18 @@ export interface DoctorExtra {
 
 export function renderDoctor(state: BoardState, jobs: JobStore, conflict: boolean, degraded?: string, extra?: DoctorExtra): string {
   const lines: string[] = [];
-  if (conflict) lines.push("✗ todo 工具冲突：旧包未卸载，本扩展未注册事件处理器");
+  if (conflict) lines.push("✗ todo tool conflict: old package not unloaded, this extension registered no event handlers");
   if (degraded) lines.push(`✗ ${degraded}`);
-  if (state.counters.halted) lines.push("⏸ 强制中断中 → /vigil-todo resume 恢复");
+  if (state.counters.halted) lines.push("⏸ Halted → /vigil-todo resume to resume");
   const maxTurns = extra?.maxTurns ?? DEFAULTS.maxTurns;
   if (state.counters.turnsUsed >= maxTurns) {
-    lines.push(`⏸ 达轮数上限 (${state.counters.turnsUsed}/${maxTurns}) → 用户发消息归零`);
+    lines.push(`⏸ Turn limit reached (${state.counters.turnsUsed}/${maxTurns}) → user sends a message to reset`);
   }
   const wipLimit = extra?.wipLimit ?? DEFAULTS.wipLimit;
   const maxJobs = extra?.maxConcurrentJobs ?? DEFAULTS.maxConcurrentJobs;
   const active = wipCount(state);
   if (active > wipLimit) {
-    lines.push(`⚠ ${active} 个 in_progress 超过 wipLimit=${wipLimit}（历史残留，可 park 释放）`);
+    lines.push(`⚠ ${active} in_progress exceeds wipLimit=${wipLimit} (historical residue; park to release)`);
   }
   const pending = state.tasks.filter((t) => t.status === "pending");
   const busySlots = jobs.all().filter((j) => j.status === "running" || j.retryAt != null).length;
@@ -125,25 +125,25 @@ export function renderDoctor(state: BoardState, jobs: JobStore, conflict: boolea
   const stuck = pending.length > 0 && !capacityFull && wipCount(state) < wipLimit
     && selectNext(state, wipLimit, capacityFull) === undefined;
   if (stuck) {
-    lines.push(`⚠ 有 ${pending.length} 个 pending 但无可推进任务（依赖环或全部被阻塞）→ /todos 查依赖`);
+    lines.push(`⚠ ${pending.length} pending but nothing actionable (dependency cycle or all blocked) → /todos to inspect dependencies`);
   }
   const cycle = detectCycle(state);
   if (cycle) {
-    lines.push(`✗ 检测到依赖环：${formatCycle(cycle)} → todo({action:"update", id:${cycle[0]}, removeBlockedBy:[…]})`);
+    lines.push(`✗ Dependency cycle detected: ${formatCycle(cycle)} → todo({action:"update", id:${cycle[0]}, removeBlockedBy:[…]})`);
   }
   if (extra?.purgedRoots) {
-    lines.push(`✗ ${extra.purgedRoots} 条链已 purge（catch-up 跳过）→ 清理后的预期状态，无需处理；如需重跑请新建任务`);
+    lines.push(`✗ ${extra.purgedRoots} chains purged (catch-up skips them) → expected after clear, no action needed; create a new task to rerun`);
   }
   if (extra?.retentionOverdue) {
-    lines.push(`⚠ ${extra.retentionOverdue} 个 completed/deleted 任务超期未清理 → /vt clear 清理历史（只清终态）`);
+    lines.push(`⚠ ${extra.retentionOverdue} completed/deleted tasks overdue for cleanup → /vt clear to clear history (terminal only)`);
   }
   if (extra?.orphanJobs) {
-    lines.push(`⚠ ${extra.orphanJobs} 个孤儿作业（sidecar 无绑定任务）→ bg_list 查看，bg_kill({job_id:"…"}) 回收`);
+    lines.push(`⚠ ${extra.orphanJobs} orphan jobs (no bound task in sidecar) → bg_list to inspect, bg_kill({job_id:"…"}) to reclaim`);
   }
   const noEvidence = state.tasks.filter((t) => t.status === "in_progress" && (t.jobs?.length ?? 0) === 0);
   if (noEvidence.length) {
     const id = noEvidence[0].id;
-    lines.push(`⚠ ${noEvidence.length} 个 in_progress 任务无绑定作业（如 #${id}）→ todo({action:"verify", id:${id}}) 重新取证，或重新起作业`);
+    lines.push(`⚠ ${noEvidence.length} in_progress tasks have no bound job (e.g. #${id}) → todo({action:"verify", id:${id}}) to re-collect evidence, or start a job`);
   }
-  return lines.length ? sanitizeMultiline(lines.join("\n")) : "✓ 未发现问题";
+  return lines.length ? sanitizeMultiline(lines.join("\n")) : "✓ No issues found";
 }

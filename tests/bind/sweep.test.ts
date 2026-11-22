@@ -27,7 +27,7 @@ beforeEach(() => {
   d = { boards, jobs, cfg: DEFAULTS, now: 1000, sessionId: "S", respawn: () => ({ ok: true }), notify: () => {}, isIdle: () => true };
 });
 
-it("retryAt 到期即 respawn（F45）", () => {
+it("retryAt due immediately respawns (F45)", () => {
   jobs.put(j("R", { retryAt: 500 }));
   let called = 0;
   d.respawn = () => { called++; return { ok: true }; };
@@ -35,12 +35,12 @@ it("retryAt 到期即 respawn（F45）", () => {
   expect(called).toBe(1);
 });
 
-it("retryAt 未到期不 respawn", () => {
+it("retryAt not due does not respawn", () => {
   jobs.put(j("R", { retryAt: 5000 }));
   expect(sweepRespawns(d)).toBe(0);
 });
 
-it("pendingReverify 且未终结 → 补一次 respawn（F85）", () => {
+it("pendingReverify without termination triggers one respawn (F85)", () => {
   jobs.put(j("R", { status: "completed", exitCode: 0, pendingReverify: true, fpVerdict: "stale" }));
   let called = 0;
   d.respawn = () => { called++; return { ok: true }; };
@@ -48,7 +48,7 @@ it("pendingReverify 且未终结 → 补一次 respawn（F85）", () => {
   expect(called).toBe(1);
 });
 
-it("pendingReverify 额度已尽 → 判终结 parked，不悬置（F85）", () => {
+it("pendingReverify quota exhausted → terminal parked, not left pending (F85)", () => {
   jobs.put(j("R", { status: "completed", exitCode: 0, pendingReverify: true, attempt: 6 }));
   jobs.put(j("R2", { rootId: "R", retryOf: "R", staleReverifyOf: "R" }));
   d.respawn = () => ({ ok: false });
@@ -56,7 +56,7 @@ it("pendingReverify 额度已尽 → 判终结 parked，不悬置（F85）", () 
   expect(jobs.get("R")?.pendingReverify).toBe(false);
 });
 
-it("F85 恢复重验继承链上最大 attempt，不破 7 job 上界", () => {
+it("F85 recovered reverify inherits the chain max attempt and stays within 7 jobs", () => {
   jobs.put(j("R", { attempt: 1, status: "completed", exitCode: 0, pendingReverify: true, fpVerdict: "stale" }));
   for (let i = 2; i <= 5; i++) {
     jobs.put(j(`R${i}`, { rootId: "R", retryOf: i === 2 ? "R" : `R${i - 1}`,
@@ -65,38 +65,38 @@ it("F85 恢复重验继承链上最大 attempt，不破 7 job 上界", () => {
   let req: { attempt?: number; staleReverifyOf?: string } | undefined;
   d.respawn = (r) => { req = r; return { ok: true }; };
   expect(sweepRespawns(d)).toBe(1);
-  expect(req?.attempt).toBe(5);                 // 不是 root.attempt=1
+  expect(req?.attempt).toBe(5);                 // not root.attempt=1
   expect(req?.staleReverifyOf).toBe("R");
   expect(jobs.get("R")?.pendingReverify).toBe(false);
 });
 
-it("catch-up 只扫 root 粒度：中间失败 job 不入扫描集（F89）", () => {
+it("catch-up scans root granularity only: intermediate failed jobs are not in the scan set (F89)", () => {
   jobs.put(j("R", { attempt: 6, finalized: true, evidenceApplied: true, notifyState: "sent", notifySentAt: 0 }));
   jobs.put(j("M", { rootId: "R", attempt: 2, notifyState: "pending" }));
   expect(catchUpScan(d)).toEqual(["R"]);
 });
 
-it("acked 永不补发（F8）", () => {
+it("acked is never redelivered (F8)", () => {
   jobs.put(j("R", { finalized: true, evidenceApplied: true, notifyState: "acked" }));
   expect(catchUpScan(d)).toEqual([]);
 });
 
-it("sent 未超 10min 不补发", () => {
+it("sent under 10min is not redelivered", () => {
   jobs.put(j("R", { finalized: true, evidenceApplied: true, notifyState: "sent", notifySentAt: 900 }));
   expect(catchUpScan(d)).toEqual([]);
 });
 
-it("非 idle 时跳过 sent 补发（F80）", () => {
+it("non-idle skips sent redelivery (F80)", () => {
   jobs.put(j("R", { finalized: true, evidenceApplied: true, notifyState: "sent", notifySentAt: 0 }));
   expect(catchUpScan({ ...d, isIdle: () => false })).toEqual([]);
 });
 
-it("未投影的 finalized 链优先入扫描集（F84）", () => {
+it("unprojected finalized chains enter the scan set first (F84)", () => {
   jobs.put(j("R", { finalized: true, evidenceApplied: false, notifyState: "pending" }));
   expect(catchUpScan(d)).toEqual(["R"]);
 });
 
-it("sweepAll 汇总 respawn / catch-up / retention", () => {
+it("sweepAll summarizes respawn / catch-up / retention", () => {
   jobs.put(j("R", { attempt: 6, finalized: true, evidenceApplied: true, notifyState: "acked" }));
   const r = sweepAll(d);
   expect(r.respawned).toBe(0);
@@ -104,18 +104,18 @@ it("sweepAll 汇总 respawn / catch-up / retention", () => {
   expect(r.retained).toBe(0);
 });
 
-it("purged 链不再补发（R19）", () => {
+it("purged chains are never redelivered (R19)", () => {
   jobs.put(j("R", { finalized: true, evidenceApplied: true, notifyState: "pending", purged: true }));
   expect(catchUpScan(d)).toEqual([]);
 });
 
-it("trigger:self 的终结不补发（F81）", () => {
+it("trigger:self terminations are not redelivered (F81)", () => {
   jobs.put(j("R", { finalized: true, evidenceApplied: true, notifyState: "pending",
     finalResult: { ok: false, note: "killed", trigger: "self", at: 2 } }));
   expect(catchUpScan(d)).toEqual([]);
 });
 
-it("purged 链不被 respawn（BLOCKER）", () => {
+it("purged chains are not respawned (BLOCKER)", () => {
   jobs.put(j("R", { retryAt: 100, purged: true }));
   let calls = 0;
   d.respawn = () => { calls++; return { ok: true }; };
@@ -123,7 +123,7 @@ it("purged 链不被 respawn（BLOCKER）", () => {
   expect(calls).toBe(0);
 });
 
-it("F117 sweepAll retention 清旧留新并 purged", () => {
+it("F117 sweepAll retention clears old, keeps new, and purges", () => {
   const b = boards.get("S");
   b.tasks = [
     { id: 1, subject: "old", status: "completed", statusSince: 1, jobs: ["R"] },
@@ -139,17 +139,17 @@ it("F117 sweepAll retention 清旧留新并 purged", () => {
   expect(jobs.get("R")?.purged).toBe(true);
 });
 
-it("F118 重验 respawn 失败 ⇒ 任务 parked「无空闲槽位重验」", () => {
+it("F118 reverify respawn failure → task parked with no free slot for reverify", () => {
   jobs.put(j("R", { status: "completed", exitCode: 0, pendingReverify: true, taskId: 1 }));
   d.respawn = () => ({ ok: false });
   expect(sweepRespawns(d)).toBe(0);
   expect(jobs.get("R")?.pendingReverify).toBe(false);
   const task = boards.get("S").tasks[0];
   expect(task.status).toBe("parked");
-  expect(task.park?.reason).toContain("无空闲槽位重验");
+  expect(task.park?.reason).toContain("no free slot for reverify");
 });
 
-it("respawn 抛错 → 不重试、清退避、任务 parked(spawn failed)（F32）", () => {
+it("respawn error → no retry, clear backoff, task parked(spawn failed) (F32)", () => {
   jobs.put(j("R", { retryAt: 500 }));
   d.respawn = () => ({ ok: false });
   expect(sweepRespawns(d)).toBe(0);
@@ -165,14 +165,14 @@ const countSaves = (store: ReturnType<typeof createJobStore>): (() => number) =>
   return () => n;
 };
 
-it("F123 空闲 sweepAll 零落盘（P1 性能回归）", () => {
+it("F123 idle sweepAll writes zero times (P1 perf regression)", () => {
   jobs.put(j("R", { attempt: 6, finalized: true, evidenceApplied: true, notifyState: "acked" }));
   const saves = countSaves(jobs);
   expect(sweepAll(d)).toEqual({ respawned: 0, catchUp: [], retained: 0, boardDirty: false });
   expect(saves()).toBe(0);
 });
 
-it("A1 respawn 失败导致 parkTask 时上报 boardDirty", () => {
+it("A1 respawn failure that parks a task reports boardDirty", () => {
   jobs.put(j("R", { retryAt: 500 }));
   d.respawn = () => ({ ok: false });
   const r = sweepAll(d);
@@ -181,12 +181,12 @@ it("A1 respawn 失败导致 parkTask 时上报 boardDirty", () => {
   expect(boards.get("S").tasks[0].status).toBe("parked");
 });
 
-it("A1 respawn 成功只改 sidecar，不上报 boardDirty", () => {
+it("A1 respawn success changes only the sidecar and does not report boardDirty", () => {
   jobs.put(j("R", { retryAt: 500 }));
   expect(sweepAll(d).boardDirty).toBe(false);
 });
 
-it("F123 到期 respawn 成功恰好落盘一次（P1）", () => {
+it("F123 due respawn success writes exactly once (P1)", () => {
   jobs.put(j("R", { retryAt: 500 }));
   const saves = countSaves(jobs);
   expect(sweepRespawns(d)).toBe(1);
@@ -194,7 +194,7 @@ it("F123 到期 respawn 成功恰好落盘一次（P1）", () => {
   expect(saves()).toBe(1);
 });
 
-it("F123 respawn 失败路径同样只在有变化时落盘（P1）", () => {
+it("F123 the respawn failure path also writes only on change (P1)", () => {
   jobs.put(j("R", { retryAt: 500 }));
   d.respawn = () => ({ ok: false });
   const saves = countSaves(jobs);
@@ -203,7 +203,7 @@ it("F123 respawn 失败路径同样只在有变化时落盘（P1）", () => {
   expect(saves()).toBe(1);
 });
 
-it("F123 清除悬置 pendingReverify 计为一次变化，二次扫描零落盘（P1）", () => {
+it("F123 clearing a stuck pendingReverify counts as one change; a second scan writes nothing (P1)", () => {
   jobs.put(j("R", { status: "completed", exitCode: 0, pendingReverify: true }));
   jobs.put(j("R2", { rootId: "R", retryOf: "R", staleReverifyOf: "R" }));
   const saves = countSaves(jobs);
@@ -214,7 +214,7 @@ it("F123 清除悬置 pendingReverify 计为一次变化，二次扫描零落盘
   expect(saves()).toBe(1);
 });
 
-it("投递失败后由单 timer 在 10min 后补偿送达（F76）", () => {
+it("after delivery failure, the single timer catches up after 10min (F76)", () => {
   jobs.put(j("R", { finalized: true, evidenceApplied: true, notifyState: "sent", notifySentAt: 1000 }));
   expect(catchUpScan({ ...d, now: 1000 + DEFAULTS.notifyRetryMs + 1 })).toEqual(["R"]);
 });

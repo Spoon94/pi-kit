@@ -1,74 +1,74 @@
-# vigil-todo 配置
+# vigil-todo configuration
 
-## 优先级链
+## Priority chain
 
 ```
-~/.config/pi-kit/config.json          （最高）
+~/.config/pi-kit/config.json          (highest)
   → pi.getSettings().vigilTodo
-  → pi.getSettings().bgRun            （旧键兼容）
-  → DEFAULTS                           （最低）
+  → pi.getSettings().bgRun            (legacy keys)
+  → DEFAULTS                           (lowest)
 ```
 
-逐键独立解析：某个键在最高层出现且合法就用它；非法值（错误类型、低于最小值）**逐项退回默认**，不影响其他键，也不抛异常。文件缺失或损坏等同视为该层没有配置。
+Each key is resolved independently: if the key appears at the highest layer with a valid value, that value wins. Invalid values (wrong type, below minimum, above maximum) **fall back to the default per key**, without affecting other keys and without throwing. A missing or corrupt file simply means that layer has no configuration.
 
-## 契约
+## Contract
 
-- **类型与范围**：每个键声明类型与最小值（见下表），`CONFIG_KEYS` 是唯一元数据来源，`default` 直接引用 `DEFAULTS`，文档、校验、默认值不会三处漂移。
-- **热更新矩阵**：除 `collapseKey`、`haltKey` 外全部即时生效（每次判定读 mtime 缓存）；两个快捷键涉及注册，需要 `/reload`。
-- **失败方向**：配置问题永远不会让扩展崩溃或禁用；最坏情况是某个键回到默认值。
+- **Types and ranges**: every key declares a type and minimum (see table); `CONFIG_KEYS` is the single source of metadata and `default` references `DEFAULTS`, so docs, validation, and defaults cannot drift.
+- **Hot-reload matrix**: all keys apply immediately except `collapseKey` and `haltKey` (each key decision reads the mtime cache); the two shortcuts are registered once, so they require `/reload`.
+- **Failure direction**: a configuration problem never crashes or disables the extension; the worst case is that a key falls back to its default.
 
-## 全键表
+## All keys
 
-| 键 | 类型 | 最小 | 最大 | 默认 | 生效时机 |
+| Key | Type | Min | Max | Default | When it applies |
 |---|---|---|---|---|---|
-| `wipLimit` | int | 1 | 100 | 1 | 即时（每次 WIP 判定） |
-| `retries` | int | 0 | 20 | 5 | 即时（下次重试判定；总尝试 = 1 + retries = 6） |
-| `retryDelaysMs` | int[] | 0（每项） | 3600000（每项） | `[0, 30000, 120000, 300000, 600000]` | 即时（下次退避调度；五档） |
-| `staleReverify` | int | 0 | 10 | 1 | 即时（下次 stale 判定） |
-| `maxTurns` | int | 1 | 10000 | 50 | 即时（`tryDeliver` 第一行闸门） |
-| `maxConcurrentJobs` | int | 1 | 200 | 10 | 即时（下次 spawn 准入） |
-| `completedTtlMs` | int | 1 | 31536000000（365 天） | 604800000（7 天） | 即时（下次 GC） |
-| `taskRetentionMs` | int | 0 | 31536000000（365 天） | **0（关闭）** | 即时（下次 sweep） |
-| `tailLines` | int | 1 | 500 | 20 | 即时（下次尾读） |
-| `maxTailBytes` | int | 1 | 1048576（1MB） | 8192 | 即时（下次尾读） |
-| `maxWidgetLines` | int | 3 | 200 | 12 | 即时（下次渲染） |
-| `collapseKey` | string | — | — | `ctrl+shift+t` / `off` | **需 `/reload`**（快捷键只注册一次） |
-| `haltKey` | string | — | — | `alt+h` / `off` | **需 `/reload`**（一键强制中断快捷键） |
-| `notifyRetryMs` | int | 1 | 86400000（24h） | 600000（10 分钟） | 即时（下次补偿扫描） |
-| `wakeMergeMs` | int | 0 | 60000（1min） | 250 | 即时（下次唤醒合并窗口） |
+| `wipLimit` | int | 1 | 100 | 1 | Immediate (every WIP decision) |
+| `retries` | int | 0 | 20 | 5 | Immediate (next retry decision; total attempts = 1 + retries = 6) |
+| `retryDelaysMs` | int[] | 0 (per item) | 3600000 (per item) | `[0, 30000, 120000, 300000, 600000]` | Immediate (next backoff schedule; five tiers) |
+| `staleReverify` | int | 0 | 10 | 1 | Immediate (next stale decision) |
+| `maxTurns` | int | 1 | 10000 | 50 | Immediate (first-line gate in `tryDeliver`) |
+| `maxConcurrentJobs` | int | 1 | 200 | 10 | Immediate (next spawn admission) |
+| `completedTtlMs` | int | 1 | 31536000000 (365 days) | 604800000 (7 days) | Immediate (next GC) |
+| `taskRetentionMs` | int | 0 | 31536000000 (365 days) | **0 (off)** | Immediate (next sweep) |
+| `tailLines` | int | 1 | 500 | 20 | Immediate (next tail read) |
+| `maxTailBytes` | int | 1 | 1048576 (1MB) | 8192 | Immediate (next tail read) |
+| `maxWidgetLines` | int | 3 | 200 | 12 | Immediate (next render) |
+| `collapseKey` | string | — | — | `ctrl+shift+t` / `off` | **`/reload` required** (shortcut is registered once) |
+| `haltKey` | string | — | — | `alt+h` / `off` | **`/reload` required** (one-key forced halt) |
+| `notifyRetryMs` | int | 1 | 86400000 (24h) | 600000 (10 min) | Immediate (next catch-up scan) |
+| `wakeMergeMs` | int | 0 | 60000 (1 min) | 250 | Immediate (next wake merge window) |
 
-超出最小值或最大值的键**逐项退回默认**，不影响其他键；上限用于防止 `maxTailBytes` 之类配置造成 TB 级缓冲/读盘自伤。
+Values outside min/max **fall back to the default per key** without affecting other keys; the maxima prevent settings such as `maxTailBytes` from causing TB-scale buffers or disk reads.
 
-`jobs.json` 另有不可配置的 **2000 条终态记录硬上限**（约 1.4 MB）：sweep 的 GC 在 TTL 之外只回收「已终结 + 已投影 + 已 ack/self」的完整链，running / 退避 / 未投影 / 未 ack 的记录永不因上限被删。
+`jobs.json` also has a non-configurable hard cap of **2000 terminal records** (≈1.4 MB): in addition to the TTL, sweep GC reclaims only complete chains that are “finalized + projected + acked/self”. Running, backoff, unprojected, and unacked records are never removed by the cap.
 
-## 工具指引覆盖（§19.2）
+## Tool guidance overrides (§19.2)
 
-配置层（文件 / `settings.vigilTodo` / `settings.bgRun`）可包含：
+The configuration layers (file / `settings.vigilTodo` / `settings.bgRun`) may contain:
 
 ```json
 {
   "guidance": {
     "snippets": {
-      "todo": "一句 todo 摘要",
-      "bg_run": "一句 bg_run 摘要",
-      "bg_list": "一句 bg_list 摘要",
-      "bg_kill": "一句 bg_kill 摘要"
+      "todo": "one-line todo summary",
+      "bg_run": "one-line bg_run summary",
+      "bg_list": "one-line bg_list summary",
+      "bg_kill": "one-line bg_kill summary"
     },
-    "promptSnippet": "全局兜底摘要（可省略）",
-    "promptGuidelines": ["要点 1", "要点 2"]
+    "promptSnippet": "global fallback snippet (optional)",
+    "promptGuidelines": ["point 1", "point 2"]
   }
 }
 ```
 
-`snippets.<tool>` 按工具覆盖（四者应互不相同，Available tools 区逐工具一行）；`promptSnippet` 保持向后兼容，作为未单独覆盖的工具的兜底。优先级与主配置链相同（file > settings.vigilTodo > legacy.bgRun > 默认），全局与 per-tool 均逐项回退。`promptGuidelines` 共享（pi 的 buildRules 会去重，不会 4× 膨胀）。工具在 `session_start` 按生效值注册/重注册：改了 guidance 后**下一次 session_start（或 `/reload`）生效**，不需要重启 pi。默认指引已覆盖 bg_run/bash 选择、WIP=1、park reason、证据完成、clear scope、唤醒后直接推进六条要点。
+`snippets.<tool>` overrides per tool (the four should differ; the Available tools section shows one line per tool); `promptSnippet` is kept for backward compatibility and acts as the fallback for tools without a per-tool override. The priority chain is the same as the main configuration (file > settings.vigilTodo > legacy.bgRun > defaults), with per-key fallback for both global and per-tool values. `promptGuidelines` is shared (pi's buildRules deduplicates, so it does not grow 4×). Tools are registered or re-registered with the effective values at `session_start`: a guidance change takes effect on the **next session_start (or `/reload`)**; no pi restart is needed. The default guidance covers bg_run-vs-bash choice, WIP=1, park reason, evidence-based completion, clear scope, and acting immediately after a wake.
 
-## `taskRetentionMs` 为什么默认 0
+## Why `taskRetentionMs` defaults to 0
 
-自动删除任务是**不可逆的数据损失**。默认关闭，只有人显式设置一个正整数时才启用；sweep 会清理 `completed` / `deleted` 且 `statusSince` 早于 `now - taskRetentionMs` 的任务，走与手动 `clear` 相同的路径（含 sidecar 的 `purged` 标记）。
+Automatically deleting tasks is **irreversible data loss**. It is off by default and enabled only when a person explicitly sets a positive integer; sweep clears `completed` / `deleted` tasks whose `statusSince` is older than `now - taskRetentionMs`, using the same path as manual `clear` (including the sidecar `purged` marker).
 
-**永不自动清理 `parked`**：parked 是等人的决策物，自动删它等于丢掉北极星的交接物。
+**`parked` is never auto-cleared**: parked tasks are decisions waiting for a person; deleting them would throw away the north star's handoff object.
 
-## 示例
+## Example
 
 ```json
 {
@@ -81,4 +81,4 @@
 }
 ```
 
-`collapseKey: "off"` 表示不注册折叠快捷键，`haltKey: "off"` 同理关闭一键中断（两个键都需 `/reload` 生效）。
+`collapseKey: "off"` disables the collapse shortcut; `haltKey: "off"` likewise disables the one-key halt (both need `/reload`).

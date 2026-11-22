@@ -34,10 +34,10 @@ const build = (nTask: number, nJob: number): SweepDeps => {
     respawn: () => ({ ok: true }), notify: () => {}, isIdle: () => true };
 };
 
-it("F123 空闲 sweepAll 固定开销 < 1ms（50/20、200/100、200/300，P3 基线）", () => {
+it("F123 idle sweepAll fixed overhead < 1ms (50/20, 200/100, 200/300; P3 baseline)", () => {
   for (const [nTask, nJob] of [[50, 20], [200, 100], [200, 300]] as const) {
     const d = build(nTask, nJob);
-    for (let i = 0; i < 20; i++) sweepAll(d);                 // JIT 预热
+    for (let i = 0; i < 20; i++) sweepAll(d);                 // JIT warmup
     const times: number[] = [];
     for (let i = 0; i < 50; i++) {
       const t0 = performance.now();
@@ -47,7 +47,7 @@ it("F123 空闲 sweepAll 固定开销 < 1ms（50/20、200/100、200/300，P3 基
     times.sort((a, b) => a - b);
     const mean = times.reduce((a, b) => a + b, 0) / times.length;
     const median = times[Math.floor(times.length / 2)];
-    console.log(`sweepAll ${nTask} 任务/${nJob} 作业: mean ${mean.toFixed(4)} ms, median ${median.toFixed(4)} ms`);
+    console.log(`sweepAll ${nTask} tasks/${nJob} jobs: mean ${mean.toFixed(4)} ms, median ${median.toFixed(4)} ms`);
     expect(median).toBeLessThan(1);
   }
 });

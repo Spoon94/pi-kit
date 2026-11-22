@@ -13,13 +13,13 @@ const job = (id: string, o: Partial<Job> = {}): Job => ({
   evidenceApplied: false, notifyState: "pending", ...o,
 });
 
-it("projectHash 稳定且 runDir 在 /tmp/bg-run 下", () => {
+it("projectHash is stable and runDir lives under /tmp/bg-run", () => {
   expect(projectHash("/a/b")).toBe(projectHash("/a/b"));
   expect(projectHash("/a/b")).not.toBe(projectHash("/a/c"));
   expect(runDir("/a/b")).toBe(`/tmp/bg-run/${projectHash("/a/b")}`);
 });
 
-it("put/save/load 往返", () => {
+it("put/save/load round trip", () => {
   const d = dir(); const s = createJobStore(d);
   s.put(job("bg_a")); s.save();
   const t = createJobStore(d);
@@ -27,7 +27,7 @@ it("put/save/load 往返", () => {
   expect(t.get("bg_a")?.id).toBe("bg_a");
 });
 
-it("损坏时留档并从空开始（F12）", () => {
+it("corruption is archived and loading starts empty (F12)", () => {
   const d = dir(); writeFileSync(join(d, "jobs.json"), "{broken");
   const s = createJobStore(d);
   const r = s.load();
@@ -36,14 +36,14 @@ it("损坏时留档并从空开始（F12）", () => {
   expect(readdirSync(d).some((f) => f.startsWith("jobs.json.corrupt-"))).toBe(true);
 });
 
-it("jobs 非数组或单条缺字段视为损坏（Review Focus 2）", () => {
+it("non-array jobs or an entry with missing fields counts as corruption (Review Focus 2)", () => {
   const d = dir(); writeFileSync(join(d, "jobs.json"), JSON.stringify({ jobs: "x" }));
   expect(createJobStore(d).load().degraded).toBe(true);
   const d2 = dir(); writeFileSync(join(d2, "jobs.json"), JSON.stringify({ jobs: [{ id: "a" }] }));
   expect(createJobStore(d2).load().degraded).toBe(true);
 });
 
-it("GC 只清超 TTL 的终态作业，running 永不清，并返回删除数", () => {
+it("GC clears only terminal jobs past TTL, never running ones, and returns the deletion count", () => {
   const d = dir(); const s = createJobStore(d);
   s.put(job("old", { endedAt: 1 }));
   s.put(job("run", { status: "running", endedAt: null }));
@@ -53,7 +53,7 @@ it("GC 只清超 TTL 的终态作业，running 永不清，并返回删除数", 
   expect(s.get("run")).toBeDefined();
 });
 
-it("B4 记录上限：TTL 未到时按最旧完整链回收，未终结/未 ack 的链绝不删", () => {
+it("B4 record cap: before TTL, reclaim the oldest complete chains; never delete unterminated/unacked chains", () => {
   const d = dir(); const s = createJobStore(d);
   for (let i = 0; i < 5; i++) {
     const done = job(`R${i}`, {
@@ -69,7 +69,7 @@ it("B4 记录上限：TTL 未到时按最旧完整链回收，未终结/未 ack 
   expect(s.all().map((j) => j.id).sort()).toEqual(["R3", "R3j2", "R4", "R4j2", "pending"]);
 });
 
-it("B4 上限不清 running / 退避 / 未投影的链", () => {
+it("B4 cap does not clear running / backoff / unprojected chains", () => {
   const d = dir(); const s = createJobStore(d);
   s.put(job("run", { status: "running", endedAt: null, finalized: false }));
   s.put(job("backoff", { retryAt: 1, finalized: false }));
@@ -78,7 +78,7 @@ it("B4 上限不清 running / 退避 / 未投影的链", () => {
   expect(s.all()).toHaveLength(3);
 });
 
-it("isSafeLogPath 只允许 runDir 内路径（MINOR #2）", () => {
+it("isSafeLogPath allows only paths inside runDir (MINOR #2)", () => {
   const d = dir(); const s = createJobStore(d);
   writeFileSync(join(d, "a.log"), "x");
   mkdirSync(join(d, "sub"));
@@ -92,7 +92,7 @@ it("isSafeLogPath 只允许 runDir 内路径（MINOR #2）", () => {
   expect(s.isSafeLogPath("")).toBe(false);
 });
 
-it("isSafeLogPath 拒绝 runDir 内指向外部的 symlink（MINOR）", () => {
+it("isSafeLogPath rejects a symlink inside runDir that points outside (MINOR)", () => {
   const root = dir();
   const d = join(root, "run");
   mkdirSync(d);

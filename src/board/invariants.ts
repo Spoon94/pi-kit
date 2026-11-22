@@ -25,16 +25,16 @@ export interface UpdateParams {
 
 const settled = (s: Status) => s === "completed" || s === "deleted";
 
-/** 结构性规则；证据类规则在 evidence.ts。返回错误文案或 undefined。 */
+/** Structural rules; evidence rules live in evidence.ts. Returns an error message or undefined. */
 export function checkStructure(state: BoardState, task: Task, p: UpdateParams, ctx: RuleContext): string | undefined {
   if (p.status !== undefined && !isTransitionValid(task.status, p.status)) {
     return `illegal transition ${task.status} → ${p.status}`;
   }
 
-  // R14 让位前置：作业在跑时不得释放 WIP 名额
+  // R14 yield precondition: cannot free a WIP slot while a job is running
   const yielding = task.status === "in_progress" && p.status === "pending";
   if (yielding && (ctx.facts.hasRunning(task.id) || ctx.facts.hasBackoff(task.id))) {
-    return `#${task.id} has a running job; cannot yield → bg_kill({job_id:"…"}) 或等它结束`;
+    return `#${task.id} has a running job; cannot yield → bg_kill({job_id:"…"}) or wait for it to finish`;
   }
 
   // R1 WIP
@@ -46,7 +46,7 @@ export function checkStructure(state: BoardState, task: Task, p: UpdateParams, c
     }
   }
 
-  // R4 依赖（R21 环检测在 reducer/graph.ts：提议边并入后 DFS，回边即拒）
+  // R4 dependencies (R21 cycle detection in reducer/graph.ts: merge proposed edges, then DFS; back-edge rejects)
   if (p.status === "in_progress" || p.status === "completed") {
     for (const dep of task.blockedBy ?? []) {
       const d = state.tasks.find((x) => x.id === dep);

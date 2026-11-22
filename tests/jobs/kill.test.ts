@@ -14,7 +14,7 @@ const j = (id: string, o: Partial<Job> = {}): Job => ({
   evidenceApplied: false, notifyState: "pending", ...o,
 });
 
-it("按 rootId 取消整链：清 retryAt 并记 requestedBy（F33）", () => {
+it("cancel the whole chain by rootId: clear retryAt and record requestedBy (F33)", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_9qv7roa4}}")));
   s.put(j("R", { retryAt: 500 }));
   s.put(j("R2", { retryOf: "R", retryAt: 900 }));
@@ -24,14 +24,14 @@ it("按 rootId 取消整链：清 retryAt 并记 requestedBy（F33）", () => {
   expect(s.get("R")?.kill).toEqual({ requestedBy: "self", at: 1000 });
 });
 
-it("按链上任意 id 也能定位 root（F33）", () => {
+it("any id in the chain can locate the root (F33)", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_9qv7roa4}}")));
   s.put(j("R", { retryAt: 500 }));
   s.put(j("R2", { retryOf: "R", retryAt: 900 }));
   expect(requestKill(s, "R2", "external", 1000).cancelledBackoff).toHaveLength(2);
 });
 
-it("未知 id 返回空结果，不抛", () => {
+it("unknown id returns an empty result without throwing", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_9qv7roa4}}")));
   expect(requestKill(s, "nope", "self", 1)).toEqual({ killed: [], cancelledBackoff: [] });
 });
@@ -45,11 +45,11 @@ const gone = async (pid: number): Promise<boolean> => {
   return false;
 };
 
-it("F116 escalate：忽略 SIGTERM 的进程在超时后被 SIGKILL", async () => {
+it("F116 escalate: a process ignoring SIGTERM is SIGKILLed after the timeout", async () => {
   const child = spawn("sh", ["-c", "trap '' TERM; while true; do sleep 1; done"], { detached: true, stdio: "ignore" });
   const pid = child.pid!;
   try {
-    await sleep(100);                     // 等 shell 安装 trap，避免开局默认处置
+    await sleep(100);                     // wait for the shell to install the trap, avoiding the default disposition early on
     const t0 = Date.now();
     await escalate(pid, 200);
     const elapsed = Date.now() - t0;
@@ -63,7 +63,7 @@ it("F116 escalate：忽略 SIGTERM 的进程在超时后被 SIGKILL", async () =
   }
 });
 
-it("F116 escalate：进程组优先，忽略 TERM 的子进程也被 SIGKILL", async () => {
+it("F116 escalate: process group first; child processes ignoring TERM are also SIGKILLed", async () => {
   const dir = mkdtempSync(join(tmpdir(), "{{SECRET_9qv7roa4}}"));
   const script = join(dir, "s.sh");
   const out = join(dir, "grandchild.pid");
@@ -87,7 +87,7 @@ it("F116 escalate：进程组优先，忽略 TERM 的子进程也被 SIGKILL", a
       await sleep(20);
     }
     expect(grandchild).toBeDefined();
-    await sleep(100);                     // 等子 shell 安装 trap
+    await sleep(100);                     // wait for the child shell to install the trap
     await escalate(pid, 200);
     expect(await gone(pid)).toBe(true);
     expect(await gone(grandchild!)).toBe(true);
@@ -100,18 +100,18 @@ it("F116 escalate：进程组优先，忽略 TERM 的子进程也被 SIGKILL", a
   }
 });
 
-it("F116 escalate：已退出进程不抛", async () => {
+it("F116 escalate: an already-exited process does not throw", async () => {
   const child = spawn("true", [], { stdio: "ignore" });
   const pid = child.pid!;
   await new Promise<void>((res) => child.once("exit", () => res()));
   await expect(escalate(pid, 100)).resolves.toBeUndefined();
 });
 
-it("killNow 对不存在的 pid 不抛（进程组与单 pid 两条兜底）", () => {
+it("killNow does not throw for a nonexistent pid (both process-group and single-pid fallbacks)", () => {
   expect(() => killNow(999_999)).not.toThrow();
 });
 
-it("killNow 真杀进程组（B3 异常清理路径）", async () => {
+it("killNow actually kills the process group (B3 exception cleanup path)", async () => {
   const child = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
   const pid = child.pid!;
   const exited = new Promise<void>((res) => child.once("exit", () => res()));

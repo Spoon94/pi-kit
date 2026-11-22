@@ -15,14 +15,14 @@ const ctx = (): RuleContext => ({
   facts: { hasRunning: () => false, hasBackoff: () => false, startedAt: () => undefined, exists: () => true },
 });
 
-it("旧包占位时判定冲突（F13）", () => {
+it("Conflict detected when the old package occupies the tool (F13)", () => {
   expect(detectToolConflict([{ name: "todo", sourceInfo: { source: "npm:@juicesharp/rpiv-todo" } }], "npm:pi-kit")).toBe(true);
   expect(detectToolConflict([{ name: "todo", sourceInfo: { source: "npm:pi-kit" } }], "npm:pi-kit")).toBe(false);
   expect(detectToolConflict([], "npm:pi-kit")).toBe(false);
   expect(detectToolConflict([{ name: "todo" }], "npm:pi-kit")).toBe(true);
 });
 
-it("L1 预检拦明显违规并给文案", () => {
+it("L1 preflight blocks obvious violations and provides a message", () => {
   const b = emptyBoard();
   b.tasks = [{ id: 1, subject: "a", status: "in_progress" }, { id: 2, subject: "b", status: "pending" }];
   const r = preflight({ toolName: "todo", input: { action: "update", id: 2, status: "in_progress" } }, b, ctx());
@@ -30,24 +30,24 @@ it("L1 预检拦明显违规并给文案", () => {
   expect(r?.reason).toContain("WIP full");
 });
 
-it("L1 跳过嵌套调用（F15）", () => {
+it("L1 skips nested calls (F15)", () => {
   const b = emptyBoard();
   b.tasks = [{ id: 1, subject: "a", status: "in_progress" }, { id: 2, subject: "b", status: "pending" }];
   expect(preflight({ toolName: "todo", parentToolCallId: "p1", input: { action: "update", id: 2, status: "in_progress" } }, b, ctx())).toBeUndefined();
 });
 
-it("L1 不管别的工具（F14）", () => {
+it("L1 ignores other tools (F14)", () => {
   expect(preflight({ toolName: "read", input: { path: "a" } }, emptyBoard(), ctx())).toBeUndefined();
 });
 
-it("L1 只处理 update + 数字 id", () => {
+it("L1 handles only update + numeric id", () => {
   const b = emptyBoard();
   b.tasks = [{ id: 1, subject: "a", status: "in_progress" }];
   expect(preflight({ toolName: "todo", input: { action: "get", id: 1 } }, b, ctx())).toBeUndefined();
   expect(preflight({ toolName: "todo", input: { action: "update", id: "1" } }, b, ctx())).toBeUndefined();
 });
 
-it("畸形 input 不抛（Review Focus 1）", () => {
+it("Malformed input does not throw (Review Focus 1)", () => {
   expect(preflight({ toolName: "todo", input: null }, emptyBoard(), ctx())).toBeUndefined();
   expect(preflight({ toolName: "todo", input: { action: "update" } }, emptyBoard(), ctx())).toBeUndefined();
 });
@@ -62,7 +62,7 @@ const toolDeps = (
   runVerify: async () => ({ ok: true, exitCode: 0 }), now: () => 1, ...over,
 });
 
-it("同一 job 不得绑定两个任务（F30）", async () => {
+it("The same job cannot bind to two tasks (F30)", async () => {
   const b = emptyBoard();
   b.tasks = [
     { id: 1, subject: "a", status: "in_progress", jobs: ["bg_x"] },
@@ -81,7 +81,7 @@ it("同一 job 不得绑定两个任务（F30）", async () => {
   expect(killed).toEqual(["bg_x"]);
 });
 
-it("bg_run 指向 pending 且 WIP 满被拒，不绑不推进（F41）", async () => {
+it("bg_run against pending with WIP full is rejected: no bind, no advance (F41)", async () => {
   const b = emptyBoard();
   b.tasks = [
     { id: 1, subject: "a", status: "in_progress" },
@@ -98,7 +98,7 @@ it("bg_run 指向 pending 且 WIP 满被拒，不绑不推进（F41）", async (
   expect(b.tasks[1].status).toBe("pending");
 });
 
-it("verify 期间人工 park 不被旧快照覆盖（BLOCKER）", async () => {
+it("Manual park during verify is not overwritten by an old snapshot (BLOCKER)", async () => {
   let board = emptyBoard();
   board.tasks = [{ id: 1, subject: "v", status: "in_progress", verify: { kind: "command", command: "true" } }];
   board.nextId = 2;
@@ -109,16 +109,16 @@ it("verify 期间人工 park 不被旧快照覆盖（BLOCKER）", async () => {
     runVerify: () => new Promise((res) => { resolveVerify = res; }),
   });
   const pending = createTodoTool(deps).execute({ action: "verify", id: 1 });
-  board = { ...board, tasks: [{ ...board.tasks[0], status: "parked", park: { reason: "人工", at: 5, from: "in_progress" } }] };
+  board = { ...board, tasks: [{ ...board.tasks[0], status: "parked", park: { reason: "manual", at: 5, from: "in_progress" } }] };
   resolveVerify({ ok: true, exitCode: 0 });
   const r = await pending;
   expect(r.isError).toBeUndefined();
   expect(board.tasks[0].status).toBe("parked");
-  expect(board.tasks[0].park?.reason).toBe("人工");
+  expect(board.tasks[0].park?.reason).toBe("manual");
   expect(board.tasks[0].evidence).toHaveLength(1);
 });
 
-it("verify 期间任务被删除不得复活（BLOCKER）", async () => {
+it("Task deleted during verify is not revived (BLOCKER)", async () => {
   let board = emptyBoard();
   board.tasks = [{ id: 1, subject: "v", status: "in_progress", verify: { kind: "command", command: "true" } }];
   board.nextId = 2;
@@ -138,7 +138,7 @@ it("verify 期间任务被删除不得复活（BLOCKER）", async () => {
   expect(commits).toBe(0);
 });
 
-it("verify 无执行上下文返回 isError 并标记不可信证据（§6.4）", async () => {
+it("verify without an execution context returns isError and records untrusted evidence (§6.4)", async () => {
   let board = emptyBoard();
   board.tasks = [{ id: 1, subject: "v", status: "in_progress", verify: { kind: "command", command: "true" } }];
   board.nextId = 2;
@@ -149,11 +149,11 @@ it("verify 无执行上下文返回 isError 并标记不可信证据（§6.4）"
   });
   const r = await createTodoTool(deps).execute({ action: "verify", id: 1 });
   expect(r.isError).toBe(true);
-  expect(r.content[0].text).toContain("未能执行");
+  expect(r.content[0].text).toContain("Verify command could not run");
   expect(board.tasks[0].evidence?.at(-1)).toMatchObject({ ok: false, known: false });
 });
 
-it("bg_run spawn 失败返回 isError 且状态不变", async () => {
+it("bg_run spawn failure returns isError and leaves state unchanged", async () => {
   const b = emptyBoard();
   b.tasks = [{ id: 1, subject: "a", status: "pending" }];
   b.nextId = 2;
@@ -164,14 +164,14 @@ it("bg_run spawn 失败返回 isError 且状态不变", async () => {
   expect(b.tasks[0].status).toBe("pending");
 });
 
-it("bg_kill 未知 id 返回 isError", async () => {
+it("bg_kill with unknown id returns isError", async () => {
   const b = emptyBoard();
   const r = await createBgKillTool(toolDeps(b)).execute({ job_id: "nope" });
   expect(r.isError).toBe(true);
   expect(r.content[0].text).toContain("not found");
 });
 
-it("clear 经工具：删 completed、markPurged、appendEntry", async () => {
+it("clear via tool: deletes completed, markPurged, appendEntry", async () => {
   let board = emptyBoard();
   board.tasks = [
     { id: 1, subject: "done", status: "completed", jobs: ["R"] },
@@ -192,7 +192,7 @@ it("clear 经工具：删 completed、markPurged、appendEntry", async () => {
   expect(entries).toBe(1);
 });
 
-it("bg_run 成功绑定 pending 并推进 in_progress", async () => {
+it("bg_run binds pending and advances to in_progress on success", async () => {
   let board = emptyBoard();
   board.tasks = [{ id: 1, subject: "a", status: "pending" }];
   board.nextId = 2;
@@ -211,7 +211,7 @@ it("bg_run 成功绑定 pending 并推进 in_progress", async () => {
   expect(commits).toBe(1);
 });
 
-it("bg_run 参数/状态/容量错误分支", async () => {
+it("bg_run parameter/status/capacity error branches", async () => {
   const b = emptyBoard();
   b.tasks = [
     { id: 1, subject: "a", status: "in_progress" },
@@ -231,7 +231,7 @@ it("bg_run 参数/状态/容量错误分支", async () => {
   expect((await full.execute({ command: "true", task_id: 1 })).content[0].text).toContain("capacity full");
 });
 
-it("bg_run 绑定阶段抛错会 kill 并返回 isError", async () => {
+it("An error during the bg_run bind stage kills the job and returns isError", async () => {
   const b = emptyBoard();
   b.tasks = [{ id: 1, subject: "a", status: "pending" }];
   b.nextId = 2;
@@ -247,7 +247,7 @@ it("bg_run 绑定阶段抛错会 kill 并返回 isError", async () => {
   expect(killed).toEqual(["bg_x"]);
 });
 
-it("verify 未知任务与无 verify 命令分支", async () => {
+it("verify unknown task and no verify command branches", async () => {
   const b = emptyBoard();
   b.tasks = [{ id: 1, subject: "a", status: "in_progress" }];
   b.nextId = 2;
@@ -256,7 +256,7 @@ it("verify 未知任务与无 verify 命令分支", async () => {
   expect((await tool.execute({ action: "verify", id: 1 })).content[0].text).toContain("no verify command");
 });
 
-it("clear scope:all 无 force 拒绝；running 绑定的任务被跳过", async () => {
+it("clear scope:all without force is rejected; tasks bound to running jobs are skipped", async () => {
   const b = emptyBoard();
   b.tasks = [{ id: 1, subject: "done", status: "completed", jobs: ["bg_a"] }];
   b.nextId = 2;
@@ -271,7 +271,7 @@ it("clear scope:all 无 force 拒绝；running 绑定的任务被跳过", async 
   expect(skipped.content[0].text).toContain("skipped");
 });
 
-it("bg_run 唯一 in_progress 可省 task_id", async () => {
+it("bg_run may omit task_id when exactly one task is in_progress", async () => {
   const b = emptyBoard();
   b.tasks = [{ id: 1, subject: "a", status: "in_progress" }];
   b.nextId = 2;
@@ -284,7 +284,7 @@ it("bg_run 唯一 in_progress 可省 task_id", async () => {
   expect(taskId).toBe(1);
 });
 
-it("bg_kill 缺 job_id 返回 isError", async () => {
+it("bg_kill missing job_id returns isError", async () => {
   const r = await createBgKillTool(toolDeps(emptyBoard())).execute({});
   expect(r.isError).toBe(true);
   expect(r.content[0].text).toContain("job_id");

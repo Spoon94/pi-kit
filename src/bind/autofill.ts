@@ -24,10 +24,10 @@ export function autofillJob(jobId: string, d: AutofillDeps): { action: AutofillA
   const idx = board.tasks.findIndex((t) => t.id === job.taskId);
   const task: Task | undefined = idx >= 0 ? { ...board.tasks[idx] } : undefined;
 
-  // 非 owner / 无绑定任务：只落 job 侧，不碰 board（铁律）
+  // Not owner / no bound task: record on the job side only, never touch board (hard rule)
   if (!task || job.sessionId !== d.sessionId) return { action: "recorded" };
 
-  // F31：同一 job 重复回调只写一条证据
+  // F31: repeated callbacks for the same job write only one evidence entry
   if ((task.evidence ?? []).some((e) => e.kind === "job" && e.origin === "async" && e.ref === job.id)) {
     return { action: "recorded" };
   }
@@ -60,7 +60,7 @@ export function autofillJob(jobId: string, d: AutofillDeps): { action: AutofillA
     next.park = { reason, at: d.now, from: task.status };
   };
 
-  // 人工优先：回填时任务已不在 in_progress ⇒ 只记证据，绝不改状态/重试/park
+  // Human first: if the task is no longer in_progress at autofill ⇒ record evidence only, never change status/retry/park
   if (humanFirst) return commit(() => {}, "recorded");
 
   if (job.status === "failed" && job.exitCodeKnown && job.exitCode !== 0) {
@@ -70,12 +70,12 @@ export function autofillJob(jobId: string, d: AutofillDeps): { action: AutofillA
       d.jobs.put({ ...d.jobs.get(job.id)!, retryAt: d.now + delay });
       return commit(() => {}, "retry");
     }
-    const reason = `${job.attempt} 次均失败${ev.note ? ` · ${ev.note}` : ""}`;
+    const reason = `failed after ${job.attempt} attempts${ev.note ? ` · ${ev.note}` : ""}`;
     return commit((t) => park(t, reason), "parked", reason);
   }
 
   if (job.status === "killed" || !job.exitCodeKnown) {
-    const reason = job.status === "killed" ? "killed" : "退出码未知，需重验";
+    const reason = job.status === "killed" ? "killed" : "exit code unknown; reverify required";
     return commit((t) => park(t, reason), "parked", reason);
   }
 
@@ -93,10 +93,10 @@ export function autofillJob(jobId: string, d: AutofillDeps): { action: AutofillA
         if (root) d.jobs.put({ ...root, pendingReverify: true });
         return commit(() => {}, "reverify");
       }
-      const reason = "无空闲槽位重验";
+      const reason = "no free slot for reverify";
       return commit((t) => park(t, reason), "parked", reason);
     }
-    const reason = "工作区持续变动，证据无法确认";
+    const reason = "workspace kept changing; evidence unverified";
     return commit((t) => park(t, reason), "parked", reason);
   }
 

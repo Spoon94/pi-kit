@@ -4,7 +4,7 @@ import type { FpVerdict } from "../board/types.js";
 import type { JobStore } from "../jobs/store.js";
 import type { Job } from "../jobs/types.js";
 
-/** HEAD + tracked 工作区状态哈希；非 git 或失败返回 undefined（已知盲区：ignored 文件不计）。 */
+/** HEAD + tracked workspace status hash; undefined when not git or on failure (known blind spot: ignored files not counted). */
 export function collectFingerprint(cwd: string): string | undefined {
   try {
     const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
@@ -15,11 +15,11 @@ export function collectFingerprint(cwd: string): string | undefined {
 
 const overlaps = (a: Job, b: Job): boolean =>
   a.id !== b.id && a.cwd === b.cwd
-  && (a.taskId !== b.taskId || a.sessionId !== b.sessionId)   // 同 task 且同 session 才排除
+  && (a.taskId !== b.taskId || a.sessionId !== b.sessionId)   // excluded only when same task and same session
   && b.startedAt <= (a.endedAt ?? Number.MAX_SAFE_INTEGER)
   && (b.endedAt ?? Number.MAX_SAFE_INTEGER) >= a.startedAt;
 
-/** 单一集合：缺 fpEnd（未结束/结果未知）或有写入都算无法归因。 */
+/** One set: missing fpEnd (not finished/result unknown) or any write counts as unattributable. */
 export function classifyOverlap(job: Job, store: JobStore) {
   const interferers: string[] = [];
   for (const other of store.all()) {
@@ -29,7 +29,7 @@ export function classifyOverlap(job: Job, store: JobStore) {
   return { interferers };
 }
 
-/** 回填时才计算；无干扰者且指纹变了才 stale。 */
+/** Computed only at autofill; stale only when there are no interferers and the fingerprint changed. */
 export function verdictAt(job: Job, store: JobStore): FpVerdict {
   if (job.fpStart === undefined || job.fpEnd === undefined) return "unknown";
   if (job.fpStart === job.fpEnd) return "fresh";
@@ -38,8 +38,8 @@ export function verdictAt(job: Job, store: JobStore): FpVerdict {
 
 export function fpReason(job: Job): string {
   if (job.fpVerdict === "fresh") return "fp:fresh";
-  if (job.fpVerdict === "stale") return "fp:stale（独占期间工作区变过）";
-  if (job.interferers.length > 0) return `fp:unknown（${job.interferers.join(",")} 期间有写入或未结束，无法归因）`;
-  if (job.fpStart !== undefined && job.fpEnd !== undefined && job.fpStart !== job.fpEnd) return "fp:unknown（无法归因）";
-  return "fp:n/a（非 git 或采集失败）";
+  if (job.fpVerdict === "stale") return "fp:stale (workspace changed during exclusive run)";
+  if (job.interferers.length > 0) return `fp:unknown (${job.interferers.join(",")} wrote during the run or never finished; unattributable)`;
+  if (job.fpStart !== undefined && job.fpEnd !== undefined && job.fpStart !== job.fpEnd) return "fp:unknown (unattributable)";
+  return "fp:n/a (not git or collection failed)";
 }

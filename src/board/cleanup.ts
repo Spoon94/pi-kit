@@ -22,17 +22,17 @@ export function planCleanup(state: BoardState, scope: ClearScope | undefined, fo
   }
   const s = scope ?? "settled";
   if (s === "all") {
-    if (force !== true) return { remove: [], skipped: [], error: `clear scope:"all" 需要 force:true` };
+    if (force !== true) return { remove: [], skipped: [], error: `clear scope:"all" requires force:true` };
     const busy = state.tasks.filter((t) => facts.hasRunning(t.id) || facts.hasBackoff(t.id));
     if (busy.length) {
       return { remove: [], skipped: busy.map((t) => t.id),
-        error: `${busy.map((t) => `#${t.id}`).join(" ")} 有作业在跑或退避中 → bg_kill({job_id:"…"}) 或 /vigil-todo halt` };
+        error: `${busy.map((t) => `#${t.id}`).join(" ")} has jobs running or in backoff → bg_kill({job_id:"…"}) or /vigil-todo halt` };
     }
   }
   const remove: number[] = []; const skipped: number[] = [];
   for (const t of state.tasks) {
     if (!inScope(t, s)) continue;
-    if (facts.hasRunning(t.id)) { skipped.push(t.id); continue; }   // 部分成功优于孤儿
+    if (facts.hasRunning(t.id)) { skipped.push(t.id); continue; }   // partial success beats orphans
     remove.push(t.id);
   }
   return { remove, skipped };
@@ -52,7 +52,7 @@ export function applyCleanup(state: BoardState, plan: CleanupPlan, _now: number)
   return { ...state, tasks };
 }
 
-/** 清理任务时同步标记 sidecar，避免 resume 后重放或 catch-up 重新补发（R19）。 */
+/** Mark the sidecar when clearing tasks, so resume/replay or catch-up never redelivers them (R19). */
 export function markPurged(jobs: JobStore, taskIds: number[], tasks: Task[]): string[] {
   const drop = new Set(taskIds);
   const roots = new Set<string>();
@@ -66,7 +66,7 @@ export function markPurged(jobs: JobStore, taskIds: number[], tasks: Task[]): st
   let dirty = false;
   for (const id of roots) {
     for (const j of jobs.all().filter((x) => x.rootId === id)) {
-      if (j.purged && j.retryAt == null && j.pendingReverify == null) continue;   // 幂等：无变化不落盘
+      if (j.purged && j.retryAt == null && j.pendingReverify == null) continue;   // idempotent: no change, no save
       const next = { ...j, purged: true };
       delete next.retryAt;
       delete next.pendingReverify;
@@ -82,6 +82,6 @@ export function retentionCandidates(state: BoardState, retentionMs: number, now:
   if (retentionMs <= 0) return [];
   return state.tasks
     .filter((t) => (t.status === "completed" || t.status === "deleted")
-      && now - (t.statusSince ?? 0) > retentionMs)   // 缺失/0 = epoch，视为最老，必须可清
+      && now - (t.statusSince ?? 0) > retentionMs)   // missing/0 = epoch, treated as oldest, always clearable
     .map((t) => t.id);
 }

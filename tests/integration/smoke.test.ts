@@ -15,7 +15,7 @@ import { DEFAULTS } from "../../src/lib/config.js";
 import { tryDeliver } from "../../src/wake/deliver.js";
 import type { RuleContext } from "../../src/board/invariants.js";
 
-it("真实作业 → 回填 → 终结 → 投影 → 投递（F4/F6/F72 闭环）", async () => {
+it("Real job → autofill → finalize → project → deliver (F4/F6/F72 closed loop)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "{{SECRET_c5r8w0nt}}"));
   const boards = createBoardStore(); const jobs = createJobStore(dir);
   const ctx = (): RuleContext => ({
@@ -27,7 +27,7 @@ it("真实作业 → 回填 → 终结 → 投影 → 投递（F4/F6/F72 闭环�
     },
   });
   let s = emptyBoard();
-  s = applyMutation(s, { action: "create", tasks: [{ subject: "跑测试" }, { subject: "写文档" }] }, ctx()).state;
+  s = applyMutation(s, { action: "create", tasks: [{ subject: "run tests" }, { subject: "write docs" }] }, ctx()).state;
   s = applyMutation(s, { action: "update", id: 1, status: "in_progress" }, ctx()).state;
   boards.commit("S", s);
 
@@ -41,7 +41,7 @@ it("真实作业 → 回填 → 终结 → 投影 → 投递（F4/F6/F72 闭环�
 
   const deps = { boards, jobs, cfg: DEFAULTS, now: Date.now(), sessionId: "S",
     respawn: () => ({ ok: true }), notify: () => {}, isIdle: () => true };
-  // 非 git 目录 ⇒ fp unknown ⇒ 仍自动完成（F35）
+  // Non-git directory ⇒ fp unknown ⇒ still auto-completes (F35)
   expect(autofillJob(exited.id, deps).action).toBe("completed");
   finalizeAndProject(exited.rootId, jobs, boards, "S", Date.now(), "done", true);
   sweepAll(deps);

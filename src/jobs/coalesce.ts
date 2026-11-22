@@ -1,18 +1,19 @@
 import type { JobStore } from "./store.js";
 
 export interface SaveCoalescer {
-  /** 标记 sidecar 有变更；批次内延到批次结束，批次外立即落盘。 */
+  /** Mark the sidecar dirty; inside a batch postpone until batch end, outside a batch save immediately. */
   save(): void;
   begin(): void;
   end(): void;
-  /** 同步落盘（若有变更），用于换 store 与关闭前。 */
+  /** Synchronously save (if dirty); used when swapping stores and before shutdown. */
   flush(): void;
   pending(): boolean;
 }
 
 /**
- * 同一同步批次内的多次 save 合并为一次写；批次外保持原有的同步落盘语义。
- * 不引入定时器 / 微任务：状态变更仍在当前调用栈让出前完成。
+ * Coalesce multiple saves in one synchronous batch into a single write; outside a batch keep
+ * the original synchronous-save semantics. No timers / microtasks: state changes still complete
+ * before the current call stack yields.
  */
 export function createSaveCoalescer(write: () => void): SaveCoalescer {
   let dirty = false;
@@ -42,7 +43,7 @@ export function createSaveCoalescer(write: () => void): SaveCoalescer {
   };
 }
 
-/** 让所有调用方（finalize/sweep/ack）的 jobs.save() 走同一合并器。 */
+/** Route jobs.save() from all callers (finalize/sweep/ack) through the same coalescer. */
 export function withCoalescedSave(store: JobStore, c: SaveCoalescer): JobStore {
   return { ...store, save: c.save };
 }

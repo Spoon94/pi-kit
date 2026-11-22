@@ -25,7 +25,7 @@ const deps = (board: ReturnType<typeof emptyBoard>, jobs: ReturnType<typeof crea
   runVerify: async () => ({ ok: true, exitCode: 0 }), now: () => 1, ...over,
 });
 
-it("bg_run：空/超长/NUL 命令、超长与非字符串 label、非法 task_id 拒绝", async () => {
+it("bg_run: rejects empty/oversized/NUL commands, oversized and non-string labels, and invalid task_id", async () => {
   const b = emptyBoard();
   b.tasks = [{ id: 1, subject: "a", status: "pending" }];
   b.nextId = 2;
@@ -40,7 +40,7 @@ it("bg_run：空/超长/NUL 命令、超长与非字符串 label、非法 task_i
   expect((await tool.execute({ command: "true", task_id: Number.MAX_SAFE_INTEGER + 1 })).content[0].text).toContain("safe integer");
 });
 
-it("bg_run：task_id 指向 deleted 任务拒绝", async () => {
+it("bg_run: rejects a task_id that points to a deleted task", async () => {
   const b = emptyBoard();
   b.tasks = [{ id: 1, subject: "a", status: "deleted" }];
   b.nextId = 2;
@@ -50,7 +50,7 @@ it("bg_run：task_id 指向 deleted 任务拒绝", async () => {
   expect(r.content[0].text).toContain("deleted");
 });
 
-it("bg_kill：空/不存在/已终结/重复 kill", async () => {
+it("bg_kill: empty/nonexistent/terminal/repeated kill", async () => {
   const b = emptyBoard();
   const jobs = createJobStore(mkdtempSync(join(tmpdir(), "vigil-edge-")));
   const tool = createBgKillTool(deps(b, jobs, {
@@ -65,7 +65,7 @@ it("bg_kill：空/不存在/已终结/重复 kill", async () => {
   expect((await tool.execute({ job_id: "nope" })).content[0].text).toContain("not found");
 
   jobs.put(job("done", { status: "completed", exitCode: 0 }));
-  expect((await tool.execute({ job_id: "done" })).content[0].text).toContain("无需中止");
+  expect((await tool.execute({ job_id: "done" })).content[0].text).toContain("nothing to abort");
 
   jobs.put(job("run", { status: "running", endedAt: null, exitCode: null, exitCodeKnown: false }));
   expect((await tool.execute({ job_id: "run" })).content[0].text).toContain("Killed");

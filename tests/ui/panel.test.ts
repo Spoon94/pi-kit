@@ -16,29 +16,29 @@ const done = (id: number, fp: "fresh" | "unknown" = "fresh"): Task =>
 const b = (tasks: Task[]) => ({ ...emptyBoard(), tasks, nextId: tasks.length + 1 });
 const jobs = () => createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_z8p3x1cq}}")));
 
-it("首行含 done/total 与 parked 数（F25）", () => {
-  const s = b([done(1), { id: 2, subject: "p", status: "parked", park: { reason: "需拍板", at: 1, from: "pending" } }]);
+it("first line includes done/total and the parked count (F25)", () => {
+  const s = b([done(1), { id: 2, subject: "p", status: "parked", park: { reason: "needs a decision", at: 1, from: "pending" } }]);
   const rows = renderPanel(s, jobs(), DEFAULTS);
   expect(rows[0]).toContain("1/2");
   expect(rows[0]).toContain("1 parked");
 });
 
-it("completed 汇总一行带证据与 fp:? 计数（F58）", () => {
+it("completed summary line includes evidence and the fp:? count (F58)", () => {
   const s = b([done(1), done(2, "unknown"), done(3, "unknown")]);
   const rows = renderPanel(s, jobs(), DEFAULTS);
   const summary = rows.find((r) => r.includes("done ·"));
   expect(summary).toContain("3 done");
   expect(summary).toContain("all exit 0");
-  expect(summary).toContain("2 条 fp:?");
+  expect(summary).toContain("2 with fp:?");
 });
 
-it("parked reason 独占缩进行（F25）", () => {
-  const s = b([{ id: 1, subject: "p", status: "parked", park: { reason: "公开 API 需拍板", at: 1, from: "pending" } }]);
+it("parked reason occupies its own indented line (F25)", () => {
+  const s = b([{ id: 1, subject: "p", status: "parked", park: { reason: "public API needs a decision", at: 1, from: "pending" } }]);
   const rows = renderPanel(s, jobs(), DEFAULTS);
-  expect(rows.some((r) => r.includes("└─ 公开 API 需拍板"))).toBe(true);
+  expect(rows.some((r) => r.includes("└─ public API needs a decision"))).toBe(true);
 });
 
-it("超预算优先保 parked，截断给出 +N more parked（F25）", () => {
+it("over budget preserves parked first; truncation shows +N more parked (F25)", () => {
   const tasks: Task[] = Array.from({ length: 10 }, (_, i) => ({
     id: i + 1, subject: `p${i}`, status: "parked" as const, park: { reason: `r${i}`, at: 1, from: "pending" as const },
   }));
@@ -48,11 +48,11 @@ it("超预算优先保 parked，截断给出 +N more parked（F25）", () => {
   expect(r.rows[0]).toContain("10 parked");
 });
 
-it("空列表返回空数组（自动卸载）", () => {
+it("empty list returns an empty array (auto-unload)", () => {
   expect(renderPanel(emptyBoard(), jobs(), DEFAULTS)).toEqual([]);
 });
 
-it("C2 状态栏：进度 / 运行作业 / parked / halted / 空态清空", () => {
+it("C2 status line: progress / running jobs / parked / halted / cleared when empty", () => {
   const empty = jobs();
   expect(renderStatus(emptyBoard(), empty)).toBeUndefined();
 
@@ -75,58 +75,58 @@ it("C2 状态栏：进度 / 运行作业 / parked / halted / 空态清空", () =
   expect(renderStatus(progress, running)).toBe("vigil ● 1 job");
 });
 
-it("/todos 逐条带 exit code 与 fp（F58 下钻）", () => {
+it("/todos lists each task with exit code and fp (F58 drill-down)", () => {
   const text = renderTodos(b([done(1), done(2, "unknown")]), jobs());
   expect(text).toContain("#1");
   expect(text).toContain("exit 0");
   expect(text).toContain("fp:unknown");
 });
 
-it("doctor 报冲突与降级（F13/F12）", () => {
-  const text = renderDoctor(emptyBoard(), jobs(), true, "sidecar 损坏");
-  expect(text).toContain("冲突");
-  expect(text).toContain("sidecar 损坏");
+it("doctor reports conflict and degradation (F13/F12)", () => {
+  const text = renderDoctor(emptyBoard(), jobs(), true, "sidecar corrupted");
+  expect(text).toContain("todo tool conflict");
+  expect(text).toContain("sidecar corrupted");
 });
 
-it("doctor 报 halted / purged / 超期 / 孤儿作业，且各带可执行下一步", () => {
+it("doctor reports halted / purged / overdue / orphan jobs, each with an actionable next step", () => {
   const b = emptyBoard();
   b.counters.halted = true;
   b.tasks = [{ id: 1, subject: "old", status: "completed", statusSince: 1 }];
   const text = renderDoctor(b, jobs(), false, undefined, { purgedRoots: 2, retentionOverdue: 1, orphanJobs: 3 });
-  expect(text).toContain("强制中断");
-  expect(text).toContain("2 条链已 purge");
-  expect(text).toContain("无需处理");
-  expect(text).toContain("如需重跑请新建任务");
-  expect(text).toContain("超期未清理");
-  expect(text).toContain("/vt clear 清理历史（只清终态）");
-  expect(text).toContain("孤儿作业");
-  expect(text).toContain("bg_list 查看");
-  expect(text).toContain('bg_kill({job_id:"…"}) 回收');
+  expect(text).toContain("Halted → /vigil-todo resume to resume");
+  expect(text).toContain("2 chains purged");
+  expect(text).toContain("no action needed");
+  expect(text).toContain("create a new task to rerun");
+  expect(text).toContain("overdue for cleanup");
+  expect(text).toContain("/vt clear to clear history (terminal only)");
+  expect(text).toContain("orphan jobs");
+  expect(text).toContain("bg_list to inspect");
+  expect(text).toContain('bg_kill({job_id:"…"}) to reclaim');
 });
 
-it("doctor：in_progress 无绑定作业给出 verify 下一步与具体任务 id", () => {
+it("doctor: in_progress without a bound job gives a verify next step and the specific task id", () => {
   const s = b([
     { id: 7, subject: "a", status: "in_progress" },
     { id: 9, subject: "b", status: "in_progress" },
   ]);
   const text = renderDoctor(s, jobs(), false, undefined,
     { purgedRoots: 0, retentionOverdue: 0, orphanJobs: 0 });
-  expect(text).toContain("2 个 in_progress 任务无绑定作业");
-  expect(text).toContain("如 #7");
+  expect(text).toContain("2 in_progress tasks have no bound job");
+  expect(text).toContain("e.g. #7");
   expect(text).toContain('todo({action:"verify", id:7})');
-  expect(text).toContain("重新起作业");
+  expect(text).toContain("or start a job");
 });
 
-it("达轮数上限在面板首行与 doctor 标注（F24）", () => {
+it("turn limit reached is marked on the panel's first line and in doctor (F24)", () => {
   const s = b([{ id: 1, subject: "p", status: "pending" }]);
   s.counters.turnsUsed = DEFAULTS.maxTurns;
-  expect(renderPanel(s, jobs(), DEFAULTS)[0]).toContain("达轮数上限");
-  expect(renderDoctor(s, jobs(), false)).toContain("达轮数上限");
+  expect(renderPanel(s, jobs(), DEFAULTS)[0]).toContain("turn limit reached");
+  expect(renderDoctor(s, jobs(), false)).toContain("Turn limit reached");
 });
 
-it("in_progress 行显示 ✶ 耗时，retry 上限随配置（§8.1）", () => {
+it("in_progress row shows ✶ elapsed; retry limit follows config (§8.1)", () => {
   const now = 1_000_000;
-  const s = b([{ id: 1, subject: "补单测", status: "in_progress", activeForm: "writing tests" }]);
+  const s = b([{ id: 1, subject: "add unit tests", status: "in_progress", activeForm: "writing tests" }]);
   const jj = jobs();
   const running: Job = {
     id: "bg_x", label: "x", command: "true", logPath: "/tmp/x.log", cwd: "/tmp", pid: 1,
@@ -138,23 +138,23 @@ it("in_progress 行显示 ✶ 耗时，retry 上限随配置（§8.1）", () => 
   const { rows } = layoutRows(s, jj, 12, DEFAULTS, now);
   const line = rows.find((r) => r.includes("#1")) ?? "";
   expect(line).toContain("✶ 2m10s");
-  expect(line).toContain("retry 1/6");                 // 默认总尝试 6
+  expect(line).toContain("retry 1/6");                 // default total attempts is 6
   const custom = layoutRows(s, jj, 12, { ...DEFAULTS, retries: 1 }, now);
   expect(custom.rows.find((r) => r.includes("#1")) ?? "").toContain("retry 1/2");
 });
 
-it("证据滚动时汇总不显示 all exit 0（MINOR #3）", () => {
+it("summary does not show all exit 0 when evidence rolled (MINOR #3)", () => {
   const evidence: Evidence[] = Array.from({ length: 8 }, (_, i) => ({
     ok: false, kind: "job", origin: "async", chainFinal: false,
     at: i, known: true, fp: "fresh", exitCode: 1, ref: `bg_${i}`,
   }));
   const s = b([{ id: 1, subject: "d", status: "completed", jobs: ["bg_a"], evidence }]);
   const summary = renderPanel(s, jobs(), DEFAULTS).find((r) => r.includes("done ·")) ?? "";
-  expect(summary).toContain("证据已滚动");
+  expect(summary).toContain("evidence rolled");
   expect(summary).not.toContain("all exit 0");
 });
 
-it("WIP 超卖在面板与 doctor 可见（MINOR #5）", () => {
+it("WIP oversold is visible in the panel and doctor (MINOR #5)", () => {
   const tasks: Task[] = [
     { id: 1, subject: "i1", status: "in_progress" },
     { id: 2, subject: "i2", status: "in_progress" },
@@ -162,14 +162,14 @@ it("WIP 超卖在面板与 doctor 可见（MINOR #5）", () => {
     { id: 4, subject: "p", status: "pending" },
   ];
   const s = b(tasks);
-  expect(renderPanel(s, jobs(), { ...DEFAULTS, wipLimit: 1 })[0]).toContain("WIP 超卖 (3/1)");
+  expect(renderPanel(s, jobs(), { ...DEFAULTS, wipLimit: 1 })[0]).toContain("WIP oversold (3/1)");
   const doc = renderDoctor(s, jobs(), false, undefined,
     { purgedRoots: 0, retentionOverdue: 0, orphanJobs: 0, wipLimit: 1 });
-  expect(doc).toContain("超过 wipLimit=1");
-  expect(doc).not.toContain("无可推进");
+  expect(doc).toContain("exceeds wipLimit=1");
+  expect(doc).not.toContain("nothing actionable");
 });
 
-it("面板按宽度截断加省略号，/todos 全量不截断（F115）", () => {
+it("panel truncates to width with an ellipsis; /todos is not truncated (F115)", () => {
   const long = "x".repeat(300);
   const s = b([
     { id: 1, subject: long, status: "pending" },
@@ -185,18 +185,18 @@ it("面板按宽度截断加省略号，/todos 全量不截断（F115）", () =>
   expect(renderTodos(s, jobs())).toContain(long);
 });
 
-it("汇总行覆盖非零退出 / reverified / verify changed 分支", () => {
+it("summary line covers nonzero exit / reverified / verify changed branches", () => {
   const s = b([
     { id: 1, subject: "a", status: "completed", verifyChanged: true, evidence: [ev({ ok: false, exitCode: 1 })] },
     { id: 2, subject: "b", status: "completed", evidence: [ev({ note: "reverified" })] },
   ]);
   const summary = renderPanel(s, jobs(), DEFAULTS).find((r) => r.includes("done ·")) ?? "";
-  expect(summary).toContain("有非零退出");
+  expect(summary).toContain("nonzero exit");
   expect(summary).toContain("reverified");
   expect(summary).toContain("verify changed");
 });
 
-it("parked 缺 reason、预算截断与 renderTodos 空证据分支", () => {
+it("parked without reason, budget truncation, and renderTodos empty-evidence branch", () => {
   const parked = b([{ id: 1, subject: "p", status: "parked" }]);
   expect(renderPanel(parked, jobs(), DEFAULTS).some((r) => r.includes("└─"))).toBe(true);
 

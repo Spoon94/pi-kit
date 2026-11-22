@@ -18,7 +18,7 @@ const ctx = (f = facts()): RuleContext => ({ wipLimit: 3, now: 1000, facts: f })
 const t = (id: number, o: Partial<Task> = {}): Task => ({ id, subject: `t${id}`, status: "pending", ...o });
 const b = (tasks: Task[]): BoardState => ({ ...emptyBoard(), tasks, nextId: tasks.length + 1 });
 
-it("默认 scope=settled：只清 completed 与 deleted，保留 pending/in_progress/parked", () => {
+it("default scope=settled: clears only completed and deleted, keeps pending/in_progress/parked", () => {
   const s = b([t(1, { status: "completed" }), t(2, { status: "deleted" }), t(3), t(4, { status: "in_progress" }),
                t(5, { status: "parked", park: { reason: "r", at: 1, from: "pending" } })]);
   const p = planCleanup(s, undefined, undefined, facts());
@@ -26,56 +26,56 @@ it("默认 scope=settled：只清 completed 与 deleted，保留 pending/in_prog
   expect(applyCleanup(s, p, 1000).tasks.map((x) => x.id)).toEqual([3, 4, 5]);
 });
 
-it("scope=completed / deleted 各自只清一类", () => {
+it("scope=completed / deleted each clears only its own class", () => {
   const s = b([t(1, { status: "completed" }), t(2, { status: "deleted" })]);
   expect(planCleanup(s, "completed", undefined, facts()).remove).toEqual([1]);
   expect(planCleanup(s, "deleted", undefined, facts()).remove).toEqual([2]);
 });
 
-it("scope=all 无 force 被拒（R18）", () => {
+it("scope=all without force is rejected (R18)", () => {
   const s = b([t(1)]);
   expect(planCleanup(s, "all", undefined, facts()).error).toMatch(/force/);
 });
 
-it("scope=all + force 但有 running 作业被拒，文案指向 halt（R18）", () => {
+it("scope=all + force with a running job is rejected; message points to halt (R18)", () => {
   const s = b([t(1, { status: "in_progress" })]);
   const p = planCleanup(s, "all", true, facts([1]));
   expect(p.error).toMatch(/halt/);
 });
 
-it("scope=all + force 但有退避链被拒（R18）", () => {
+it("scope=all + force with a backoff chain is rejected (R18)", () => {
   expect(planCleanup(b([t(1, { status: "in_progress" })]), "all", true, facts([], [1])).error).toMatch(/halt/);
 });
 
-it("任何 scope 下绑 running 作业的任务被跳过并列出（R18 部分成功）", () => {
+it("under any scope, tasks bound to a running job are skipped and listed (R18 partial success)", () => {
   const s = b([t(1, { status: "completed", jobs: ["bg_a"] }), t(2, { status: "completed" })]);
   const p = planCleanup(s, "completed", undefined, facts([1]));
   expect(p.remove).toEqual([2]);
   expect(p.skipped).toEqual([1]);
 });
 
-it("clear 经 reducer 时默认不再全清（防回归）", () => {
+it("clear through the reducer no longer clears everything by default (regression guard)", () => {
   let s = applyMutation(emptyBoard(), { action: "create", subject: "a" }, ctx()).state;
   s = applyMutation(s, { action: "update", id: 1, status: "in_progress" }, ctx()).state;
   const r = applyMutation(s, { action: "clear" }, ctx());
-  expect(r.state.tasks).toHaveLength(1);          // in_progress 不被默认清掉
+  expect(r.state.tasks).toHaveLength(1);          // in_progress is not cleared by default
 });
 
-it("clear scope=all force 在无作业时可全清", () => {
+it("clear scope=all force clears everything when there are no jobs", () => {
   const s = b([t(1), t(2, { status: "completed" })]);
   const r = applyMutation(s, { action: "clear", scope: "all", force: true }, ctx());
   expect(r.state.tasks).toHaveLength(0);
   expect(r.op.kind).toBe("clear");
 });
 
-it("清理保留 counters（不得重置 turnsUsed 绕过保险丝）", () => {
+it("cleanup preserves counters (must not reset turnsUsed to bypass the fuse)", () => {
   const s = b([t(1, { status: "completed" })]);
   s.counters.turnsUsed = 42;
   const r = applyMutation(s, { action: "clear", scope: "all", force: true }, ctx());
   expect(r.state.counters.turnsUsed).toBe(42);
 });
 
-it("清理已完成依赖后移除 blockedBy 引用，下游可推进（BLOCKER）", () => {
+it("cleanup removes blockedBy references to completed dependencies; downstream can advance (BLOCKER)", () => {
   const s = b([t(1, { status: "completed" }), t(2, { blockedBy: [1] })]);
   const cleared = applyMutation(s, { action: "clear" }, ctx());
   expect(cleared.state.tasks.map((x) => x.id)).toEqual([2]);
@@ -92,7 +92,7 @@ const job = (id: string, o: Partial<Job> = {}): Job => ({
   finalResult: { ok: true, note: "done", trigger: "external", at: 2 }, notifyState: "pending", ...o,
 });
 
-it("markPurged 标记绑定链的 root（R19）", () => {
+it("markPurged marks the root of bound chains (R19)", () => {
   const jobs = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_c1nsk0qv}}")));
   jobs.put(job("R"));
   const roots = markPurged(jobs, [1], [t(1, { status: "completed", jobs: ["R"] })]);
@@ -100,7 +100,7 @@ it("markPurged 标记绑定链的 root（R19）", () => {
   expect(jobs.get("R")?.purged).toBe(true);
 });
 
-it("markPurged 同时取消退避与待重验（BLOCKER）", () => {
+it("markPurged cancels both backoff and pending reverify (BLOCKER)", () => {
   const jobs = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_c1nsk0qv}}")));
   jobs.put(job("R", { retryAt: 500, pendingReverify: true }));
   markPurged(jobs, [1], [t(1, { status: "completed", jobs: ["R"] })]);
@@ -109,7 +109,7 @@ it("markPurged 同时取消退避与待重验（BLOCKER）", () => {
   expect(jobs.get("R")?.pendingReverify).toBeFalsy();
 });
 
-it("markPurged 清全链每个 job 的退避/待重验（MAJOR #2）", () => {
+it("markPurged clears backoff/pending reverify for every job in the chain (MAJOR #2)", () => {
   const jobs = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_c1nsk0qv}}")));
   jobs.put(job("R", { retryAt: 500, pendingReverify: true }));
   jobs.put(job("R2", { rootId: "R", retryOf: "R", retryAt: 600, pendingReverify: true }));
@@ -121,7 +121,7 @@ it("markPurged 清全链每个 job 的退避/待重验（MAJOR #2）", () => {
   }
 });
 
-it("F123 markPurged 幂等：无变化不落盘（P2）", () => {
+it("F123 markPurged is idempotent: no write when nothing changes (P2)", () => {
   const jobs = createJobStore(mkdtempSync(join(tmpdir(), "{{SECRET_c1nsk0qv}}")));
   jobs.put(job("R"));
   markPurged(jobs, [1], [t(1, { status: "completed", jobs: ["R"] })]);
@@ -132,19 +132,19 @@ it("F123 markPurged 幂等：无变化不落盘（P2）", () => {
   expect(saves).toBe(0);
 });
 
-it("retention 只候选 completed/deleted，绝不包含 parked", () => {
+it("retention candidates include only completed/deleted, never parked", () => {
   const s = b([t(1, { status: "completed", statusSince: 10 }), t(2, { status: "deleted", statusSince: 10 }),
                t(3, { status: "parked", statusSince: 10, park: { reason: "r", at: 10, from: "pending" } }),
                t(4, { status: "completed", statusSince: 900 })]);
   expect(retentionCandidates(s, 100, 1000).sort()).toEqual([1, 2]);
 });
 
-it("retentionMs=0 关闭，不产生候选", () => {
+it("retentionMs=0 disables retention and produces no candidates", () => {
   const s = b([t(1, { status: "completed", statusSince: 1 })]);
   expect(retentionCandidates(s, 0, 100_000)).toEqual([]);
 });
 
-it("statusSince 缺失或 0 视为极老，retention 可清（MAJOR）", () => {
+it("missing or 0 statusSince is treated as ancient; retention may clear it (MAJOR)", () => {
   const s = b([t(1, { status: "completed", statusSince: 0 }), t(2, { status: "deleted" })]);
   expect(retentionCandidates(s, 1000, 100_000).sort()).toEqual([1, 2]);
 });

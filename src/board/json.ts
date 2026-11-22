@@ -1,4 +1,4 @@
-/** 保守的 JSON 值校验：无环、深度 ≤64、节点 ≤10000、仅有限数字/JSON 类型。 */
+/** Conservative JSON value check: acyclic, depth ≤64, nodes ≤10000, finite numbers/JSON types only. */
 const MAX_NODES = 10_000;
 const MAX_DEPTH = 64;
 
@@ -28,7 +28,7 @@ export function isJsonSafe(value: unknown): boolean {
 
 const VERIFY_MAX = 4096;
 
-/** verify 规格：kind=command、非空、≤4096、无 NUL；换行允许（shell 脚本）。 */
+/** verify spec: kind=command, non-empty, ≤4096, no NUL; newlines allowed (shell scripts). */
 export function verifyError(v: { kind?: unknown; command?: unknown }): string | undefined {
   if (v.kind !== "command") return `verify.kind must be "command"`;
   if (typeof v.command !== "string" || v.command.trim() === "") return "verify.command required (non-empty)";

@@ -27,7 +27,7 @@ export interface TrackDeps {
   abandon(job: Job): void;
 }
 
-/** spawn 后的登记；任一步失败 ⇒ 放弃子进程（调用方负责杀），不留下无主进程（B3）。 */
+/** Post-spawn bookkeeping; if any step fails ⇒ abandon the child (caller kills it), leaving no orphan process (B3). */
 export function trackSpawned(job: Job, onExit: (j: Job) => void, d: TrackDeps): { ok: true } | { ok: false; error: string } {
   try {
     d.put(job);
@@ -59,8 +59,8 @@ export function spawnJob(req: SpawnRequest, dir: string, now: number): SpawnResu
     const child = spawn("sh", ["-c", req.command], {
       cwd: req.cwd, detached: true, stdio: ["ignore", fd, fd], env: { ...process.env, PWD: req.cwd },
     });
-    // 立即接管异步 error：无效 cwd 等失败路径不得变成未处理事件
-    child.once("error", () => { /* monitor 或调用方负责语义；这里只防崩溃 */ });
+    // Attach the async error immediately: failure paths like invalid cwd must not become unhandled events
+    child.once("error", () => { /* monitor or caller owns semantics; this only prevents a crash */ });
     if (child.pid === undefined) return { ok: false, error: "spawn returned no pid" };
     const job: Job = {
       id, label: req.label?.trim() || req.command.trim().slice(0, 50), command: req.command,

@@ -15,7 +15,7 @@ const walk = (dir: string): string[] => {
 const importsOf = (f: string): string[] =>
   [...readFileSync(f, "utf8").matchAll(/from\s+["']([^"']+)["']/g)].map((m) => m[1]);
 
-it("board/ 不得 import pi 或 extensions（纯状态机）", () => {
+it("board/ must not import pi or extensions (pure state machine)", () => {
   const bad: string[] = [];
   for (const f of walk(join(ROOT, "src/board"))) {
     for (const spec of importsOf(f)) {
@@ -25,7 +25,7 @@ it("board/ 不得 import pi 或 extensions（纯状态机）", () => {
   expect(bad).toEqual([]);
 });
 
-it("jobs/ 不得 import bind/wake/ui/tool（作业子系统不懂编排）", () => {
+it("jobs/ must not import bind/wake/ui/tool (the job subsystem knows nothing about orchestration)", () => {
   const bad: string[] = [];
   for (const f of walk(join(ROOT, "src/jobs"))) {
     for (const spec of importsOf(f)) {
@@ -35,7 +35,7 @@ it("jobs/ 不得 import bind/wake/ui/tool（作业子系统不懂编排）", () 
   expect(bad).toEqual([]);
 });
 
-it("ui/ 不得调用写入口（只读）", () => {
+it("ui/ must not call write entry points (read-only)", () => {
   const bad: string[] = [];
   for (const f of walk(join(ROOT, "src/ui"))) {
     const src = readFileSync(f, "utf8");

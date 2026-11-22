@@ -16,7 +16,7 @@ const job = (id: string, o: Partial<Job> = {}): Job => ({
   evidenceApplied: false, notifyState: "pending", ...o,
 });
 
-it("T1 面板子命令：空前缀全出，h/r/d 前缀过滤，未知返回 null", () => {
+it("T1 panel subcommands: empty prefix returns all, h/r/d prefixes filter, unknown returns null", () => {
   expect(panelCompletions("")!.map((c) => c.value)).toEqual(["halt", "resume", "doctor", "clear"]);
   expect(panelCompletions("h")!.map((c) => c.value)).toEqual(["halt"]);
   expect(panelCompletions("r")!.map((c) => c.value)).toEqual(["resume"]);
@@ -29,7 +29,7 @@ it("T1 面板子命令：空前缀全出，h/r/d 前缀过滤，未知返回 nul
   expect(PANEL_SUBCOMMANDS.find((c) => c.value === "halt")?.description).toContain("park");
 });
 
-it("F131 补全：一级含 clear，clear 前缀只出三个范围候选（无 all）", () => {
+it("F131 completions: top level includes clear; clear prefix offers only three scope candidates (no all)", () => {
   expect(panelCompletions("")!.map((c) => c.value)).toContain("clear");
   expect(panelCompletions("clear ")!.map((c) => c.value))
     .toEqual(["clear completed", "clear deleted", "clear settled"]);
@@ -39,27 +39,27 @@ it("F131 补全：一级含 clear，clear 前缀只出三个范围候选（无 a
   expect(panelCompletions("clear s")!.map((c) => c.value)).toEqual(["clear settled"]);
   expect(panelCompletions("clear a")).toBeNull();
   expect(panelCompletions("clear z")).toBeNull();
-  expect(panelCompletions("clear ")![0].description).toContain("已完成");
-  expect(panelCompletions("clear ")![2].description).toContain("默认");
+  expect(panelCompletions("clear ")![0].description).toContain("Clear only completed tasks");
+  expect(panelCompletions("clear ")![2].description).toContain("default scope");
 });
 
-it("T2 /bg 子命令与动态 id：k 只列 running/退避，tail 列全部", () => {
+it("T2 /bg subcommands and dynamic ids: k lists only running/backoff, tail lists all", () => {
   const dir = mkdtempSync(join(tmpdir(), "vigil-comp-"));
   const s = createJobStore(dir);
   expect(bgCompletions("")!.map((c) => c.value)).toEqual(["k", "tail"]);
   expect(bgCompletions("k")!.map((c) => c.value)).toEqual(["k"]);
   expect(bgCompletions("t")!.map((c) => c.value)).toEqual(["tail"]);
   expect(bgCompletions("x")).toBeNull();
-  expect(bgCompletions("k ", s)).toBeNull();            // 无作业 → null，不是空数组
+  expect(bgCompletions("k ", s)).toBeNull();            // no jobs → null, not an empty array
   expect(bgCompletions("tail ", s)).toBeNull();
 
-  s.put(job("bg_run", { label: "训练", status: "running", endedAt: null, exitCode: null }));
-  s.put(job("bg_back", { label: "退避", status: "failed", retryAt: 500 }));
-  s.put(job("bg_done", { label: "完成" }));
+  s.put(job("bg_run", { label: "training", status: "running", endedAt: null, exitCode: null }));
+  s.put(job("bg_back", { label: "backoff", status: "failed", retryAt: 500 }));
+  s.put(job("bg_done", { label: "done" }));
   const k = bgCompletions("k ", s)!;
   expect(k.map((c) => c.label)).toEqual(["bg_run", "bg_back"]);
   expect(k.map((c) => c.value)).toEqual(["k bg_run", "k bg_back"]);
-  expect(k[0].description).toContain("训练");
+  expect(k[0].description).toContain("training");
   expect(k[0].description).toContain("running");
   expect(k[1].description).toContain("backoff");
 
@@ -71,18 +71,18 @@ it("T2 /bg 子命令与动态 id：k 只列 running/退避，tail 列全部", ()
   expect(BG_SUBCOMMANDS.map((c) => c.value)).toEqual(["k", "tail"]);
 });
 
-it("T2 候选上限截断到 50", () => {
+it("T2 candidates truncate to the cap of 50", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "vigil-comp-")));
   for (let i = 0; i < 60; i++) s.put(job(`bg_${String(i).padStart(2, "0")}`, { status: "running" }));
   expect(bgCompletions("k ", s)).toHaveLength(COMPLETION_JOB_LIMIT);
   expect(bgCompletions("tail ", s)).toHaveLength(COMPLETION_JOB_LIMIT);
 });
 
-it("补全纯读、永不抛：不 save、不改 store、坏 store 返回 null", () => {
+it("completion is pure read and never throws: no save, no store mutation, broken store returns null", () => {
   const dir = mkdtempSync(join(tmpdir(), "vigil-comp-"));
   const s = createJobStore(dir);
   s.put(job("bg_x", { status: "running" }));
-  s.put(job("bg bad id", { label: "space" }));          // 会拆参数的畸形 id 不进入候选
+  s.put(job("bg bad id", { label: "space" }));          // malformed ids that would split arguments are excluded from candidates
   expect(bgCompletions("tail ", s)!.map((c) => c.label)).not.toContain("bg bad id");
   const before = JSON.stringify(s.all());
   s.put = () => { throw new Error("mutated"); };
@@ -100,7 +100,7 @@ it("补全纯读、永不抛：不 save、不改 store、坏 store 返回 null",
   expect(bgCompletions(undefined as never, undefined)!.map((c) => c.value)).toEqual(["k", "tail"]);
 });
 
-it("恶意 job.label 进 description 后被清洗", () => {
+it("malicious job.label is sanitized in description", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "vigil-comp-")));
   s.put(job("bg_evil", { label: "\u001b]0;pwned\u0007\u001b[31mRED" }));
   const c = bgCompletions("tail ", s)![0];
@@ -109,7 +109,7 @@ it("恶意 job.label 进 description 后被清洗", () => {
   expect(c.description).toContain("RED");
 });
 
-it("T3 /todos 无候选", () => {
+it("T3 /todos has no candidates", () => {
   expect(todosCompletions()).toBeNull();
   expect(todosCompletions("anything")).toBeNull();
 });

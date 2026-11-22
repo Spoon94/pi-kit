@@ -15,7 +15,7 @@ import { DEFAULTS } from "../../src/lib/config.js";
 import { tryDeliver } from "../../src/wake/deliver.js";
 import type { RuleContext } from "../../src/board/invariants.js";
 
-it("一个 todo 挂 3 个真实作业：并行、日志独立、合并一条、completed 一次（V2）", async () => {
+it("One todo with 3 real jobs: parallel, independent logs, one merged delivery, completed once (V2)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vigil-multi-"));
   const boards = createBoardStore();
   const jobs = createJobStore(dir);
@@ -29,7 +29,7 @@ it("一个 todo 挂 3 个真实作业：并行、日志独立、合并一条、c
     },
   });
   let s = emptyBoard();
-  s = applyMutation(s, { action: "create", tasks: [{ subject: "训练" }, { subject: "next" }] }, ctx()).state;
+  s = applyMutation(s, { action: "create", tasks: [{ subject: "training" }, { subject: "next" }] }, ctx()).state;
   s = applyMutation(s, { action: "update", id: 1, status: "in_progress" }, ctx()).state;
   boards.commit("S", s);
 
@@ -48,9 +48,9 @@ it("一个 todo 挂 3 个真实作业：并行、日志独立、合并一条、c
   mon.clearAll();
   for (const j of exited) { jobs.put(j); jobs.save(); }
 
-  // 真并行：最晚启动早于最早结束
+  // Truly parallel: the latest start is earlier than the earliest end
   expect(Math.max(...spawned.map((j) => j.startedAt))).toBeLessThan(Math.min(...exited.map((j) => j.endedAt!)));
-  // 日志各自独立
+  // Logs are independent
   expect(readFileSync(exited[0].logPath, "utf8").trim()).toBe("A");
   expect(readFileSync(exited[1].logPath, "utf8").trim()).toBe("B");
   expect(readFileSync(exited[2].logPath, "utf8").trim()).toBe("C");
@@ -59,7 +59,7 @@ it("一个 todo 挂 3 个真实作业：并行、日志独立、合并一条、c
     respawn: () => ({ ok: true }), notify: () => {}, isIdle: () => true };
   const actions = exited.map((j) => autofillJob(j.id, deps).action);
   expect(actions[0]).toBe("completed");
-  expect(actions.slice(1)).toEqual(["recorded", "recorded"]);   // 已 completed，不再改状态
+  expect(actions.slice(1)).toEqual(["recorded", "recorded"]);   // Already completed; status no longer changes
   for (const j of exited) finalizeAndProject(j.rootId, jobs, boards, "S", Date.now(), "completed", true);
 
   const task = boards.get("S").tasks[0];

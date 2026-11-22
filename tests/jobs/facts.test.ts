@@ -13,7 +13,7 @@ const j = (id: string, o: Partial<Job> = {}): Job => ({
   evidenceApplied: false, notifyState: "pending", ...o,
 });
 
-it("jobFactsOf 四项事实：running/backoff/startedAt/exists", () => {
+it("jobFactsOf exposes four facts: running/backoff/startedAt/exists", () => {
   const s = createJobStore(mkdtempSync(join(tmpdir(), "vigil-facts-")));
   s.put(j("run", { status: "running", taskId: 1, startedAt: 42 }));
   s.put(j("back", { taskId: 2, retryAt: 99, startedAt: 7 }));

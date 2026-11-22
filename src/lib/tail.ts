@@ -1,6 +1,6 @@
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 
-/** 从文件尾按字节读 ≤maxBytes，取末 lines 行；不整读大文件。 */
+/** Read ≤maxBytes from the file end by bytes and take the last `lines` lines; never read large files whole. */
 export function tailLines(path: string, lines: number, maxBytes: number): string[] {
   let fd: number | undefined;
   try {
@@ -11,7 +11,7 @@ export function tailLines(path: string, lines: number, maxBytes: number): string
     readSync(fd, buf, 0, len, size - len);
     const text = buf.toString("utf8");
     const parts = text.split("\n");
-    if (len < size) parts.shift();               // 丢弃可能被截断的首行
+    if (len < size) parts.shift();               // drop the possibly truncated first line
     while (parts.length && parts.at(-1) === "") parts.pop();
     return parts.slice(-lines);
   } catch { return []; }

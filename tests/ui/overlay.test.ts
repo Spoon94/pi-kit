@@ -2,14 +2,14 @@ import { expect, it } from "vitest";
 import { createOverlayController } from "../../src/ui/overlay.js";
 import { emptyBoard } from "../../src/board/types.js";
 
-it("headless 时全部 no-op（Review Focus 5）", () => {
+it("all no-ops when headless (Review Focus 5)", () => {
   let calls = 0;
   const c = createOverlayController({ hasUI: () => false, setWidget: () => { calls++; } });
   c.update(emptyBoard());
   expect(calls).toBe(0);
 });
 
-it("空列表卸载 widget；非空注册", () => {
+it("empty list unloads the widget; non-empty registers", () => {
   const set: (string | undefined)[] = [];
   const c = createOverlayController({ hasUI: () => true, setWidget: (k) => { set.push(k); } });
   c.update(emptyBoard());

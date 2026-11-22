@@ -19,7 +19,7 @@ const board3 = (): BoardState => ({
 });
 const msg = (r: ReturnType<typeof applyMutation>) => (r.op as { message: string }).message;
 
-it("update 组合：reason/accept 仅在对应状态；completed 与改 verify 冲突", () => {
+it("update combinations: reason/accept are only valid in their matching status; completed conflicts with changing verify", () => {
   let s = board3();
   expect(msg(applyMutation(s, { action: "update", id: 1, status: "completed", reason: "x" }, ctx())))
     .toContain('reason is only valid with status:"parked"');
@@ -33,7 +33,7 @@ it("update 组合：reason/accept 仅在对应状态；completed 与改 verify �
     .toContain("cannot change verify and complete");
 });
 
-it("metadata：循环/深嵌套/超大/BigInt 拒绝，合法嵌套保留", () => {
+it("metadata: cyclic/deeply nested/oversized/BigInt are rejected; valid nesting is preserved", () => {
   const base = board3();
   const cyclic: any = { a: 1 }; cyclic.self = cyclic;
   expect(msg(applyMutation(base, { action: "update", id: 1, metadata: cyclic }, ctx()))).toContain("JSON-safe");
@@ -55,7 +55,7 @@ it("metadata：循环/深嵌套/超大/BigInt 拒绝，合法嵌套保留", () =
   expect(msg(applyMutation(base, { action: "create", subject: "x", metadata: cyclic }, ctx()))).toContain("JSON-safe");
 });
 
-it("blockedBy：重复去重；add/remove 同 id 拒绝；非安全整数拒绝", () => {
+it("blockedBy: duplicates are deduplicated; add/remove of the same id is rejected; non-safe integers are rejected", () => {
   const created = applyMutation(board3(), { action: "create", subject: "d", blockedBy: [2, 2] }, ctx());
   expect(created.state.tasks.find((t) => t.id === 4)?.blockedBy).toEqual([2]);
 
@@ -70,7 +70,7 @@ it("blockedBy：重复去重；add/remove 同 id 拒绝；非安全整数拒绝"
     .toContain("safe integer");
 });
 
-it("verify.command：空/超长/NUL 拒；换行允许", () => {
+it("verify.command: empty/too long/NUL are rejected; newlines are allowed", () => {
   const s = board3();
   expect(msg(applyMutation(s, { action: "update", id: 1, verify: { kind: "command", command: "  " } }, ctx())))
     .toContain("verify.command required");
@@ -84,7 +84,7 @@ it("verify.command：空/超长/NUL 拒；换行允许", () => {
     .toContain("verify.command required");
 });
 
-it("id 非安全整数与 nextId 溢出拒绝", () => {
+it("non-safe integer ids and nextId overflow are rejected", () => {
   const s = board3();
   for (const id of [Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
     expect(msg(applyMutation(s, { action: "update", id } as never, ctx()))).toContain("safe integer");
@@ -95,7 +95,7 @@ it("id 非安全整数与 nextId 溢出拒绝", () => {
   expect(msg(applyMutation(overflow, { action: "create", subject: "x" }, ctx()))).toContain("overflow");
 });
 
-it("tasks[] 单项畸形：subject 非字符串/缺省、metadata 非对象", () => {
+it("malformed tasks[] items: subject not a string/missing, metadata not an object", () => {
   const s = board3();
   expect(msg(applyMutation(s, { action: "create", tasks: [{ subject: 7 as never }] }, ctx()))).toContain("subject required");
   expect(msg(applyMutation(s, { action: "create", tasks: [{ subject: "a", metadata: "x" as never }] }, ctx())))
@@ -103,7 +103,7 @@ it("tasks[] 单项畸形：subject 非字符串/缺省、metadata 非对象", ()
   expect(msg(applyMutation(s, { action: "create", tasks: [] }, ctx()))).toContain("subject required");
 });
 
-it("create 带 tasks[] 时顶层字段被拒（不静默丢弃）", () => {
+it("top-level fields are rejected when create has tasks[] (not silently dropped)", () => {
   const s = board3();
   for (const extra of [
     { description: "d" }, { activeForm: "x" }, { owner: "o" },
@@ -114,7 +114,7 @@ it("create 带 tasks[] 时顶层字段被拒（不静默丢弃）", () => {
   }
 });
 
-it("park + verify 改动被拒（与 completed 对称）", () => {
+it("changing verify together with park is rejected (symmetric with completed)", () => {
   const s = applyMutation(emptyBoard(), {
     action: "create", subject: "v", verify: { kind: "command", command: "npm test" },
   }, ctx()).state;
@@ -124,7 +124,7 @@ it("park + verify 改动被拒（与 completed 对称）", () => {
   expect(applyMutation(s, { action: "update", id: 1, status: "parked", reason: "r" }, ctx()).op.kind).toBe("update");
 });
 
-it("clear：非法 scope 与非布尔 force 拒绝", () => {
+it("clear: invalid scope and non-boolean force are rejected", () => {
   const s = board3();
   expect(msg(applyMutation(s, { action: "clear", scope: "bogus" } as never, ctx()))).toContain("invalid scope");
   expect(msg(applyMutation(s, { action: "clear", force: "yes" } as never, ctx()))).toContain("force must be a boolean");

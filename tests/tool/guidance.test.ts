@@ -26,7 +26,7 @@ const defs = (guidance = DEFAULT_GUIDANCE) => [
   createBgListTool(deps(), guidance), createBgKillTool(deps(), guidance),
 ];
 
-it("F120：四个工具都有 promptSnippet/promptGuidelines，合起来覆盖六条要点", () => {
+it("F120: all four tools have promptSnippet/promptGuidelines covering six key points together", () => {
   const list = defs();
   for (const d of list) {
     expect(d.promptSnippet?.trim()).toBeTruthy();
@@ -42,7 +42,7 @@ it("F120：四个工具都有 promptSnippet/promptGuidelines，合起来覆盖�
   expect(DEFAULT_GUIDANCE.promptGuidelines.length).toBeGreaterThanOrEqual(6);
 });
 
-it("F122：四个 per-tool snippet 互不相同；支持按工具覆盖与全局兜底", () => {
+it("F122: the four per-tool snippets differ; per-tool override and global fallback are supported", () => {
   const list = defs();
   expect(new Set(list.map((d) => d.promptSnippet)).size).toBe(4);
   for (const s of Object.values(DEFAULT_GUIDANCE.snippets)) expect(s.trim()).not.toBe("");
@@ -58,7 +58,7 @@ it("F122：四个 per-tool snippet 互不相同；支持按工具覆盖与全局
   expect(global.promptSnippet).toBe("G");
 });
 
-it("schema 每个参数都有非空 description（含嵌套对象）", () => {
+it("Every schema parameter has a non-empty description (including nested objects)", () => {
   const check = (schema: any, where: string): void => {
     for (const [key, prop] of Object.entries<any>(schema.properties ?? {})) {
       expect(typeof prop.description, `${where}.${key}`).toBe("string");
@@ -72,10 +72,10 @@ it("schema 每个参数都有非空 description（含嵌套对象）", () => {
   check(BgKillParamsSchema, "bg_kill");
   const reasonDesc = (TodoParamsSchema.properties.reason as any).description as string;
   expect(reasonDesc).toContain("park");
-  expect(reasonDesc).not.toContain("清理");
+  expect(reasonDesc).not.toContain("cleanup");
 });
 
-it("指引可被配置覆盖，优先级 file > settings > legacy > 默认", () => {
+it("Guidance can be overridden by config; priority file > settings > legacy > default", () => {
   expect(resolveGuidance({})).toEqual(DEFAULT_GUIDANCE);
   const custom = { promptSnippet: "CUSTOM SNIPPET", promptGuidelines: ["CUSTOM LINE"] };
   const file = resolveGuidance({ file: { guidance: custom } });
@@ -97,7 +97,7 @@ it("指引可被配置覆盖，优先级 file > settings > legacy > 默认", () 
   expect(d.promptGuidelines).toEqual(["CUSTOM LINE"]);
 });
 
-it("guidance loader 缓存：stat 未变不重读，变化才重读", () => {
+it("guidance loader cache: unchanged stat skips reread, change triggers reread", () => {
   let reads = 0; let key = "a";
   const load = createGuidanceLoader({
     stat: () => ({ mtimeMs: 1, settingsKey: key }),

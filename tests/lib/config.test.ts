@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { CONFIG_KEYS, DEFAULTS, createConfigLoader, resolveConfig } from "../../src/lib/config.js";
 
 describe("resolveConfig", () => {
-  it("空来源全部走默认值", () => {
+  it("all defaults apply when sources are empty", () => {
     expect(resolveConfig({})).toEqual(DEFAULTS);
     expect(DEFAULTS.wipLimit).toBe(1);
     expect(DEFAULTS.retries).toBe(5);
@@ -13,13 +13,13 @@ describe("resolveConfig", () => {
     expect(DEFAULTS.maxConcurrentJobs).toBe(10);
   });
 
-  it("默认总尝试 6：retries=5，退避五档（避开 4）", () => {
+  it("default total attempts 6: retries=5, five backoff tiers (avoiding 4)", () => {
     expect(1 + DEFAULTS.retries).toBe(6);
     expect(DEFAULTS.retryDelaysMs).toHaveLength(5);
     expect(DEFAULTS.retryDelaysMs).toEqual([0, 30_000, 120_000, 300_000, 600_000]);
   });
 
-  it("file > settings.vigilTodo > legacy.bgRun > 默认", () => {
+  it("file > settings.vigilTodo > legacy.bgRun > defaults", () => {
     const c = resolveConfig({
       file: { wipLimit: 5 },
       settings: { wipLimit: 4, maxTurns: 9 },
@@ -30,7 +30,7 @@ describe("resolveConfig", () => {
     expect(c.maxConcurrentJobs).toBe(2);
   });
 
-  it("非法值退回默认，不抛异常", () => {
+  it("invalid values fall back to defaults without throwing", () => {
     const c = resolveConfig({
       file: { wipLimit: 0, retries: -1, maxTurns: "50", tailLines: 1.5, collapseKey: "" },
     });
@@ -41,7 +41,7 @@ describe("resolveConfig", () => {
     expect(c.collapseKey).toBe(DEFAULTS.collapseKey);
   });
 
-  it("collapseKey / haltKey 允许 off 哨兵（C4）", () => {
+  it("collapseKey / haltKey allow the off sentinel (C4)", () => {
     expect(resolveConfig({ file: { collapseKey: "off" } }).collapseKey).toBe("off");
     expect(resolveConfig({ file: { haltKey: "off" } }).haltKey).toBe("off");
     expect(resolveConfig({ file: { haltKey: " alt+H " } }).haltKey).toBe("alt+h");
@@ -49,37 +49,37 @@ describe("resolveConfig", () => {
   });
 });
 
-it("CONFIG_KEYS 覆盖 VigilConfig 全部键，无遗漏无多余", () => {
+it("CONFIG_KEYS covers every VigilConfig key, with no missing or extra entries", () => {
   expect(Object.keys(CONFIG_KEYS).sort()).toEqual(Object.keys(DEFAULTS).sort());
 });
 
-it("每个键的 default 与 DEFAULTS 一致（文档不会漂移）", () => {
+it("each key's default matches DEFAULTS (docs cannot drift)", () => {
   for (const [k, meta] of Object.entries(CONFIG_KEYS)) {
     expect(meta.default).toEqual((DEFAULTS as unknown as Record<string, unknown>)[k]);
   }
 });
 
-it("只有 collapseKey / haltKey 需要 reload", () => {
+it("only collapseKey / haltKey require reload", () => {
   const needReload = Object.entries(CONFIG_KEYS).filter(([, m]) => m.reload).map(([k]) => k);
   expect(needReload).toEqual(["collapseKey", "haltKey"]);
 });
 
-it("taskRetentionMs 默认 0（自动删任务默认关闭）", () => {
+it("taskRetentionMs defaults to 0 (automatic task retention deletion off by default)", () => {
   expect(DEFAULTS.taskRetentionMs).toBe(0);
   expect(resolveConfig({}).taskRetentionMs).toBe(0);
 });
 
-it("合法的 int[] 覆盖生效（不是静默忽略）", () => {
+it("valid int[] overrides take effect (not silently ignored)", () => {
   expect(resolveConfig({ file: { retryDelaysMs: [0, 1000] } }).retryDelaysMs).toEqual([0, 1000]);
 });
 
-it("逐键非法值只影响该键，其他键仍生效", () => {
+it("an invalid value for one key affects only that key; other keys still apply", () => {
   const c = resolveConfig({ file: { wipLimit: -5, maxTurns: 7 } });
   expect(c.wipLimit).toBe(DEFAULTS.wipLimit);
   expect(c.maxTurns).toBe(7);
 });
 
-it("loader 分离 stat 与读取：未变不读文件，settings/mtime 变化才重读（BLOCKER）", () => {
+it("loader separates stat from read: unchanged means no file read, only settings/mtime changes trigger a reread (BLOCKER)", () => {
   let reads = 0; let mtime = 1; let key = "a";
   const load = createConfigLoader({
     stat: () => ({ mtimeMs: mtime, settingsKey: key }),
@@ -95,7 +95,7 @@ it("loader 分离 stat 与读取：未变不读文件，settings/mtime 变化才
   expect(load().maxTurns).toBe(4);
 });
 
-it("超上限逐项退回默认（max 生效，MINOR #4）", () => {
+it("values above the limit fall back per key to defaults (max enforced, MINOR #4)", () => {
   const c = resolveConfig({ file: {
     maxTailBytes: 1e12, maxTurns: 20_000, wipLimit: 1000, tailLines: 501,
     maxWidgetLines: 201, retryDelaysMs: [0, 4_000_000],
@@ -108,14 +108,14 @@ it("超上限逐项退回默认（max 生效，MINOR #4）", () => {
   expect(c.retryDelaysMs).toEqual(DEFAULTS.retryDelaysMs);
 });
 
-it("边界值本身可用", () => {
+it("boundary values themselves are accepted", () => {
   const c = resolveConfig({ file: { wipLimit: 100, maxTailBytes: 1_048_576, tailLines: 500 } });
   expect(c.wipLimit).toBe(100);
   expect(c.maxTailBytes).toBe(1_048_576);
   expect(c.tailLines).toBe(500);
 });
 
-it("CONFIG_KEYS 暴露上限（MINOR #4）", () => {
+it("CONFIG_KEYS exposes the limits (MINOR #4)", () => {
   expect(CONFIG_KEYS.maxTailBytes.max).toBe(1_048_576);
   expect(CONFIG_KEYS.maxWidgetLines.max).toBe(200);
   expect(CONFIG_KEYS.wipLimit.max).toBe(100);
@@ -124,7 +124,7 @@ it("CONFIG_KEYS 暴露上限（MINOR #4）", () => {
   expect(CONFIG_KEYS.tailLines.max).toBe(500);
 });
 
-it("docs/configuration.md 的 max 列与 CONFIG_KEYS 完全一致", () => {
+it("the max column in docs/configuration.md matches CONFIG_KEYS exactly", () => {
   const doc = readFileSync(new URL("../../docs/configuration.md", import.meta.url), "utf8");
   for (const [key, meta] of Object.entries(CONFIG_KEYS)) {
     const row = doc.split("\n").find((line) => line.startsWith(`| \`${key}\` |`));

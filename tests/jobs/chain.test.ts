@@ -15,7 +15,7 @@ const j = (id: string, o: Partial<Job> = {}): Job => ({
   evidenceApplied: false, notifyState: "pending", ...o,
 });
 
-it("退避间隔按 attempt 取五档，越界取最后一档（第 4/5 档 5min/10min）", () => {
+it("backoff delay picks one of five tiers by attempt; out-of-range uses the last tier (tiers 4/5 are 5min/10min)", () => {
   const d = DEFAULTS.retryDelaysMs;
   expect(d).toEqual([0, 30_000, 120_000, 300_000, 600_000]);
   expect(retryDelayMs(1, d)).toBe(0);
@@ -26,7 +26,7 @@ it("退避间隔按 attempt 取五档，越界取最后一档（第 4/5 档 5min
   expect(retryDelayMs(9, d)).toBe(600_000);
 });
 
-it("attempt 上限含重验分支内的失败重试（F67）：第 5 次仍可重试，第 6 次停", () => {
+it("attempt limit includes failure retries inside the reverify branch (F67): still retryable at the 5th, stops at the 6th", () => {
   const s = store();
   s.put(j("a1", { attempt: 1 }));
   s.put(j("r1", { attempt: 1, retryOf: "a1", staleReverifyOf: "a1", status: "failed" }));
@@ -38,23 +38,23 @@ it("attempt 上限含重验分支内的失败重试（F67）：第 5 次仍可�
   expect(chainJobs(s, "R")).toHaveLength(7);
 });
 
-it("重验分支后代不得再触发重验（F67）", () => {
+it("descendants of a reverify branch must not trigger another reverify (F67)", () => {
   const s = store();
   s.put(j("a1", { status: "completed", exitCode: 0, fpVerdict: "stale" }));
   s.put(j("r1", { retryOf: "a1", staleReverifyOf: "a1", status: "failed" }));
   s.put(j("r2", { attempt: 2, retryOf: "r1", status: "completed", exitCode: 0, fpVerdict: "stale" }));
   expect(isReverifyBranch(s.get("r2")!, s)).toBe(true);
   expect(canReverify(s.get("r2")!, s, 1)).toBe(false);
-  expect(canReverify(s.get("a1")!, s, 1)).toBe(false);   // 额度已用
+  expect(canReverify(s.get("a1")!, s, 1)).toBe(false);   // quota already used
 });
 
-it("首次 stale 且额度未用可重验（F64）", () => {
+it("first stale with unused quota can reverify (F64)", () => {
   const s = store();
   s.put(j("a1", { status: "completed", exitCode: 0, fpVerdict: "stale" }));
   expect(canReverify(s.get("a1")!, s, 1)).toBe(true);
 });
 
-it("重验只为「重验 + 一次失败重试」留槽：6 job 链不再重验（BLOCKER）", () => {
+it("reverify reserves a slot only for reverify + one failure retry: a 6-job chain cannot reverify again (BLOCKER)", () => {
   const s = store();
   for (let i = 1; i <= 6; i++) {
     s.put(j(`a${i}`, { id: `a${i}`, rootId: "R", retryOf: i > 1 ? `a${i - 1}` : undefined,
@@ -70,10 +70,10 @@ it("重验只为「重验 + 一次失败重试」留槽：6 job 链不再重验�
   expect(canReverify(s5.get("a5")!, s5, 1, 5)).toBe(true);
 });
 
-it("链上界 7：正常 6 job；重验最坏 +1 保底重试也不超过 7", () => {
+it("chain upper bound is 7: normally 6 jobs; reverify at worst adds 1 fallback retry and still stays within 7", () => {
   expect(1 + DEFAULTS.retries + DEFAULTS.staleReverify).toBe(7);
 
-  // 路径 A：5 次失败后成功(stale) → 重验(attempt 5) → 失败 → 保底重试(attempt 6)
+  // Path A: success after 5 failures (stale) → reverify (attempt 5) → failure → fallback retry (attempt 6)
   const a = store();
   for (let i = 1; i <= 5; i++) {
     a.put(j(`a${i}`, { id: `a${i}`, rootId: "R", retryOf: i > 1 ? `a${i - 1}` : undefined,
@@ -88,7 +88,7 @@ it("链上界 7：正常 6 job；重验最坏 +1 保底重试也不超过 7", ()
   expect(chainJobs(a, "R")).toHaveLength(7);
   expect(canRetry(a.get("rv2")!, a, 5)).toBe(false);
 
-  // 路径 B：首战即成功但 stale → 重验(attempt 1) + 重试到 attempt 6，仍为 7
+  // Path B: success on the first try but stale → reverify (attempt 1) + retries up to attempt 6, still 7
   const b = store();
   b.put(j("b1", { id: "b1", rootId: "R", attempt: 1, status: "completed", exitCode: 0, fpVerdict: "stale" }));
   expect(canReverify(b.get("b1")!, b, 1, 5)).toBe(true);
@@ -100,16 +100,16 @@ it("链上界 7：正常 6 job；重验最坏 +1 保底重试也不超过 7", ()
   expect(canRetry(b.get("r6")!, b, 5)).toBe(false);
 });
 
-it("退化输入：空退避数组取 0；root 记录兜底；staleReverify=0 不重验", () => {
+it("degenerate inputs: empty backoff array yields 0; root record fallback; staleReverify=0 disables reverify", () => {
   expect(retryDelayMs(1, [])).toBe(0);
   const s = store();
   expect(terminalJob(s, "missing")).toBeUndefined();
-  s.put(j("R", { rootId: "OTHER" }));               // id 叫 R 但不是本链 root
+  s.put(j("R", { rootId: "OTHER" }));               // id is R but is not the root of this chain
   expect(terminalJob(s, "R")?.id).toBe("R");
   expect(canReverify(s.get("R")!, s, 0, 5)).toBe(false);
 });
 
-it("chainTerminated 是派生判定：running / retryAt / pendingReverify 任一存在即未终结", () => {
+it("chainTerminated is derived: not terminated while any of running / retryAt / pendingReverify exists", () => {
   const s = store();
   s.put(j("R", { status: "running", endedAt: null }));
   expect(chainTerminated(s, "R")).toBe(false);
@@ -121,11 +121,11 @@ it("chainTerminated 是派生判定：running / retryAt / pendingReverify 任一
   expect(chainTerminated(s, "R")).toBe(true);
 });
 
-it("root 记录不存在时视为已终结（F34 孤儿）", () => {
+it("missing root record is treated as terminated (F34 orphan)", () => {
   expect(chainTerminated(store(), "missing")).toBe(true);
 });
 
-it("terminalJob 按写入顺序取最后一条，不依赖 endedAt（MAJOR #4）", () => {
+it("terminalJob returns the last entry in write order, independent of endedAt (MAJOR #4)", () => {
   const s = store();
   s.put(j("R", { endedAt: 2 }));
   s.put(j("R2", { rootId: "R", retryOf: "R", endedAt: 2 }));

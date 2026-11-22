@@ -10,8 +10,8 @@ export function createMonitor() {
 
   const emit = (id: string, code: number | null, signal?: string | null) => {
     const j = jobs.get(id);
-    if (!j) return;                    // 已终结/未登记 ⇒ late duplicate 直接忽略（F31）
-    // 终结即释放本 job 的全部登记：长命会话不会随作业数线性增长（B1）
+    if (!j) return;                    // terminated/unregistered ⇒ ignore late duplicate (F31)
+    // On termination release all registrations for this job: a long-lived session does not grow linearly with job count (B1)
     const handler = handlers.get(id);
     const stop = stops.get(id);
     jobs.delete(id);
@@ -47,7 +47,7 @@ export function createMonitor() {
       if (proc) {
         stop = attach(job, proc);
       } else {
-        // 恢复作业的退出检测并入扩展的单 timer（recoveredExit），不另起 3s 轮询
+        // Exit detection for recovered jobs joins the extension's single timer (recoveredExit); no separate 3s poll
         stop = () => {};
       }
       stops.set(job.id, stop);
@@ -59,7 +59,7 @@ export function createMonitor() {
   };
 }
 
-/** 恢复作业探活：进程消失或 startStamp 变化 ⇒ 返回终态（退出码未知）。 */
+/** Liveness check for a recovered job: process gone or startStamp changed ⇒ return terminal state (exit code unknown). */
 export function recoveredExit(job: Job, now: number, readStamp: (pid: number) => string | undefined = readStartStamp): Job | undefined {
   if (job.status !== "running") return undefined;
   let alive = false;
@@ -69,7 +69,8 @@ export function recoveredExit(job: Job, now: number, readStamp: (pid: number) =>
   return { ...job, status: "failed", exitCode: null, exitCodeKnown: false, endedAt: now };
 }
 
-/** 重启恢复：进程已消失 ⇒ 不猜退出码（规格 §10.1）。返回改动条数，调用方据此决定是否落盘。 */
+/** Restart recovery: process gone ⇒ do not guess the exit code (spec §10.1).
+ *  Returns the number of changes; the caller decides whether to save. */
 export function recoverJobs(store: JobStore, now: number): number {
   let n = 0;
   for (const j of store.all()) {

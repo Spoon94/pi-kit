@@ -22,7 +22,7 @@ export function halt(d: HaltDeps) {
     d.kill(j.rootId, "self");
     if (typeof j.taskId === "number") affected.add(j.taskId);
   }
-  // 退避链全局取消（不依赖 d.kill 的实现）
+  // Cancel backoff chains globally (independent of d.kill's implementation)
   for (const j of mine) {
     if (j.retryAt == null) continue;
     const cur = d.jobs.get(j.id);
@@ -37,11 +37,11 @@ export function halt(d: HaltDeps) {
     if (!affected.has(t.id) || t.status !== "in_progress") return t;
     parked++;
     return { ...t, status: "parked" as const, statusSince: d.now,
-      park: { reason: "用户强制中断", at: d.now, from: "in_progress" as const, by: "halt" as const } };
+      park: { reason: "halted by user", at: d.now, from: "in_progress" as const, by: "halt" as const } };
   });
   d.boards.commit(d.sessionId, { ...board, tasks,
     counters: { ...board.counters, halted: true, haltedAt: d.now } });
-  d.notify(`已强制中断：取消 ${targets.length} 条作业链，${parked} 个任务 parked。用 /vigil-todo resume 恢复`);
+  d.notify(`Halted: cancelled ${targets.length} job chains, ${parked} tasks parked. Use /vigil-todo resume to resume`);
   return { killed: targets.length, parked, alreadyHalted };
 }
 
@@ -50,8 +50,8 @@ export function resume(d: HaltDeps): boolean {
   if (!isHalted(board)) return false;
   const counters = { ...board.counters };
   delete counters.halted; delete counters.haltedAt;
-  // 只恢复 halt 自己造成的 parked（显式标记，不按 reason 文案匹配）；
-  // 回到 pending 交还 next/WIP 机制，绝不碰模型/用户真实决策的 park。
+  // Restore only parks caused by halt itself (explicit marker, not reason text);
+  // back to pending and hand off to next/WIP, never touch parks from real model/user decisions.
   let restored = 0;
   const tasks = board.tasks.map((t) => {
     if (t.status !== "parked" || t.park?.by !== "halt") return t;
@@ -61,19 +61,19 @@ export function resume(d: HaltDeps): boolean {
     delete next.inProgressSince;
     return next;
   });
-  d.boards.commit(d.sessionId, { ...board, tasks, counters });   // turnsUsed 不重置
+  d.boards.commit(d.sessionId, { ...board, tasks, counters });   // turnsUsed is not reset
   const maxTurns = d.maxTurns ?? DEFAULTS.maxTurns;
   if (board.counters.turnsUsed >= maxTurns) {
-    d.notify(`已达轮数上限 (${board.counters.turnsUsed}/${maxTurns})：发任意消息归零后再继续`);
+    d.notify(`Turn limit reached (${board.counters.turnsUsed}/${maxTurns}): send any message to reset it, then continue`);
   } else {
     d.notify(restored > 0
-      ? `已恢复自主推进（${restored} 个中断任务回到 pending）`
-      : "已恢复自主推进");
+      ? `Autonomous progress resumed (${restored} halted tasks back to pending)`
+      : "Autonomous progress resumed");
   }
   return true;
 }
 
-/** halt 落盘后崩溃 ⇒ 启动补杀本会话残留 running（不留孤儿）。 */
+/** Crash after halt is saved ⇒ on startup, kill leftover running jobs for this session (no orphans). */
 export function reapHaltedLeftovers(d: HaltDeps): number {
   if (!isHalted(d.boards.get(d.sessionId))) return 0;
   const left = d.jobs.all().filter((j) => j.sessionId === d.sessionId && j.status === "running");

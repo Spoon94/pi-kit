@@ -13,7 +13,7 @@ export function sanitizeTerminalText(value: string): string {
     .replace(BIDI, "");
 }
 
-/** 逐行清洗，保留换行分隔（用于多行终端输出/工具文本/唤醒消息）。 */
+/** Sanitize line by line, keeping newline separators (for multiline terminal output/tool text/wake messages). */
 export function sanitizeMultiline(value: string): string {
   return value.split("\n").map(sanitizeTerminalText).join("\n");
 }

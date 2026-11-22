@@ -8,7 +8,7 @@ function isTask(v: unknown): v is Task {
   return Number.isSafeInteger(v.id) && typeof v.subject === "string" && STATUSES.has(v.status as Status);
 }
 
-/** 宽松解码：只校验 id/subject/status，其余字段原样保留（超集兼容）。 */
+/** Lenient decode: validate only id/subject/status; keep other fields as-is (superset-compatible). */
 export function decodeSnapshot(v: unknown): BoardState | undefined {
   if (!isBag(v) || !Array.isArray(v.tasks) || !v.tasks.every(isTask) || !Number.isSafeInteger(v.nextId)) return undefined;
   const c = isBag(v.counters) ? v.counters : {};

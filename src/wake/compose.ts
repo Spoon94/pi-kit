@@ -32,12 +32,12 @@ export function composeWake(roots: string[], board: BoardState, jobs: JobStore, 
   const active = board.tasks.filter((t) => t.status === "in_progress").length;
   if (next) {
     lines.push(`next: #${next.id} ${sanitizeTerminalText(next.subject)} (pending, unblocked)`);
-    lines.push(`→ 开干: bg_run({task_id:${next.id}, command:"…"})`);
-    lines.push(`  需人拍板: todo({action:"update", id:${next.id}, status:"parked", reason:"…"})`);
+    lines.push(`→ Start: bg_run({task_id:${next.id}, command:"…"})`);
+    lines.push(`  Needs a decision: todo({action:"update", id:${next.id}, status:"parked", reason:"…"})`);
   } else if (active >= cfg.wipLimit) {
-    lines.push(`WIP 满 (${active}/${cfg.wipLimit})，先 park 一个或等一个完成`);
+    lines.push(`WIP full (${active}/${cfg.wipLimit}); park one first or wait for one to finish`);
   } else {
-    lines.push("无可推进任务");
+    lines.push("No actionable tasks");
   }
   return sanitizeMultiline(lines.join("\n")).slice(0, 4800);
 }

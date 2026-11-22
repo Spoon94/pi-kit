@@ -9,26 +9,26 @@ export interface ArgCandidate {
 }
 
 export const PANEL_SUBCOMMANDS: readonly ArgCandidate[] = [
-  { value: "halt", label: "halt", description: "立即停止全部后台工作并 park 受影响任务（一键刹车，也可 alt+h）" },
-  { value: "resume", label: "resume", description: "恢复自主推进（达轮数上限时会提示发消息归零）" },
-  { value: "doctor", label: "doctor", description: "自检：冲突/孤儿/超期/环/WIP 超卖/轮数上限" },
-  { value: "clear", label: "clear", description: "清理历史任务：默认 completed+deleted；pending/in_progress/parked 永不清" },
+  { value: "halt", label: "halt", description: "Immediately stop all background work and park affected tasks (one-key brake; alt+h also works)" },
+  { value: "resume", label: "resume", description: "Resume autonomous progress (at the turn limit, prompts to send a message to reset)" },
+  { value: "doctor", label: "doctor", description: "Self-check: conflicts/orphans/overdue/cycles/WIP oversold/turn limit" },
+  { value: "clear", label: "clear", description: "Clear task history: completed+deleted by default; pending/in_progress/parked are never cleared" },
 ];
 
 export const CLEAR_SCOPES: readonly ArgCandidate[] = [
-  { value: "clear completed", label: "completed", description: "只清已完成任务" },
-  { value: "clear deleted", label: "deleted", description: "只清已删除（tombstone）任务" },
-  { value: "clear settled", label: "settled", description: "清 completed + deleted（默认范围）" },
+  { value: "clear completed", label: "completed", description: "Clear only completed tasks" },
+  { value: "clear deleted", label: "deleted", description: "Clear only deleted (tombstone) tasks" },
+  { value: "clear settled", label: "settled", description: "Clear completed + deleted (default scope)" },
 ];
 
 export const BG_SUBCOMMANDS: readonly ArgCandidate[] = [
-  { value: "k", label: "k", description: "中止整条作业链（两步确认）" },
-  { value: "tail", label: "tail", description: "查看作业日志尾" },
+  { value: "k", label: "k", description: "Abort the whole job chain (two-step confirmation)" },
+  { value: "tail", label: "tail", description: "View the job log tail" },
 ];
 
 export const COMPLETION_JOB_LIMIT = 50;
 
-/** 纯函数、同步、只读：/vigil-todo 与 /vt 共用（T1/F131）。 */
+/** Pure, synchronous, read-only: shared by /vigil-todo and /vt (T1/F131). */
 export function panelCompletions(prefix: string): ArgCandidate[] | null {
   const text = typeof prefix === "string" ? prefix : "";
   const lower = text.toLowerCase();
@@ -53,7 +53,7 @@ function jobCandidates(list: readonly Job[], head: "k" | "tail", typed: string):
   const out: ArgCandidate[] = [];
   for (const j of list) {
     const id = sanitizeTerminalText(j.id).trim();
-    if (!id || /\s/.test(id)) continue;                 // 拒绝会拆出额外参数的畸形 id
+    if (!id || /\s/.test(id)) continue;                 // reject malformed ids that would split into extra arguments
     if (q && !id.toLowerCase().startsWith(q)) continue;
     out.push({ value: `${head} ${id}`, label: id, description: jobDescription(j) });
     if (out.length >= COMPLETION_JOB_LIMIT) break;
@@ -61,7 +61,7 @@ function jobCandidates(list: readonly Job[], head: "k" | "tail", typed: string):
   return out.length ? out : null;
 }
 
-/** /bg 的动态补全（T2）：只读 jobs 内存态，无 I/O、无定时器、无状态变更。 */
+/** Dynamic completion for /bg (T2): reads jobs in-memory only; no I/O, timers, or state changes. */
 export function bgCompletions(prefix: string, jobs?: JobStore): ArgCandidate[] | null {
   try {
     const text = typeof prefix === "string" ? prefix : "";
@@ -79,11 +79,11 @@ export function bgCompletions(prefix: string, jobs?: JobStore): ArgCandidate[] |
     const items = BG_SUBCOMMANDS.filter((c) => c.value.startsWith(q));
     return items.length ? items : null;
   } catch {
-    return null;                                        // 补全永不抛异常
+    return null;                                        // completion never throws
   }
 }
 
-/** /todos 无参数候选（T3）。 */
+/** /todos has no argument candidates (T3). */
 export function todosCompletions(_prefix?: string): null {
   return null;
 }

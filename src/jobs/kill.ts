@@ -16,17 +16,17 @@ export function requestKill(store: JobStore, idOrRoot: string, by: "self" | "ext
   return { killed, cancelledBackoff };
 }
 
-/** 同步强杀：进程组优先，用于 spawn 后登记失败等异常路径（B3）。 */
+/** Synchronous force-kill: process group first; used on exceptional paths such as failed post-spawn bookkeeping (B3). */
 export function killNow(pid: number): void {
-  try { process.kill(-pid, "SIGKILL"); return; } catch { /* 无进程组 */ }
-  try { process.kill(pid, "SIGKILL"); } catch { /* 已退出 */ }
+  try { process.kill(-pid, "SIGKILL"); return; } catch { /* no process group */ }
+  try { process.kill(pid, "SIGKILL"); } catch { /* already exited */ }
 }
 
-/** SIGTERM → 等 timeoutMs → SIGKILL；进程组优先。 */
+/** SIGTERM → wait timeoutMs → SIGKILL; process group first. */
 export async function escalate(pid: number, timeoutMs: number): Promise<void> {
   const send = (sig: NodeJS.Signals) => {
-    try { process.kill(-pid, sig); return; } catch { /* 无进程组 */ }
-    try { process.kill(pid, sig); } catch { /* 已退出 */ }
+    try { process.kill(-pid, sig); return; } catch { /* no process group */ }
+    try { process.kill(pid, sig); } catch { /* already exited */ }
   };
   send("SIGTERM");
   const deadline = Date.now() + timeoutMs;

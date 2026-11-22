@@ -33,7 +33,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
-it("10 作业同一同步批次终结：sidecar 一次写，board 每任务一次（B2）", async () => {
+it("10 jobs settle in one synchronous batch: one sidecar write, one board write per task (B2)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-burst-"));
   const store = createJobStore(runDir(cwd));
   const jobs = Array.from({ length: 10 }, (_, i) => job(`R${i}`, i));
@@ -74,7 +74,7 @@ it("10 作业同一同步批次终结：sidecar 一次写，board 每任务一�
   const snapshots = branch.filter((e) => e.customType === "rpiv-todo-state").length - beforeSnaps;
   console.log(`burst: ${duration.toFixed(1)}ms, sidecar writes=${counter.writes - before}, snapshots=${snapshots}`);
   expect(counter.writes - before).toBe(1);
-  expect(snapshots).toBe(2);                   // 1 张任务态 + 1 张投递计数；10 任务不各写一张
+  expect(snapshots).toBe(2);                   // 1 task-state snapshot + 1 delivery-count snapshot; the 10 tasks do not each write one
   const loaded = createJobStore(runDir(cwd));
   loaded.load();
   expect(loaded.all().filter((j) => j.status === "failed").length).toBe(10);

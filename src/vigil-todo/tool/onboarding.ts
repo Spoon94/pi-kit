@@ -12,6 +12,12 @@ export const ONBOARDING_SECTION = "vigil-todo-board";
 export const ONBOARDING_MAX = 1200;
 /** Room reserved for the section XML wrapper so base + digest + markers stay under the cap. */
 const SECTION_OVERHEAD = 32;
+
+/** First-run user-role nudge: a custom message is far more visible than appended system text. */
+export const ONBOARDING_MESSAGE_TYPE = "vigil-todo-onboarding";
+export const FIRST_RUN_MESSAGE = "vigil-todo: this request is multi-step. Before any other work, call todo create — "
+  + "todo({action:\"create\", tasks:[{subject:\"...\"}, ...]}) — then keep exactly one in_progress and complete "
+  + "each task only with real evidence. Run long-running commands with bg_run({task_id, command}), not bash.";
 const SUBJECT_MAX = 80;
 
 const BASE = "vigil-todo: at the start of a new instruction, capture multi-step work with todo create before acting "

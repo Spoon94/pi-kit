@@ -785,6 +785,65 @@ it("F142 before_agent_start adds no timer and keeps other content intact", async
   expect(options.sections.other).toBe("KEEP");
 });
 
+it("F144 the first user run returns a hidden user-role onboarding message", async () => {
+  clearOnboardingConfig();
+  const h = await startWith([snapshot(emptyBoard())]);
+  const result = await h.emit("before_agent_start", startEvent({ appendSystemPrompt: "" }));
+  expect(result?.message?.customType).toBe("vigil-todo-onboarding");
+  expect(result?.message?.display).toBe(false);
+  expect(result?.message?.content).toContain("todo create");
+  expect(result?.message?.content).toContain("bg_run");
+});
+
+it("F145 the second user run does not repeat the onboarding message", async () => {
+  clearOnboardingConfig();
+  const h = await startWith([snapshot(emptyBoard())]);
+  const first = await h.emit("before_agent_start", startEvent({ appendSystemPrompt: "" }));
+  expect(first?.message).toBeDefined();
+  const second = await h.emit("before_agent_start", startEvent({ appendSystemPrompt: "" }));
+  expect(second?.message).toBeUndefined();
+  const third = await h.emit("before_agent_start", startEvent({ appendSystemPrompt: "" }));
+  expect(third?.message).toBeUndefined();
+});
+
+it("F146 off has no message, once has a message without a section, live has both", async () => {
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "wip", status: "in_progress", inProgressSince: 1 }];
+  b.nextId = 2;
+
+  onboardingConfig({ onboardingPrompt: "off" });
+  const off = await startWith([snapshot(b)]);
+  const offOptions: any = { appendSystemPrompt: "" };
+  const offResult = await off.emit("before_agent_start", startEvent(offOptions));
+  expect(offResult?.message).toBeUndefined();
+  expect(offOptions.appendSystemPrompt).toBe("");
+
+  onboardingConfig({ onboardingPrompt: "once" });
+  const once = await startWith([snapshot(b)]);
+  const onceOptions: any = { appendSystemPrompt: "" };
+  const onceResult = await once.emit("before_agent_start", startEvent(onceOptions));
+  expect(onceResult?.message?.customType).toBe("vigil-todo-onboarding");
+  expect(onceOptions.sections?.["vigil-todo-board"]).toBeUndefined();
+
+  clearOnboardingConfig();
+  const live = await startWith([snapshot(b)]);
+  const liveOptions: any = { appendSystemPrompt: "" };
+  const liveResult = await live.emit("before_agent_start", startEvent(liveOptions));
+  expect(liveResult?.message?.customType).toBe("vigil-todo-onboarding");
+  expect(liveOptions.sections?.["vigil-todo-board"]).toContain("Current board");
+});
+
+it("F147 a custom (wake) run never gets the first-run message", async () => {
+  clearOnboardingConfig();
+  const h = await startWith([snapshot(emptyBoard())]);
+  const custom = await h.emit("before_agent_start", {
+    type: "before_agent_start", messageType: "custom", systemPrompt: "", systemPromptOptions: { appendSystemPrompt: "" },
+  });
+  expect(custom?.message).toBeUndefined();
+  const user = await h.emit("before_agent_start", startEvent({ appendSystemPrompt: "" }));
+  expect(user?.message?.customType).toBe("vigil-todo-onboarding");
+});
+
 it("All extension events and command paths (coverage reinforcement)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const storeDir = runDir(cwd);

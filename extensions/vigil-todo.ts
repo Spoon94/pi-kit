@@ -31,7 +31,7 @@ import {
   preflight, type ToolDef, type ToolDeps,
 } from "../src/vigil-todo/tool/register.js";
 import { createGuidanceLoader, DEFAULT_GUIDANCE, type ToolGuidance } from "../src/vigil-todo/tool/guidance.js";
-import { ONBOARDING_SECTION, createOnboardingCache } from "../src/vigil-todo/tool/onboarding.js";
+import { FIRST_RUN_MESSAGE, ONBOARDING_MESSAGE_TYPE, ONBOARDING_SECTION, createOnboardingCache } from "../src/vigil-todo/tool/onboarding.js";
 import { createOverlayController } from "../src/vigil-todo/ui/overlay.js";
 import { WIDGET_KEY, STATUS_KEY, renderDoctor, renderPanel, renderStatus, renderTodos } from "../src/vigil-todo/ui/panel.js";
 import { bgCompletions, panelCompletions, todosCompletions } from "../src/vigil-todo/ui/completions.js";
@@ -79,6 +79,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   let timer: NodeJS.Timeout | undefined;
   let mergeTimer: NodeJS.Timeout | undefined;
   let lastModelAdvanced = false;
+  let onboardingMessageSent = false;
   let pendingKill: string | undefined;
   const recovered = new Set<string>();
   let wired = false;
@@ -379,6 +380,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     activeCtx = ctx;
     const nextSid = ctx.sessionManager.getSessionId();
     if (nextSid === sid && ctx.cwd === cwd) return;
+    onboardingMessageSent = false;
     flushExitQueue();                        // persist exits queued by the old session first
     if (mergeTimer) { clearTimeout(mergeTimer); mergeTimer = undefined; }
     sid = nextSid;
@@ -759,6 +761,15 @@ export default function vigilTodo(pi: ExtensionAPI): void {
         delete next[ONBOARDING_SECTION];
         options.sections = next;
       }
+      // §22 second layer: a user-role nudge on the very first user run is far more visible than
+      // appended system text. Fires once per session; custom (wake) runs never trigger it.
+      if (event.messageType === "user" && !onboardingMessageSent) {
+        onboardingMessageSent = true;
+        return {
+          message: { customType: ONBOARDING_MESSAGE_TYPE, content: FIRST_RUN_MESSAGE, display: false },
+        };
+      }
+      return undefined;
     });
 
     pi.on("agent_before_settle", (_event, ctx) => {

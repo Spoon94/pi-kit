@@ -5,8 +5,13 @@ import { DEFAULT_GUIDANCE, type ToolGuidance } from "./guidance.js";
 
 export type OnboardingMode = "off" | "once" | "live";
 
+/** Dedicated system-prompt section key: assigning it replaces our previous digest instead of appending. */
+export const ONBOARDING_SECTION = "vigil-todo-board";
+
 /** Hard cap for the whole injected text (spec §22). */
 export const ONBOARDING_MAX = 1200;
+/** Room reserved for the section XML wrapper so base + digest + markers stay under the cap. */
+const SECTION_OVERHEAD = 32;
 const SUBJECT_MAX = 80;
 
 const BASE = "vigil-todo: at the start of a new instruction, capture multi-step work with todo create before acting "
@@ -35,15 +40,42 @@ export function buildBoardSummary(board: BoardState): string {
   return `Current board: WIP ${wipText}; next ${nextText}.`;
 }
 
-/** Pure: no I/O, no timers. Empty text means "inject nothing". */
+const cap = (text: string): string => (
+  text.length <= ONBOARDING_MAX ? text : `${text.slice(0, ONBOARDING_MAX - 1)}…`
+);
+
+export interface OnboardingInjection {
+  /** Base sentence for `appendSystemPrompt` (empty means inject nothing). */
+  append: string;
+  /** Board digest for the dedicated section key (undefined means "no section"). */
+  board?: string;
+}
+
+/**
+ * Split form used by the extension: the base sentence goes to `appendSystemPrompt` (added once),
+ * the digest goes to `sections[ONBOARDING_SECTION]` so a new board replaces the old one instead of
+ * stacking. Pure: no I/O, no timers.
+ */
+export function buildOnboardingInjection(
+  board: BoardState, guidance: ToolGuidance = DEFAULT_GUIDANCE, mode: OnboardingMode = "live",
+): OnboardingInjection {
+  if (mode === "off") return { append: "" };
+  const base = cap(baseOnboardingText(guidance));
+  if (mode !== "live" || board.tasks.length === 0) return { append: base };
+  const room = ONBOARDING_MAX - SECTION_OVERHEAD - base.length - 1;
+  if (room <= 0) return { append: base };
+  let summary = buildBoardSummary(board);
+  if (summary.length > room) summary = `${summary.slice(0, Math.max(0, room - 1))}…`;
+  return summary ? { append: base, board: summary } : { append: base };
+}
+
+/** Combined text (base + digest), used by docs/tests; the extension injects the split form above. */
 export function buildOnboardingPrompt(
   board: BoardState, guidance: ToolGuidance = DEFAULT_GUIDANCE, mode: OnboardingMode = "live",
 ): string {
-  if (mode === "off") return "";
-  const parts = [baseOnboardingText(guidance)];
-  if (mode === "live" && board.tasks.length > 0) parts.push(buildBoardSummary(board));
-  const text = parts.join("\n");
-  return text.length <= ONBOARDING_MAX ? text : `${text.slice(0, ONBOARDING_MAX - 1)}…`;
+  const { append, board: digest } = buildOnboardingInjection(board, guidance, mode);
+  if (!append) return "";
+  return cap(digest ? `${append}\n${digest}` : append);
 }
 
 /** Identity of everything the digest reads, so an unchanged board keeps a byte-identical prompt. */
@@ -58,15 +90,15 @@ export function boardSignature(board: BoardState): string {
 }
 
 /** Memoized builder: recompute only when the mode, the guidance text, or the board signature changes. */
-export function createOnboardingCache(): (board: BoardState, guidance: ToolGuidance, mode: OnboardingMode) => string {
+export function createOnboardingCache(): (board: BoardState, guidance: ToolGuidance, mode: OnboardingMode) => OnboardingInjection {
   let key = "";
-  let text = "";
+  let cached: OnboardingInjection = { append: "" };
   return (board, guidance, mode) => {
     const nextKey = `${mode}\u0000${guidance.onboardingPromptText ?? ""}\u0000${boardSignature(board)}`;
     if (nextKey !== key) {
       key = nextKey;
-      text = buildOnboardingPrompt(board, guidance, mode);
+      cached = buildOnboardingInjection(board, guidance, mode);
     }
-    return text;
+    return cached;
   };
 }

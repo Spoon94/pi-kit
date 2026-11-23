@@ -31,7 +31,7 @@ import {
   preflight, type ToolDef, type ToolDeps,
 } from "../src/vigil-todo/tool/register.js";
 import { createGuidanceLoader, DEFAULT_GUIDANCE, type ToolGuidance } from "../src/vigil-todo/tool/guidance.js";
-import { createOnboardingCache } from "../src/vigil-todo/tool/onboarding.js";
+import { ONBOARDING_SECTION, createOnboardingCache } from "../src/vigil-todo/tool/onboarding.js";
 import { createOverlayController } from "../src/vigil-todo/ui/overlay.js";
 import { WIDGET_KEY, STATUS_KEY, renderDoctor, renderPanel, renderStatus, renderTodos } from "../src/vigil-todo/ui/panel.js";
 import { bgCompletions, panelCompletions, todosCompletions } from "../src/vigil-todo/ui/completions.js";
@@ -743,13 +743,22 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     pi.on("before_agent_start", (event, ctx) => {
       initSession(ctx);
       const mode = getCfg().onboardingPrompt;
-      if (mode === "off") return;
-      const text = onboardingPrompt(boards.get(sid), getGuidance(), mode);
-      if (!text) return;
-      const current = event.systemPromptOptions.appendSystemPrompt;
-      const existing = typeof current === "string" ? current : "";
-      if (existing.includes(text)) return;            // stable: never duplicate our own block
-      event.systemPromptOptions.appendSystemPrompt = existing ? `${existing}\n\n${text}` : text;
+      if (mode === "off") return;                     // off adds nothing and leaves other content alone
+      const injection = onboardingPrompt(boards.get(sid), getGuidance(), mode);
+      const options = event.systemPromptOptions;
+      const current = typeof options.appendSystemPrompt === "string" ? options.appendSystemPrompt : "";
+      if (injection.append && !current.includes(injection.append)) {
+        options.appendSystemPrompt = current ? `${current}\n\n${injection.append}` : injection.append;
+      }
+      // The digest lives in our own section: assigning it replaces the previous version instead of
+      // appending, so a changing board can never stack stale summaries (§22, F139).
+      if (injection.board !== undefined) {
+        options.sections = { ...(options.sections ?? {}), [ONBOARDING_SECTION]: injection.board };
+      } else if (options.sections && ONBOARDING_SECTION in options.sections) {
+        const next = { ...options.sections };
+        delete next[ONBOARDING_SECTION];
+        options.sections = next;
+      }
     });
 
     pi.on("agent_before_settle", (_event, ctx) => {

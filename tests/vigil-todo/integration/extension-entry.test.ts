@@ -791,8 +791,12 @@ it("F144 the first user run returns a hidden user-role onboarding message", asyn
   const result = await h.emit("before_agent_start", startEvent({ appendSystemPrompt: "" }));
   expect(result?.message?.customType).toBe("vigil-todo-onboarding");
   expect(result?.message?.display).toBe(false);
-  expect(result?.message?.content).toContain("todo create");
-  expect(result?.message?.content).toContain("bg_run");
+  const text = String(result?.message?.content);
+  expect(text).toContain("todo create");
+  expect(text).toContain("3+ steps");
+  expect(text).toContain("trivial");
+  expect(text).toContain("bg_run");
+  expect(text).not.toMatch(/this request is multi-step/i);
 });
 
 it("F145 the second user run does not repeat the onboarding message", async () => {

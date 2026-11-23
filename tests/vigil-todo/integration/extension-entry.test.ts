@@ -630,6 +630,114 @@ it("F120: config file guidance overrides tool promptSnippet/promptGuidelines", a
   expect(h.toolDefs.get("todo")?.promptGuidelines).toEqual(["CUSTOM LINE"]);
 });
 
+const onboardingConfig = (value: Record<string, unknown>): void => {
+  const home = mkdtempSync(join(tmpdir(), "vigil-onboard-cfg-"));
+  mkdirSync(join(home, "pi-kit"), { recursive: true });
+  writeFileSync(join(home, "pi-kit", "config.json"), JSON.stringify(value));
+  process.env.XDG_CONFIG_HOME = home;
+};
+const clearOnboardingConfig = (): void => { delete process.env.XDG_CONFIG_HOME; };
+
+const startWith = async (branch: unknown[], idle = true) => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-onboard-"));
+  const h = makeHarness(cwd, branch, idle);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  return h;
+};
+
+const askStart = async (h: any): Promise<string> => {
+  const options: any = { appendSystemPrompt: "" };
+  await h.emit("before_agent_start", {
+    type: "before_agent_start", messageType: "user", prompt: "hi", systemPrompt: "", systemPromptOptions: options,
+  });
+  return options.appendSystemPrompt as string;
+};
+
+it("F137 first run gets onboarding even on an empty board", async () => {
+  clearOnboardingConfig();
+  const h = await startWith([snapshot(emptyBoard())]);
+  const text = await askStart(h);
+  expect(text).toContain("todo create");
+  expect(text).toContain("bg_run");
+  expect(text).not.toContain("Current board");
+});
+
+it("F138 live mode adds the WIP and next digest on every run", async () => {
+  clearOnboardingConfig();
+  const b = emptyBoard();
+  b.tasks = [
+    { id: 1, subject: "wire onboarding", status: "in_progress", inProgressSince: 1 },
+    { id: 2, subject: "write tests", status: "pending" },
+  ];
+  b.nextId = 3;
+  const h = await startWith([snapshot(b)]);
+  const text = await askStart(h);
+  expect(text).toContain("Current board: WIP #1 wire onboarding; next #2 write tests.");
+});
+
+it("F139 an unchanged board yields an identical prompt; a mutation updates it", async () => {
+  clearOnboardingConfig();
+  const h = await startWith([snapshot(emptyBoard())]);
+  const first = await askStart(h);
+  expect(await askStart(h)).toBe(first);
+
+  const shared: any = { appendSystemPrompt: "" };
+  const event = (o: any) => ({ type: "before_agent_start", messageType: "user", prompt: "hi", systemPrompt: "", systemPromptOptions: o });
+  await h.emit("before_agent_start", event(shared));
+  const once = shared.appendSystemPrompt as string;
+  await h.emit("before_agent_start", event(shared));      // same options object: must not duplicate
+  expect(shared.appendSystemPrompt).toBe(once);
+  expect(once.split("todo create").length - 1).toBe(1);
+
+  await h.runTool("todo", { action: "create", subject: "captured work" });
+  const after = await askStart(h);
+  expect(after).not.toBe(first);
+  expect(after).toContain("captured work");
+});
+
+it("F140 onboardingPrompt off injects nothing and once drops the digest", async () => {
+  onboardingConfig({ onboardingPrompt: "off" });
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "wip", status: "in_progress", inProgressSince: 1 }];
+  b.nextId = 2;
+  const off = await startWith([snapshot(b)]);
+  expect(await askStart(off)).toBe("");
+
+  onboardingConfig({ onboardingPrompt: "once" });
+  const once = await startWith([snapshot(b)]);
+  const text = await askStart(once);
+  expect(text).toContain("todo create");
+  expect(text).not.toContain("Current board");
+  clearOnboardingConfig();
+});
+
+it("F141 a 2000-char subject keeps the injected prompt within 1200 chars", async () => {
+  clearOnboardingConfig();
+  const b = emptyBoard();
+  b.tasks = [
+    { id: 1, subject: "X".repeat(2000), status: "in_progress", inProgressSince: 1 },
+    { id: 2, subject: "Y".repeat(2000), status: "pending" },
+  ];
+  b.nextId = 3;
+  const h = await startWith([snapshot(b)]);
+  const text = await askStart(h);
+  expect(text.length).toBeLessThanOrEqual(1200);
+});
+
+it("F142 before_agent_start adds no timer and keeps an existing append prompt", async () => {
+  clearOnboardingConfig();
+  const h = await startWith([snapshot(emptyBoard())]);
+  const before = vi.getTimerCount();
+  const options: any = { appendSystemPrompt: "EXISTING BLOCK" };
+  await h.emit("before_agent_start", {
+    type: "before_agent_start", messageType: "user", prompt: "hi", systemPrompt: "", systemPromptOptions: options,
+  });
+  expect(vi.getTimerCount()).toBe(before);
+  expect(options.appendSystemPrompt.startsWith("EXISTING BLOCK")).toBe(true);
+  expect(options.appendSystemPrompt).toContain("todo create");
+});
+
 it("All extension events and command paths (coverage reinforcement)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const storeDir = runDir(cwd);

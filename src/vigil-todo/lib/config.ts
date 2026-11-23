@@ -6,6 +6,7 @@ export interface VigilConfig {
   haltKey: string;
   notifyRetryMs: number;
   wakeMergeMs: number;
+  onboardingPrompt: "off" | "once" | "live";
 }
 
 export const DEFAULTS: VigilConfig = {
@@ -17,12 +18,13 @@ export const DEFAULTS: VigilConfig = {
   haltKey: "alt+h",
   notifyRetryMs: 600_000,
   wakeMergeMs: 250,
+  onboardingPrompt: "live",
 };
 
 type Bag = Record<string, unknown>;
 const isBag = (v: unknown): v is Bag => typeof v === "object" && v !== null && !Array.isArray(v);
 
-export const CONFIG_KEYS: Record<keyof VigilConfig, { type: "int" | "int[]" | "string"; min?: number; max?: number; reload: boolean; default: unknown }> = {
+export const CONFIG_KEYS: Record<keyof VigilConfig, { type: "int" | "int[]" | "string"; min?: number; max?: number; reload: boolean; default: unknown; allowed?: readonly string[] }> = {
   wipLimit: { type: "int", min: 1, max: 100, reload: false, default: DEFAULTS.wipLimit },
   retries: { type: "int", min: 0, max: 20, reload: false, default: DEFAULTS.retries },
   retryDelaysMs: { type: "int[]", min: 0, max: 3_600_000, reload: false, default: DEFAULTS.retryDelaysMs },
@@ -38,6 +40,7 @@ export const CONFIG_KEYS: Record<keyof VigilConfig, { type: "int" | "int[]" | "s
   haltKey: { type: "string", reload: true, default: DEFAULTS.haltKey },
   notifyRetryMs: { type: "int", min: 1, max: 86_400_000, reload: false, default: DEFAULTS.notifyRetryMs },
   wakeMergeMs: { type: "int", min: 0, max: 60_000, reload: false, default: DEFAULTS.wakeMergeMs },
+  onboardingPrompt: { type: "string", reload: false, allowed: ["off", "once", "live"], default: DEFAULTS.onboardingPrompt },
 };
 
 const posInt = (v: unknown, min: number, max?: number): number | undefined =>
@@ -66,6 +69,13 @@ export function resolveConfig(s: { file?: unknown; settings?: unknown; legacy?: 
   for (const k of ["collapseKey", "haltKey"] as const) {
     const key = pick(k);
     if (typeof key === "string" && key.trim() !== "") out[k] = key.trim().toLowerCase();
+  }
+  for (const [k, meta] of Object.entries(CONFIG_KEYS)) {
+    if (meta.type !== "string" || !meta.allowed) continue;
+    const v = pick(k as keyof VigilConfig);
+    if (typeof v === "string" && meta.allowed.includes(v.trim().toLowerCase())) {
+      (out as unknown as Bag)[k] = v.trim().toLowerCase();
+    }
   }
   return out;
 }

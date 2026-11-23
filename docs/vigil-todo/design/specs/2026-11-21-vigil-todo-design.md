@@ -1605,3 +1605,36 @@ renderPanel                             → 三个 pending 带 ⛓，观感完�
 | F134 | 在飞 turn 中执行 /vt halt | ctx.abort 被调用一次 |
 | F135 | resume 后变更类调用恢复可用 | op 正常 |
 | F136 | 空闲（无在飞 run）halt | 不抛异常，abort 安全 |
+
+---
+
+## 22. Onboarding: make the model reach for the board on its own
+
+### 22.1 Evidence
+
+A first-time user had to remind the model to use `todo`; the guidance only covered long-running work (`bg_run`) and nothing told the model to capture a new multi-step instruction before acting. There was also no `before_agent_start` handler, so a resumed session gave the model no board context.
+
+### 22.2 Design
+
+| # | Requirement |
+|---|---|
+| 1 | `buildOnboardingPrompt(board, guidance, mode)` is a pure function returning at most **1200** characters of English text; no fs, git, or timer access. |
+| 2 | Base sentence (empty board / new session): capture multi-step work with `todo create` before acting (3+ steps, multiple files, long-running commands); long-running commands use `bg_run`, not bash. |
+| 3 | `live` mode appends one digest line with the current WIP and `selectNext`'s next task (id + truncated, sanitized subject). |
+| 4 | Injection point: `before_agent_start` → `event.systemPromptOptions.appendSystemPrompt`. pi 1.5.2 exposes no `systemPromptOptions` on `session_start` (`SessionStartEvent` has only `type`/`reason`/`previousSessionFile`), so the same handler also covers the first run. |
+| 5 | Stability: an unchanged board produces a byte-identical prompt (board signature cache); the block is never duplicated when it is already present. |
+| 6 | `onboardingPrompt: "off" \| "once" \| "live"`, default `live`. `off` injects nothing, `once` injects the base sentence only, `live` adds the digest. Unknown values fall back to `live`. |
+| 7 | Guidance gains a leading line: "At the start of a new instruction, capture multi-step work with todo create before acting when it spans 3+ steps, multiple files, or long-running commands. Skip trivial questions." User-supplied `promptGuidelines` still replace the whole list; `guidance.onboardingText` optionally replaces the base sentence. |
+| 8 | No automatic task creation: onboarding must not pollute the board. |
+
+### 22.3 Acceptance cases
+
+| # | Case | Expectation |
+|---|---|---|
+| F137 | First run, empty board | Injected text contains `todo create` and `bg_run`, no board digest |
+| F138 | Board with WIP + next | Digest line carries the ids and subjects |
+| F139 | Same board twice / then mutated | Identical text, then updated |
+| F140 | `off` / `once` | Nothing injected / base sentence without digest |
+| F141 | 2000-char subject | Total length stays ≤ 1200 |
+| F142 | Timer and purity | No new timer; builder has no fs/child_process/timer access |
+| F143 | Guideline ordering | Default first line is the onboarding line; user override still wins |

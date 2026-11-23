@@ -31,6 +31,7 @@ import {
   preflight, type ToolDef, type ToolDeps,
 } from "../src/vigil-todo/tool/register.js";
 import { createGuidanceLoader, DEFAULT_GUIDANCE, type ToolGuidance } from "../src/vigil-todo/tool/guidance.js";
+import { createOnboardingCache } from "../src/vigil-todo/tool/onboarding.js";
 import { createOverlayController } from "../src/vigil-todo/ui/overlay.js";
 import { WIDGET_KEY, STATUS_KEY, renderDoctor, renderPanel, renderStatus, renderTodos } from "../src/vigil-todo/ui/panel.js";
 import { bgCompletions, panelCompletions, todosCompletions } from "../src/vigil-todo/ui/completions.js";
@@ -712,6 +713,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     if (wired) return;
     wired = true;
 
+    const onboardingPrompt = createOnboardingCache();
     pi.on("tool_call", (event, ctx) => {
       initSession(ctx);
       if (event.parentToolCallId) return;
@@ -734,6 +736,20 @@ export default function vigilTodo(pi: ExtensionAPI): void {
       initSession(ctx);
       ackTracker.onAgentStart(jobs, sid);
       lastModelAdvanced = false;
+    });
+
+    // §22 onboarding: tell the model when to reach for the board, plus (live mode) a light board digest.
+    // pi 1.5.2 exposes systemPromptOptions only here, so the base sentence also covers the first run.
+    pi.on("before_agent_start", (event, ctx) => {
+      initSession(ctx);
+      const mode = getCfg().onboardingPrompt;
+      if (mode === "off") return;
+      const text = onboardingPrompt(boards.get(sid), getGuidance(), mode);
+      if (!text) return;
+      const current = event.systemPromptOptions.appendSystemPrompt;
+      const existing = typeof current === "string" ? current : "";
+      if (existing.includes(text)) return;            // stable: never duplicate our own block
+      event.systemPromptOptions.appendSystemPrompt = existing ? `${existing}\n\n${text}` : text;
     });
 
     pi.on("agent_before_settle", (_event, ctx) => {

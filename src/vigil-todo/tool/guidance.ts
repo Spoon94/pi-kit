@@ -6,6 +6,8 @@ export interface ToolGuidance {
   promptSnippet: string;
   promptGuidelines: string[];
   snippets: Record<GuidanceTool, string>;
+  /** Optional replacement for the onboarding base sentence (spec §22). */
+  onboardingText?: string;
 }
 
 export const DEFAULT_GUIDANCE: ToolGuidance = {
@@ -17,6 +19,7 @@ export const DEFAULT_GUIDANCE: ToolGuidance = {
     bg_kill: "Cancel a background job chain, including its retries and backoff.",
   },
   promptGuidelines: [
+    "At the start of a new instruction, capture multi-step work with todo create before acting when it spans 3+ steps, multiple files, or long-running commands. Skip trivial questions.",
     "Long-running work (training, builds, full test suites) MUST use bg_run, not bash. Start it, end your turn; completion wakes you.",
     "Keep exactly one todo in_progress (WIP=1). Finish it or park it before starting another.",
     "park requires a non-empty reason. Parked tasks do not occupy WIP; continue tasks that do not depend on them.",
@@ -70,7 +73,15 @@ export function resolveGuidance(s: { file?: unknown; settings?: unknown; legacy?
     : [];
   const promptGuidelines = lines.length > 0 ? lines : DEFAULT_GUIDANCE.promptGuidelines;
 
-  return { promptSnippet: global ?? DEFAULT_GUIDANCE.promptSnippet, promptGuidelines, snippets };
+  const onboardingText = (() => {
+    for (let i = layers.length - 1; i >= 0; i--) {
+      const v = cookie(layers[i].onboardingText);
+      if (v !== undefined) return v;
+    }
+    return undefined;
+  })();
+
+  return { promptSnippet: global ?? DEFAULT_GUIDANCE.promptSnippet, promptGuidelines, snippets, onboardingText };
 }
 
 /** Same stat/read cache contract as createConfigLoader. */

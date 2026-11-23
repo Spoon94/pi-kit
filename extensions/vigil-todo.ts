@@ -533,6 +533,8 @@ export default function vigilTodo(pi: ExtensionAPI): void {
         if (arg === "halt") {
           halt(haltDeps());
           persistBoard(boards.get(sid));
+          saves.flush();                       // leave a durable trail before aborting the in-flight turn
+          ctx.abort();
           refreshTimer();
           refreshOverlay();
           return;
@@ -696,6 +698,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
           halt(haltDeps());
           persistBoard(boards.get(sid));
           saves.flush();
+          ctx.abort();
           refreshTimer();
           refreshOverlay();
         },

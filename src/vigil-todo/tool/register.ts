@@ -83,6 +83,10 @@ export function createTodoTool(deps: ToolDeps, guidance: ToolGuidance = DEFAULT_
     prepareArguments: prepareTodoArguments,
     async execute(raw) {
       const p = asParams(prepareTodoArguments(raw));
+      const readOnly = p.action === "list" || p.action === "get";
+      if (!readOnly && deps.board().counters.halted) {
+        return errResult("Halted: model mutations are frozen; run /vt resume to continue");
+      }
       if (p.action === "verify") {
         const before = deps.board();
         const target = before.tasks.find((t) => t.id === p.id);
@@ -156,6 +160,9 @@ export function createBgRunTool(deps: ToolDeps, guidance: ToolGuidance = DEFAULT
     promptGuidelines: guidance.promptGuidelines,
     parameters: BgRunParamsSchema,
     async execute(raw) {
+      if (deps.board().counters.halted) {
+        return errResult("Halted: bg_run is frozen; run /vt resume to continue");
+      }
       const command = raw.command;
       if (typeof command !== "string" || command.trim() === "") return errResult("Command cannot be empty");
       if (command.length > 100_000) return errResult("Command too long (max 100000)");

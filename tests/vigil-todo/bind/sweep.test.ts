@@ -283,6 +283,24 @@ it("retention with no candidates and with only running-bound candidates retains 
   expect(sweepAll({ ...d, cfg, now: 100_000 }).retained).toBe(0);
 });
 
+it("sweepAll combined pass skips self-trigger and halted catch-up while still reaping dangling roots", () => {
+  jobs.put(j("R", {
+    taskId: 1, finalized: true, evidenceApplied: true, notifyState: "pending",
+    finalResult: { ok: false, note: "killed", trigger: "self", at: 2 },
+  }));
+  expect(sweepAll(d).catchUp).toEqual([]);
+
+  const b = boards.get("S");
+  b.counters.halted = true;
+  boards.commit("S", b);
+  jobs.put(j("ghost", {
+    id: "ghost", rootId: "ghost", taskId: 99, finalized: true,
+    evidenceApplied: true, notifyState: "pending",
+  }));
+  expect(sweepAll(d).catchUp).toEqual([]);
+  expect(jobs.get("ghost")?.purged).toBe(true);
+});
+
 it("after delivery failure, the single timer catches up after 10min (F76)", () => {
   jobs.put(j("R", { finalized: true, evidenceApplied: true, notifyState: "sent", notifySentAt: 1000 }));
   expect(catchUpScan({ ...d, now: 1000 + DEFAULTS.notifyRetryMs + 1 })).toEqual(["R"]);

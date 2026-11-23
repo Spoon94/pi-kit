@@ -49,3 +49,41 @@ it("P1 50-chain wake stops reading logs once the output budget is spent", () => 
   expect(text).toContain("chains not fully expanded");
   expect(text).toContain("job 0");                    // the earliest status line survives
 });
+
+it("P1 200-chain wake keeps the footer intact even with a 2000-char next subject", () => {
+  const dir = mkdtempSync(join(tmpdir(), "wake-200-"));
+  mkdirSync(join(dir, "logs"));
+  const jobs = createJobStore(dir);
+  const roots: string[] = [];
+  for (let i = 0; i < 200; i++) {
+    const log = join(dir, "logs", `j${i}.log`);
+    writeFileSync(log, Array.from({ length: 20 }, (_, k) => `line ${k} of job ${i}`).join("\n"));
+    const id = `bg_${i}`;
+    const job: Job = {
+      id, label: `job ${i}`, command: "npm test", logPath: log, cwd: "/tmp", pid: 1,
+      status: "failed", exitCode: 1, exitCodeKnown: true, startedAt: 1000, endedAt: 61_000,
+      fpVerdict: "fresh", interferers: [], rootId: id, attempt: 6, taskId: i + 1, sessionId: "S",
+      evidenceApplied: true, finalized: true, notifyState: "pending",
+      finalResult: { ok: false, note: "failed after 6 attempts", trigger: "external", at: 61_000, jobId: id },
+    };
+    jobs.put(job);
+    roots.push(id);
+  }
+  const board = emptyBoard();
+  board.tasks = [{ id: 201, subject: "X".repeat(2000), status: "pending" } as never];
+  board.nextId = 202;
+
+  counter.reads = 0;
+  const text = composeWake(roots, board, jobs, DEFAULTS, board.tasks[0] as never);
+
+  expect(text.length).toBeLessThanOrEqual(4800);
+  expect(counter.reads).toBeLessThan(roots.length);
+  expect(text).toContain("chains not fully expanded");
+  expect(text).toContain("job 0");
+  // footer survives and comes after the truncation marker
+  const marker = text.indexOf("chains not fully expanded");
+  const footer = text.indexOf("next: #201");
+  expect(footer).toBeGreaterThan(marker);
+  expect(text).toContain("bg_run({task_id:201");
+  expect(text).toContain("Needs a decision");
+});

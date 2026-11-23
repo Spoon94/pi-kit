@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.1.0] - 2026-11-22
+## [0.1.0] - Unreleased
 
 ### Added
 
@@ -10,4 +10,4 @@
 
 ### Notes
 
-- Remove `@juicesharp/rpiv-todo` and `pi-bg-run` first: tool-name registration is first-registrant-wins, and leaving the old packages installed produces a half-working state.
+- Remove `@juicesharp/rpiv-todo` and `pi-bg-run` first: with both packages present, pi 1.5.2 prints `Error: Failed to load extension "<path>": Tool "todo" conflicts with <path>` and refuses to start (exit 1). The prefix is misleading — the extension is loaded; the conflict is a startup diagnostic. At the loader level both extensions stay loaded and the first registrant owns the tool, so a half-effective state is possible only where such diagnostics are non-fatal (embedded/SDK use); the `session_start` self-check (F13) guards exactly that. Uninstall both before installing this package.

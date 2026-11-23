@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
+import { extractFIds, missingFIds } from "./fids.js";
 
 const ROOT = new URL("../../", import.meta.url).pathname;
 const walk = (dir: string): string[] => {
@@ -25,11 +26,15 @@ const RETIRED = new Set([
 it("every F number in spec §13 appears in test text (spec and tests stay linked)", () => {
   const spec = readFileSync(join(ROOT, "docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md"), "utf8");
   const table = spec.slice(spec.indexOf("## 13."), spec.indexOf("## 14."));
-  const ids = [...new Set([...table.matchAll(/\bF(\d+)\b/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
+  const ids = extractFIds(table);
   expect(ids.length).toBeGreaterThanOrEqual(105);
   const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
-  const missing = ids.filter((n) => !RETIRED.has(n) && !new RegExp(`\\bF${n}\\b`).test(corpus));
-  expect(missing).toEqual([]);
+  expect(missingFIds(table, corpus).filter((n) => !RETIRED.has(n))).toEqual([]);
+});
+
+it("the F-id checker reports a missing id and accepts a present one", () => {
+  expect(missingFIds("| F999 | synthetic acceptance case |", "no ids in this corpus")).toEqual([999]);
+  expect(missingFIds("| F999 | synthetic acceptance case |", "test F999 exists")).toEqual([]);
 });
 
 it("the eight-aspect matrix exists and covers all eight rows", () => {
@@ -52,7 +57,7 @@ it("§18 F106-F111 all appear in test text (R21 / deadlock visibility)", () => {
   const start = spec.indexOf("### 18.4");
   const end = spec.indexOf("## 19.");
   const section = spec.slice(start, end > start ? end : undefined);
-  const ids = [...new Set([...section.matchAll(/\bF(\d+)\b/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
+  const ids = extractFIds(section);
   expect(ids).toEqual([106, 107, 108, 109, 110, 111]);
   const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
   const missing = ids.filter((n) => !new RegExp(`\\bF${n}\\b`).test(corpus));
@@ -64,7 +69,7 @@ it("§19 F112-F122 all appear in test text (completeness/guidance/truncation/cov
   const start = spec.indexOf("### 19.6");
   const end = spec.indexOf("## 20.");
   const section = spec.slice(start, end > start ? end : undefined);
-  const ids = [...new Set([...section.matchAll(/\bF(\d+)\b/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
+  const ids = extractFIds(section);
   expect(ids).toEqual([112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122]);
   const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
   const missing = ids.filter((n) => !new RegExp(`\\bF${n}\\b`).test(corpus));
@@ -74,7 +79,7 @@ it("§19 F112-F122 all appear in test text (completeness/guidance/truncation/cov
 it("§20 F123-F132 all appear in test text (/vt clear)", () => {
   const spec = readFileSync(join(ROOT, "docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md"), "utf8");
   const section = spec.slice(spec.indexOf("### 20.4"));
-  const ids = [...new Set([...section.matchAll(/\bF(\d+)\b/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
+  const ids = extractFIds(section);
   expect(ids).toEqual([123, 124, 125, 126, 127, 128, 129, 130, 131, 132]);
   const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
   const missing = ids.filter((n) => !new RegExp(`\\bF${n}\\b`).test(corpus));

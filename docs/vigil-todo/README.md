@@ -11,7 +11,7 @@
    pi remove @juicesharp/rpiv-todo
    pi remove pi-bg-run
    ```
-   Tool names are first-registrant-wins and silent; having both packages installed produces a half-working state.
+   With both packages present, pi 1.5.2 prints `Error: Failed to load extension "<path>": Tool "todo" conflicts with <path>` and refuses to start (exit 1). The prefix is misleading — the extension is loaded; the conflict is a startup diagnostic. At the loader level both extensions stay loaded and the first registrant owns the tool, so a half-effective state is possible only where such diagnostics are non-fatal (embedded/SDK use); the `session_start` self-check (F13) guards exactly that. Remove both old packages before installing this one.
 2. Install this repository with pi (see the collection [README](../../README.md) for local and git-source forms).
 3. Restart pi. `/vigil-todo doctor` should show `✓ No issues found`.
 

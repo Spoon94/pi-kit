@@ -20,7 +20,7 @@ const cut = (value: string, max: number): string => {
 
 /** Base sentence; a configured override keeps the same priority chain as the rest of guidance. */
 export function baseOnboardingText(guidance: ToolGuidance = DEFAULT_GUIDANCE): string {
-  const custom = guidance.onboardingText;
+  const custom = guidance.onboardingPromptText;
   return typeof custom === "string" && custom.trim() !== "" ? custom.trim() : BASE;
 }
 
@@ -62,7 +62,7 @@ export function createOnboardingCache(): (board: BoardState, guidance: ToolGuida
   let key = "";
   let text = "";
   return (board, guidance, mode) => {
-    const nextKey = `${mode}\u0000${guidance.onboardingText ?? ""}\u0000${boardSignature(board)}`;
+    const nextKey = `${mode}\u0000${guidance.onboardingPromptText ?? ""}\u0000${boardSignature(board)}`;
     if (nextKey !== key) {
       key = nextKey;
       text = buildOnboardingPrompt(board, guidance, mode);

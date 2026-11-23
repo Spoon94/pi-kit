@@ -1624,7 +1624,7 @@ A first-time user had to remind the model to use `todo`; the guidance only cover
 | 4 | Injection point: `before_agent_start` → `event.systemPromptOptions.appendSystemPrompt`. pi 1.5.2 exposes no `systemPromptOptions` on `session_start` (`SessionStartEvent` has only `type`/`reason`/`previousSessionFile`), so the same handler also covers the first run. |
 | 5 | Stability: an unchanged board produces a byte-identical prompt (board signature cache); the block is never duplicated when it is already present. |
 | 6 | `onboardingPrompt: "off" \| "once" \| "live"`, default `live`. `off` injects nothing, `once` injects the base sentence only, `live` adds the digest. Unknown values fall back to `live`. |
-| 7 | Guidance gains a leading line: "At the start of a new instruction, capture multi-step work with todo create before acting when it spans 3+ steps, multiple files, or long-running commands. Skip trivial questions." User-supplied `promptGuidelines` still replace the whole list; `guidance.onboardingText` optionally replaces the base sentence. |
+| 7 | Guidance gains a leading line: "At the start of a new instruction, capture multi-step work with todo create before acting when it spans 3+ steps, multiple files, or long-running commands. Skip trivial questions." User-supplied `promptGuidelines` still replace the whole list; `guidance.onboardingPromptText` optionally replaces the base sentence. |
 | 8 | No automatic task creation: onboarding must not pollute the board. |
 
 ### 22.3 Acceptance cases

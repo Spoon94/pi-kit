@@ -7,7 +7,7 @@ export interface ToolGuidance {
   promptGuidelines: string[];
   snippets: Record<GuidanceTool, string>;
   /** Optional replacement for the onboarding base sentence (spec §22). */
-  onboardingText?: string;
+  onboardingPromptText?: string;
 }
 
 export const DEFAULT_GUIDANCE: ToolGuidance = {
@@ -73,15 +73,15 @@ export function resolveGuidance(s: { file?: unknown; settings?: unknown; legacy?
     : [];
   const promptGuidelines = lines.length > 0 ? lines : DEFAULT_GUIDANCE.promptGuidelines;
 
-  const onboardingText = (() => {
+  const onboardingPromptText = (() => {
     for (let i = layers.length - 1; i >= 0; i--) {
-      const v = cookie(layers[i].onboardingText);
+      const v = cookie(layers[i].onboardingPromptText);
       if (v !== undefined) return v;
     }
     return undefined;
   })();
 
-  return { promptSnippet: global ?? DEFAULT_GUIDANCE.promptSnippet, promptGuidelines, snippets, onboardingText };
+  return { promptSnippet: global ?? DEFAULT_GUIDANCE.promptSnippet, promptGuidelines, snippets, onboardingPromptText };
 }
 
 /** Same stat/read cache contract as createConfigLoader. */

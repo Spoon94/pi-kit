@@ -84,8 +84,8 @@ it("F140 onboardingPrompt defaults to live and accepts only the three modes", ()
   expect(resolveConfig({ file: { onboardingPrompt: "bogus" } }).onboardingPrompt).toBe("live");
 });
 
-it("F120 a configured onboardingText replaces the base sentence", () => {
-  const guidance = resolveGuidance({ file: { guidance: { onboardingText: "CUSTOM ONBOARDING" } } });
+it("F120 a configured onboardingPromptText replaces the base sentence", () => {
+  const guidance = resolveGuidance({ file: { guidance: { onboardingPromptText: "CUSTOM ONBOARDING" } } });
   expect(buildOnboardingPrompt(emptyBoard(), guidance, "live")).toBe("CUSTOM ONBOARDING");
 });
 
@@ -101,12 +101,12 @@ it("F138 a blank board digest and long subjects degrade gracefully", () => {
 });
 
 it("F141 an oversized custom base sentence is capped, and blank overrides fall back", () => {
-  const huge = { ...DEFAULT_GUIDANCE, onboardingText: "B".repeat(3000) };
+  const huge = { ...DEFAULT_GUIDANCE, onboardingPromptText: "B".repeat(3000) };
   const text = buildOnboardingPrompt(emptyBoard(), huge, "live");
   expect(text.length).toBe(ONBOARDING_MAX);
   expect(text.endsWith("…")).toBe(true);
 
-  const blank = { ...DEFAULT_GUIDANCE, onboardingText: "   " };
+  const blank = { ...DEFAULT_GUIDANCE, onboardingPromptText: "   " };
   expect(buildOnboardingPrompt(emptyBoard(), blank, "live")).toContain("todo create");
 });
 

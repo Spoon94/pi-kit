@@ -89,12 +89,22 @@ it("§20 F123-F132 all appear in test text (/vt clear)", () => {
 
 it("§21 F133-F136 all appear in test text (full halt brake)", () => {
   const spec = readFileSync(join(ROOT, "docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md"), "utf8");
-  const section = spec.slice(spec.indexOf("### 21.3"));
+  const end = spec.indexOf("## 22.");
+  const section = spec.slice(spec.indexOf("### 21.3"), end > 0 ? end : undefined);
   const ids = extractFIds(section);
   expect(ids).toEqual([133, 134, 135, 136]);
   const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
   const missing = ids.filter((n) => !new RegExp(`\\bF${n}\\b`).test(corpus));
   expect(missing).toEqual([]);
+});
+
+it("§22 F137-F143 all appear in test text (onboarding)", () => {
+  const spec = readFileSync(join(ROOT, "docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md"), "utf8");
+  const section = spec.slice(spec.indexOf("### 22.3"));
+  const ids = extractFIds(section);
+  expect(ids).toEqual([137, 138, 139, 140, 141, 142, 143]);
+  const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
+  expect(missingFIds(section, corpus)).toEqual([]);
 });
 
 it("the sub-agent dispatch doc exists and covers the key boundaries (atomic flow/poller/halt/no auto re-attach)", () => {

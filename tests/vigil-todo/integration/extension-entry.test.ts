@@ -630,6 +630,224 @@ it("F120: config file guidance overrides tool promptSnippet/promptGuidelines", a
   expect(h.toolDefs.get("todo")?.promptGuidelines).toEqual(["CUSTOM LINE"]);
 });
 
+const onboardingConfig = (value: Record<string, unknown>): void => {
+  const home = mkdtempSync(join(tmpdir(), "vigil-onboard-cfg-"));
+  mkdirSync(join(home, "pi-kit"), { recursive: true });
+  writeFileSync(join(home, "pi-kit", "config.json"), JSON.stringify(value));
+  process.env.XDG_CONFIG_HOME = home;
+};
+const clearOnboardingConfig = (): void => { delete process.env.XDG_CONFIG_HOME; };
+
+const startWith = async (branch: unknown[], idle = true) => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-onboard-"));
+  const h = makeHarness(cwd, branch, idle);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  return h;
+};
+
+const startEvent = (options: any) => ({
+  type: "before_agent_start", messageType: "user", prompt: "hi", systemPrompt: "", systemPromptOptions: options,
+});
+const askStart = async (h: any, options: any = { appendSystemPrompt: "" }) => {
+  await h.emit("before_agent_start", startEvent(options));
+  return options;
+};
+const baseCount = (text: string): number => text.split("vigil-todo: at the start").length - 1;
+
+it("F137 first run gets onboarding even on an empty board", async () => {
+  clearOnboardingConfig();
+  const h = await startWith([snapshot(emptyBoard())]);
+  const options = await askStart(h);
+  expect(options.appendSystemPrompt).toContain("todo create");
+  expect(options.appendSystemPrompt).toContain("bg_run");
+  expect(options.sections?.["vigil-todo-board"]).toBeUndefined();
+});
+
+it("F138 live mode keeps the WIP and next digest in its own section", async () => {
+  clearOnboardingConfig();
+  const b = emptyBoard();
+  b.tasks = [
+    { id: 1, subject: "wire onboarding", status: "in_progress", inProgressSince: 1 },
+    { id: 2, subject: "write tests", status: "pending" },
+  ];
+  b.nextId = 3;
+  const h = await startWith([snapshot(b)]);
+  const options = await askStart(h);
+  expect(options.appendSystemPrompt).not.toContain("Current board");
+  expect(options.sections["vigil-todo-board"]).toContain("Current board: WIP #1 wire onboarding; next #2 write tests.");
+});
+
+it("F139 three calls on one options object never duplicate the base and never keep a stale digest", async () => {
+  clearOnboardingConfig();
+  const h = await startWith([snapshot(emptyBoard())]);
+  const options: any = { appendSystemPrompt: "" };
+
+  await askStart(h, options);                                  // empty board: base only
+  expect(baseCount(options.appendSystemPrompt)).toBe(1);
+  expect(options.sections?.["vigil-todo-board"]).toBeUndefined();
+  const afterFirst = options.appendSystemPrompt.length;
+
+  await h.runTool("todo", { action: "create", subject: "first task" });
+  await h.runTool("todo", { action: "update", id: 1, status: "in_progress" });
+  await askStart(h, options);                                  // board appears: base + digest
+  expect(baseCount(options.appendSystemPrompt)).toBe(1);
+  const firstDigest = options.sections["vigil-todo-board"];
+  expect(firstDigest).toContain("WIP #1 first task");
+
+  await h.runTool("todo", { action: "create", subject: "second task" });
+  await askStart(h, options);                                  // board changes: digest replaced
+  expect(baseCount(options.appendSystemPrompt)).toBe(1);
+  expect(options.appendSystemPrompt.length).toBe(afterFirst);
+  const secondDigest = options.sections["vigil-todo-board"];
+  expect(secondDigest).not.toBe(firstDigest);
+  expect(secondDigest).toContain("next #2 second task");
+
+  await h.runTool("todo", { action: "update", id: 1, status: "completed", accept: "stale" });
+  await askStart(h, options);
+  expect(baseCount(options.appendSystemPrompt)).toBe(1);
+  expect(options.appendSystemPrompt.length).toBe(afterFirst);
+  const thirdDigest = options.sections["vigil-todo-board"];
+  expect(thirdDigest).not.toBe(secondDigest);
+  expect(thirdDigest).toContain("WIP none");
+  expect(thirdDigest).toContain("next #2 second task");
+});
+
+it("F139 other extensions' append text and sections survive untouched", async () => {
+  clearOnboardingConfig();
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "own task", status: "in_progress", inProgressSince: 1 }];
+  b.nextId = 2;
+  const h = await startWith([snapshot(b)]);
+  const options: any = { appendSystemPrompt: "OTHER EXTENSION BLOCK", sections: { other: "KEEP ME" } };
+  await askStart(h, options);
+  expect(baseCount(options.appendSystemPrompt)).toBe(1);
+  expect(options.appendSystemPrompt.startsWith("OTHER EXTENSION BLOCK")).toBe(true);
+  expect(options.appendSystemPrompt).toContain("OTHER EXTENSION BLOCK\n\n");
+  expect(options.sections.other).toBe("KEEP ME");
+  expect(options.sections["vigil-todo-board"]).toContain("own task");
+});
+
+it("F140 onboardingPrompt off injects nothing and once drops the digest", async () => {
+  onboardingConfig({ onboardingPrompt: "off" });
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "wip", status: "in_progress", inProgressSince: 1 }];
+  b.nextId = 2;
+  const off = await startWith([snapshot(b)]);
+  const kept: any = { appendSystemPrompt: "KEPT", sections: { other: "ALSO KEPT" } };
+  await askStart(off, kept);
+  expect(kept.appendSystemPrompt).toBe("KEPT");
+  expect(kept.sections).toEqual({ other: "ALSO KEPT" });
+
+  onboardingConfig({ onboardingPrompt: "once" });
+  const once = await startWith([snapshot(b)]);
+  const onceOptions = await askStart(once);
+  expect(onceOptions.appendSystemPrompt).toContain("todo create");
+  expect(onceOptions.sections?.["vigil-todo-board"]).toBeUndefined();
+
+  // live -> once on the same options object must drop our own digest and keep foreign sections.
+  const switching: any = { appendSystemPrompt: "", sections: { other: "KEEP" } };
+  onboardingConfig({ onboardingPrompt: "live" });
+  const live = await startWith([snapshot(b)]);
+  await askStart(live, switching);
+  expect(switching.sections["vigil-todo-board"]).toContain("Current board");
+  onboardingConfig({ onboardingPrompt: "once" });
+  const onceAgain = await startWith([snapshot(b)]);
+  await askStart(onceAgain, switching);
+  expect(switching.sections["vigil-todo-board"]).toBeUndefined();
+  expect(switching.sections.other).toBe("KEEP");
+  clearOnboardingConfig();
+});
+
+it("F141 a 2000-char subject keeps base plus digest within 1200 chars", async () => {
+  clearOnboardingConfig();
+  const b = emptyBoard();
+  b.tasks = [
+    { id: 1, subject: "X".repeat(2000), status: "in_progress", inProgressSince: 1 },
+    { id: 2, subject: "Y".repeat(2000), status: "pending" },
+  ];
+  b.nextId = 3;
+  const h = await startWith([snapshot(b)]);
+  const options = await askStart(h);
+  const total = options.appendSystemPrompt.length + (options.sections?.["vigil-todo-board"]?.length ?? 0);
+  expect(total).toBeLessThanOrEqual(1200);
+});
+
+it("F142 before_agent_start adds no timer and keeps other content intact", async () => {
+  clearOnboardingConfig();
+  const h = await startWith([snapshot(emptyBoard())]);
+  const before = vi.getTimerCount();
+  const options: any = { appendSystemPrompt: "EXISTING BLOCK", sections: { other: "KEEP" } };
+  await askStart(h, options);
+  expect(vi.getTimerCount()).toBe(before);
+  expect(options.appendSystemPrompt.startsWith("EXISTING BLOCK")).toBe(true);
+  expect(baseCount(options.appendSystemPrompt)).toBe(1);
+  expect(options.sections.other).toBe("KEEP");
+});
+
+it("F144 the first user run returns a hidden user-role onboarding message", async () => {
+  clearOnboardingConfig();
+  const h = await startWith([snapshot(emptyBoard())]);
+  const result = await h.emit("before_agent_start", startEvent({ appendSystemPrompt: "" }));
+  expect(result?.message?.customType).toBe("vigil-todo-onboarding");
+  expect(result?.message?.display).toBe(false);
+  const text = String(result?.message?.content);
+  expect(text).toContain("todo create");
+  expect(text).toContain("3+ steps");
+  expect(text).toContain("trivial");
+  expect(text).toContain("bg_run");
+  expect(text).not.toMatch(/this request is multi-step/i);
+});
+
+it("F145 the second user run does not repeat the onboarding message", async () => {
+  clearOnboardingConfig();
+  const h = await startWith([snapshot(emptyBoard())]);
+  const first = await h.emit("before_agent_start", startEvent({ appendSystemPrompt: "" }));
+  expect(first?.message).toBeDefined();
+  const second = await h.emit("before_agent_start", startEvent({ appendSystemPrompt: "" }));
+  expect(second?.message).toBeUndefined();
+  const third = await h.emit("before_agent_start", startEvent({ appendSystemPrompt: "" }));
+  expect(third?.message).toBeUndefined();
+});
+
+it("F146 off has no message, once has a message without a section, live has both", async () => {
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "wip", status: "in_progress", inProgressSince: 1 }];
+  b.nextId = 2;
+
+  onboardingConfig({ onboardingPrompt: "off" });
+  const off = await startWith([snapshot(b)]);
+  const offOptions: any = { appendSystemPrompt: "" };
+  const offResult = await off.emit("before_agent_start", startEvent(offOptions));
+  expect(offResult?.message).toBeUndefined();
+  expect(offOptions.appendSystemPrompt).toBe("");
+
+  onboardingConfig({ onboardingPrompt: "once" });
+  const once = await startWith([snapshot(b)]);
+  const onceOptions: any = { appendSystemPrompt: "" };
+  const onceResult = await once.emit("before_agent_start", startEvent(onceOptions));
+  expect(onceResult?.message?.customType).toBe("vigil-todo-onboarding");
+  expect(onceOptions.sections?.["vigil-todo-board"]).toBeUndefined();
+
+  clearOnboardingConfig();
+  const live = await startWith([snapshot(b)]);
+  const liveOptions: any = { appendSystemPrompt: "" };
+  const liveResult = await live.emit("before_agent_start", startEvent(liveOptions));
+  expect(liveResult?.message?.customType).toBe("vigil-todo-onboarding");
+  expect(liveOptions.sections?.["vigil-todo-board"]).toContain("Current board");
+});
+
+it("F147 a custom (wake) run never gets the first-run message", async () => {
+  clearOnboardingConfig();
+  const h = await startWith([snapshot(emptyBoard())]);
+  const custom = await h.emit("before_agent_start", {
+    type: "before_agent_start", messageType: "custom", systemPrompt: "", systemPromptOptions: { appendSystemPrompt: "" },
+  });
+  expect(custom?.message).toBeUndefined();
+  const user = await h.emit("before_agent_start", startEvent({ appendSystemPrompt: "" }));
+  expect(user?.message?.customType).toBe("vigil-todo-onboarding");
+});
+
 it("All extension events and command paths (coverage reinforcement)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   const storeDir = runDir(cwd);

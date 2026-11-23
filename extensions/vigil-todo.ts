@@ -31,6 +31,7 @@ import {
   preflight, type ToolDef, type ToolDeps,
 } from "../src/vigil-todo/tool/register.js";
 import { createGuidanceLoader, DEFAULT_GUIDANCE, type ToolGuidance } from "../src/vigil-todo/tool/guidance.js";
+import { FIRST_RUN_MESSAGE, ONBOARDING_MESSAGE_TYPE, ONBOARDING_SECTION, createOnboardingCache } from "../src/vigil-todo/tool/onboarding.js";
 import { createOverlayController } from "../src/vigil-todo/ui/overlay.js";
 import { WIDGET_KEY, STATUS_KEY, renderDoctor, renderPanel, renderStatus, renderTodos } from "../src/vigil-todo/ui/panel.js";
 import { bgCompletions, panelCompletions, todosCompletions } from "../src/vigil-todo/ui/completions.js";
@@ -78,6 +79,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   let timer: NodeJS.Timeout | undefined;
   let mergeTimer: NodeJS.Timeout | undefined;
   let lastModelAdvanced = false;
+  let onboardingMessageSent = false;
   let pendingKill: string | undefined;
   const recovered = new Set<string>();
   let wired = false;
@@ -378,6 +380,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     activeCtx = ctx;
     const nextSid = ctx.sessionManager.getSessionId();
     if (nextSid === sid && ctx.cwd === cwd) return;
+    onboardingMessageSent = false;
     flushExitQueue();                        // persist exits queued by the old session first
     if (mergeTimer) { clearTimeout(mergeTimer); mergeTimer = undefined; }
     sid = nextSid;
@@ -712,6 +715,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     if (wired) return;
     wired = true;
 
+    const onboardingPrompt = createOnboardingCache();
     pi.on("tool_call", (event, ctx) => {
       initSession(ctx);
       if (event.parentToolCallId) return;
@@ -734,6 +738,38 @@ export default function vigilTodo(pi: ExtensionAPI): void {
       initSession(ctx);
       ackTracker.onAgentStart(jobs, sid);
       lastModelAdvanced = false;
+    });
+
+    // §22 onboarding: tell the model when to reach for the board, plus (live mode) a light board digest.
+    // pi 1.5.2 exposes systemPromptOptions only here, so the base sentence also covers the first run.
+    pi.on("before_agent_start", (event, ctx) => {
+      initSession(ctx);
+      const mode = getCfg().onboardingPrompt;
+      if (mode === "off") return;                     // off adds nothing and leaves other content alone
+      const injection = onboardingPrompt(boards.get(sid), getGuidance(), mode);
+      const options = event.systemPromptOptions;
+      const current = typeof options.appendSystemPrompt === "string" ? options.appendSystemPrompt : "";
+      if (injection.append && !current.includes(injection.append)) {
+        options.appendSystemPrompt = current ? `${current}\n\n${injection.append}` : injection.append;
+      }
+      // The digest lives in our own section: assigning it replaces the previous version instead of
+      // appending, so a changing board can never stack stale summaries (§22, F139).
+      if (injection.board !== undefined) {
+        options.sections = { ...(options.sections ?? {}), [ONBOARDING_SECTION]: injection.board };
+      } else if (options.sections && ONBOARDING_SECTION in options.sections) {
+        const next = { ...options.sections };
+        delete next[ONBOARDING_SECTION];
+        options.sections = next;
+      }
+      // §22 second layer: a user-role nudge on the very first user run is far more visible than
+      // appended system text. Fires once per session; custom (wake) runs never trigger it.
+      if (event.messageType === "user" && !onboardingMessageSent) {
+        onboardingMessageSent = true;
+        return {
+          message: { customType: ONBOARDING_MESSAGE_TYPE, content: FIRST_RUN_MESSAGE, display: false },
+        };
+      }
+      return undefined;
     });
 
     pi.on("agent_before_settle", (_event, ctx) => {

@@ -15,6 +15,15 @@
 2. Install this repository with pi (see the collection [README](../../README.md) for local and git-source forms).
 3. Restart pi. `/vigil-todo doctor` should show `✓ No issues found`.
 
+## First run
+
+The extension does not seed tasks; it makes the model reach for the board on its own. Two layers work together, both applied in `before_agent_start` (pi exposes prompt options there):
+
+1. **One user-role message per session.** On the first real user run, the model receives a single hidden instruction: if the request spans 3+ steps, multiple files, or long-running commands, call `todo create` before doing anything else, keep one `in_progress`, complete only with evidence, and use `bg_run({task_id, command})` for long commands. Trivial questions are told to skip task creation. Later user runs in the same session get no repeat, and `messageType:"custom"` (wake) runs never trigger it.
+2. **System-prompt onboarding.** A stable base sentence plus a digest of the current WIP and the next actionable task. The digest lives in its own prompt section (`sections["vigil-todo-board"]`), so a changed board replaces it instead of stacking stale summaries.
+
+Modes (`onboardingPrompt`): `live` (default) = base sentence + first-run message + board digest; `once` = base sentence + first-run message, no digest; `off` = nothing. The base sentence can be replaced with `guidance.onboardingPromptText`, following the same configuration priority chain as the rest of the guidance.
+
 ## Tools
 
 | Tool | Purpose |
@@ -52,7 +61,7 @@ Tab completion: `/vigil-todo` and `/vt` complete `halt`/`resume`/`doctor`/`clear
 
 Collapse shortcut defaults to `ctrl+shift+t`; the one-key halt defaults to `alt+h` (both accept `off`; `/reload` required).
 
-Model-side trigger: when the user says “run it in the background / I'm going to sleep / batch / long task / run overnight”, the guidance tells the model to create a todo and start `bg_run` without being asked for the tool name. `/vt halt` is always the brake: it aborts the in-flight turn and freezes model writes until `/vt resume`.
+Model-side triggers work at two levels that complement each other. The onboarding layer above covers the general case: any multi-step instruction (3+ steps, multiple files, or a long-running command) is captured with `todo create` before acting, without the user naming a tool. The explicit-intent layer adds emphasis when the user says “run it in the background / I'm going to sleep / batch / long task / run overnight”, so the model creates a todo and starts `bg_run` immediately. Neither layer creates tasks by itself — the model still calls the tool. `/vt halt` is always the brake: it aborts the in-flight turn and freezes model writes until `/vt resume`.
 
 ## Configuration
 
@@ -73,8 +82,9 @@ Priority: `~/.config/pi-kit/config.json` → `pi.getSettings().vigilTodo` → `p
 | `wakeMergeMs` | 250 |
 | `notifyRetryMs` | 10min |
 | `collapseKey` / `haltKey` | collapse key / one-key halt key (default `alt+h`, `off` disables) |
+| `onboardingPrompt` | `live` (default; first-run message + board digest), `once` (message only), `off` (nothing) |
 
-Full key contract, validation ranges, hot-reload matrix, and examples: [configuration.md](configuration.md).
+Full key contract, validation ranges, hot-reload matrix, and examples: [configuration.md](configuration.md). The onboarding base sentence can be overridden per project with `guidance.onboardingPromptText` (same priority chain).
 
 ## Dispatching sub-agents
 

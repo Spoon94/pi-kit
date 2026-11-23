@@ -6,7 +6,7 @@ A pi extension collection: one repository, one install, N extensions.
 
 | Extension | What it does | Docs |
 |---|---|---|
-| `vigil-todo` | Task board plus background jobs: evidence-based completion, retries/backoff, wake delivery, and a one-key halt. | [docs/vigil-todo/README.md](docs/vigil-todo/README.md) |
+| `vigil-todo` | Task board plus background jobs: evidence-based completion, retries/backoff, wake delivery, a one-key halt, and proactive first-run onboarding that tells the model when to reach for the board. | [docs/vigil-todo/README.md](docs/vigil-todo/README.md) |
 
 Sub-agent dispatch guidance for `vigil-todo` lives at [docs/vigil-todo/dispatching-agents.md](docs/vigil-todo/dispatching-agents.md).
 
@@ -35,6 +35,12 @@ pi install ./
 Pin a ref if you want a fixed snapshot: `pi install git:github.com/Spoon94/pi-kit@<tag-or-sha>`.
 
 Adjust the remote/fork as needed, then restart pi. Each extension's docs describe any additional setup (for example, `vigil-todo` requires removing the old `rpiv-todo` / `pi-bg-run` packages first).
+
+## First use
+
+On the first real user run of a session, `vigil-todo` gives the model one short, conditional instruction: if the request spans 3+ steps, multiple files, or long-running commands, capture the work with `todo create` before acting; run long commands with `bg_run`; skip trivial questions (no tasks for them). Later runs in the same session get no repeat message, and wake/custom runs never trigger it. The system prompt also carries a one-line onboarding sentence plus a light board digest (current WIP and the next task) that is replaced whenever the board changes.
+
+Configure it with `onboardingPrompt`: `live` (default, message + board digest), `once` (base sentence and the first-run message only) or `off` (nothing). Tool details live in [docs/vigil-todo/README.md](docs/vigil-todo/README.md).
 
 ## Adding an extension
 

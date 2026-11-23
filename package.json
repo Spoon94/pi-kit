@@ -1,7 +1,7 @@
 {
   "name": "pi-kit",
   "version": "0.1.0",
-  "description": "Personal pi extension collection for pi — vigil-todo and more",
+  "description": "pi extension collection — vigil-todo and more",
   "license": "MIT",
   "type": "module",
   "repository": {

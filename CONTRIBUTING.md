@@ -1,24 +1,33 @@
-# pi-kit 协作流程
+# Contributing to pi-kit
 
-## vigil-todo：一个完整构建分支
+pi-kit is a collection of pi extensions. One repo, one install, N extensions.
 
-`vigil-todo` 的完整构建使用 **`feat/vigil-todo`**，不按每个小任务新建分支。
+## One build branch per major build
 
-- P0–P5、测试、文档和缺陷修复都在该构建分支持续提交。
-- 普通小任务不单独开分支、不单独开 PR。
-- 构建过程中可以推送分支备份和查看差异，但**不创建最终 PR**。
-- 只有完整构建结束、测试和验收通过后，才从 `feat/vigil-todo` 向 `main` 创建最终 PR。
-- **最终 PR 由人审核并决定是否合并；agent 不得自动 approve、自动 merge 或绕过规则。**
+A major build (a new extension, or a large cross-cutting change) runs on a **single build branch**, e.g. `feat/<name>`. Do not open a branch per small task.
 
-历史设计评审 PR 是构建开始前的文档基线，不改变上述后续流程。
+- Implementation, tests, docs, and defect fixes all commit to that build branch as they land.
+- Ordinary small tasks do not get their own branch or their own PR.
+- Pushing the build branch for backup and diffing is fine; **do not open the final PR early**.
+- Only when the whole build is finished and its exit criteria pass, open one PR from the build branch to `main`.
+- **The final PR is reviewed and merged by a human. Agents must not approve, merge, or bypass repository rules.**
 
-## 完成标准
+The `feat/vigil-todo` build branch followed this process and is merged; future builds use the same convention with their own name.
 
-最终 PR 前至少确认：
+## Definition of done
 
-1. 规格中相应阶段出口已完成；
-2. **交付前必跑三件套**：`npm test`、`npm run typecheck`、`npm run coverage:check`；也可一次运行 `npm run verify`（任一失败即非零退出）；
-3. 自动化测试和真实 pi 冒烟验证通过；
-4. 文档、配置说明和验收用例已同步；
-5. 工作区无未提交改动；
-6. 向人提交差异、测试证据和剩余风险，等待人工审核。
+Before the final PR, confirm at least:
+
+1. The relevant stage exits in the spec are met.
+2. **The pre-delivery triple** passes: `npm test`, `npm run typecheck`, `npm run coverage:check` — or `npm run verify` for all three (non-zero exit on any failure).
+3. Automated tests and a real-pi smoke load pass.
+4. Docs, configuration reference, and acceptance cases are in sync with behavior.
+5. The working tree has no uncommitted changes.
+6. Hand the human the diff, the test evidence, and the remaining risks; wait for review.
+
+## Repository conventions
+
+- **English** for `src/`, `extensions/`, `tests/`, and all user-facing docs (enforced for code by `tests/arch/language.test.ts`). The internal design archive under `docs/<name>/design/` stays in its original language by decision.
+- **Guards are proven, not assumed**: every repo-level guard (module boundaries, retired-mechanism scope, CJK-free source, spec↔test coverage, config-consumed) has a test that injects a violation and must fail.
+- **Truth from durable state**: runtime decisions read authoritative, persistent state (the job sidecar), never evictable display data.
+- Rejections and warnings always carry an executable next step.

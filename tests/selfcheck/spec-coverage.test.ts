@@ -32,6 +32,11 @@ it("every F number in spec §13 appears in test text (spec and tests stay linked
   expect(missingFIds(table, corpus).filter((n) => !RETIRED.has(n))).toEqual([]);
 });
 
+it("the F-id checker reports a missing id and accepts a present one", () => {
+  expect(missingFIds("| F999 | synthetic acceptance case |", "no ids in this corpus")).toEqual([999]);
+  expect(missingFIds("| F999 | synthetic acceptance case |", "test F999 exists")).toEqual([]);
+});
+
 it("the eight-aspect matrix exists and covers all eight rows", () => {
   const doc = readFileSync(join(ROOT, "docs/vigil-todo/quality-matrix.md"), "utf8");
   for (const k of ["Performance", "Resilience", "Configurability", "Usability", "Extensibility", "Self-verification", "Clearing todos", "Forced halt"]) {
@@ -52,7 +57,7 @@ it("§18 F106-F111 all appear in test text (R21 / deadlock visibility)", () => {
   const start = spec.indexOf("### 18.4");
   const end = spec.indexOf("## 19.");
   const section = spec.slice(start, end > start ? end : undefined);
-  const ids = [...new Set([...section.matchAll(/\bF(\d+)\b/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
+  const ids = extractFIds(section);
   expect(ids).toEqual([106, 107, 108, 109, 110, 111]);
   const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
   const missing = ids.filter((n) => !new RegExp(`\\bF${n}\\b`).test(corpus));
@@ -64,7 +69,7 @@ it("§19 F112-F122 all appear in test text (completeness/guidance/truncation/cov
   const start = spec.indexOf("### 19.6");
   const end = spec.indexOf("## 20.");
   const section = spec.slice(start, end > start ? end : undefined);
-  const ids = [...new Set([...section.matchAll(/\bF(\d+)\b/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
+  const ids = extractFIds(section);
   expect(ids).toEqual([112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122]);
   const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
   const missing = ids.filter((n) => !new RegExp(`\\bF${n}\\b`).test(corpus));

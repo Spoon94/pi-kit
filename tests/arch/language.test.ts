@@ -1,6 +1,6 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { afterEach, expect, it } from "vitest";
 
 const ROOT = new URL("../../", import.meta.url).pathname;
 const walk = (dir: string): string[] => {
@@ -14,15 +14,37 @@ const walk = (dir: string): string[] => {
 };
 
 const CJK = new RegExp("[\\u4e00-\\u9fff]");
+const probes: string[] = [];
+const cleanup = (): void => {
+  for (const p of probes.splice(0)) {
+    try { rmSync(p, { force: true }); } catch { /* already gone */ }
+  }
+};
+afterEach(cleanup);
 
-it("src/, extensions/ and tests/ contain no CJK characters", () => {
+const scan = (dirs: readonly string[] = ["src", "extensions", "tests"]): string[] => {
   const hits: string[] = [];
-  for (const dir of ["src", "extensions", "tests"]) {
+  for (const dir of dirs) {
     for (const f of walk(join(ROOT, dir))) {
       if (CJK.test(readFileSync(f, "utf8"))) hits.push(f);
     }
   }
-  expect(hits).toEqual([]);
+  return hits;
+};
+
+it("src/, extensions/ and tests/ contain no CJK characters", () => {
+  expect(scan()).toEqual([]);
+});
+
+it("permanent negative: a CJK probe in a scanned directory is detected", () => {
+  const probe = join(ROOT, "src/vigil-todo/lib/__probe_language.ts");
+  probes.push(probe);
+  try {
+    writeFileSync(probe, `export const marker = "${String.fromCharCode(0x4e2d, 0x6587)}";\n`);
+    expect(scan()).toContain(probe);
+  } finally {
+    cleanup();
+  }
 });
 
 it("the language guard excludes only the internal design archive", () => {

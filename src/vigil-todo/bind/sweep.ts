@@ -1,6 +1,7 @@
 import type { BoardStore } from "../board/store.js";
 import { applyCleanup, markPurged, planCleanup, retentionCandidates } from "../board/cleanup.js";
 import { jobFactsOf } from "../jobs/facts.js";
+import type { Job } from "../jobs/types.js";
 import type { SpawnRequest } from "../jobs/spawn.js";
 import type { JobStore } from "../jobs/store.js";
 import type { VigilConfig } from "../lib/config.js";
@@ -17,12 +18,19 @@ export interface SweepDeps {
 
 export function sweepRespawns(d: SweepDeps): number {
   if (d.boards.get(d.sessionId).counters.halted) return 0;      // R20: no respawn after halt
+  const all = d.jobs.all();
+  // Idle fast path: without retryAt, pendingReverify, or a reverify job there is no work to do.
+  let work = false;
+  for (const j of all) {
+    if (j.retryAt != null || j.pendingReverify === true || j.staleReverifyOf != null) { work = true; break; }
+  }
+  if (!work) return 0;
   let n = 0;
   let dirty = false;
   // Whether a reverify job exists is independent of any single job: build the set in one scan, avoiding a full scan per job (P3 hot spot)
   const reverifyRoots = new Set<string>();
-  for (const j of d.jobs.all()) if (j.staleReverifyOf != null) reverifyRoots.add(j.rootId);
-  for (const job of d.jobs.all()) {
+  for (const j of all) if (j.staleReverifyOf != null) reverifyRoots.add(j.rootId);
+  for (const job of all) {
     const root = d.jobs.get(job.rootId);
     if (job.purged || root?.purged) continue;                 // R19: purged chains are not respawned
     const dueBackoff = job.retryAt != null && job.retryAt <= d.now;
@@ -71,30 +79,50 @@ export function sweepRespawns(d: SweepDeps): number {
 }
 
 /**
- * Roots in this session whose bound task no longer exists (tree rollback, clear, or no taskId at all)
- * are terminal orphans: purge once on the job side so catch-up and timers stop re-evaluating them.
- * The process records remain visible to doctor (`orphanJobs`) and can be reclaimed with bg_kill.
+ * Combined first pass: purge roots whose task no longer exists (tree rollback, clear, or no taskId),
+ * and collect catch-up candidates from the same snapshot. Purged orphans remain visible to doctor
+ * (`orphanJobs`) and can be reclaimed with bg_kill.
  */
-export function reapOrphanRoots(d: SweepDeps): number {
+function reapAndScan(d: SweepDeps, all: readonly Job[]): string[] {
   const board = d.boards.get(d.sessionId);
   const taskIds = new Set(board.tasks.map((t) => t.id));
+  const halted = board.counters.halted;
+  const candidates: string[] = [];
   let dirty = false;
-  let marked = 0;
-  for (const root of d.jobs.all()) {
-    if (root.id !== root.rootId || root.sessionId !== d.sessionId || root.purged) continue;
-    if (root.taskId !== undefined && taskIds.has(root.taskId)) continue;
-    marked++;
-    for (const j of d.jobs.all().filter((x) => x.rootId === root.id)) {
-      if (j.purged && j.retryAt == null && j.pendingReverify == null) continue;
-      const next = { ...j, purged: true };
-      delete next.retryAt;
-      delete next.pendingReverify;
-      d.jobs.put(next);
-      dirty = true;
+  let chains: Map<string, Job[]> | undefined;
+  for (const root of all) {
+    if (root.id !== root.rootId) continue;                       // roots only
+    if (root.sessionId !== d.sessionId || root.purged) continue;
+    if (root.taskId === undefined || !taskIds.has(root.taskId)) {
+      if (!chains) {
+        chains = new Map<string, Job[]>();
+        for (const j of all) {
+          const list = chains.get(j.rootId);
+          if (list) list.push(j); else chains.set(j.rootId, [j]);
+        }
+      }
+      for (const j of chains.get(root.id)!) {
+        if (j.purged && j.retryAt == null && j.pendingReverify == null) continue;
+        const next = { ...j, purged: true };
+        delete next.retryAt;
+        delete next.pendingReverify;
+        d.jobs.put(next);
+        dirty = true;
+      }
+      continue;
     }
+    if (halted) continue;                                        // R20: no catch-up after halt
+    if (root.finalResult?.trigger === "self") continue;          // R6-5: do not wake self
+    if (!root.finalized) continue;
+    if (!root.evidenceApplied) { candidates.push(root.id); continue; }
+    if (root.notifyState === "acked") continue;
+    if (root.notifyState === "pending") { candidates.push(root.id); continue; }
+    const sentAt = root.notifySentAt;
+    const overdue = sentAt == null || sentAt <= 0 || d.now - sentAt > d.cfg.notifyRetryMs;
+    if (overdue && d.isIdle()) candidates.push(root.id);
   }
   if (dirty) d.jobs.save();
-  return marked;
+  return candidates;
 }
 
 /** Root-granularity scan set (spec §5.3). */
@@ -123,13 +151,15 @@ export function catchUpScan(d: SweepDeps): string[] {
 export function sweepAll(d: SweepDeps) {
   let boardDirty = false;
   const dd: SweepDeps = { ...d, boardChanged: () => { boardDirty = true; } };
-  reapOrphanRoots(dd);
-  for (const id of catchUpScan(dd)) {
-    if (projectFinal(id, dd.jobs, dd.boards, dd.sessionId, dd.now)) boardDirty = true;
+  const candidates = reapAndScan(dd, dd.jobs.all());  let mutated = false;
+  for (const id of candidates) {
+    if (projectFinal(id, dd.jobs, dd.boards, dd.sessionId, dd.now)) { boardDirty = true; mutated = true; }
   }
   const respawned = sweepRespawns(dd);
-  const catchUp = catchUpScan(dd);
+  if (respawned > 0) mutated = true;
   const retained = applyRetention(dd);
+  if (retained > 0) mutated = true;
+  const catchUp = mutated ? catchUpScan(dd) : candidates;
   return { respawned, catchUp, retained, boardDirty };
 }
 

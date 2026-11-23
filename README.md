@@ -1,6 +1,6 @@
 # pi-kit
 
-A personal pi extension collection: one repository, one install, N extensions.
+A pi extension collection: one repository, one install, N extensions.
 
 ## Extensions
 
@@ -14,17 +14,16 @@ Sub-agent dispatch guidance for `vigil-todo` lives at [docs/vigil-todo/dispatchi
 
 Three installation modes, depending on your situation:
 
-**npm — recommended for users, after the release is published:**
+**git — works today, tracks `main`:**
+
+```bash
+pi install git:github.com/Spoon94/pi-kit
+```
+
+**npm — once the first release is published (not yet):**
 
 ```bash
 pi install npm:pi-kit
-```
-
-**git — until the build branch is merged (the `main` branch currently contains docs only):**
-
-```bash
-pi install git:github.com/Spoon94/pi-kit@feat/vigil-todo
-# or: pi install https://github.com/Spoon94/pi-kit#feat/vigil-todo
 ```
 
 **local checkout — for development; code changes take effect with `/reload`:**
@@ -32,6 +31,8 @@ pi install git:github.com/Spoon94/pi-kit@feat/vigil-todo
 ```bash
 pi install ./
 ```
+
+Pin a ref if you want a fixed snapshot: `pi install git:github.com/Spoon94/pi-kit@<tag-or-sha>`.
 
 Adjust the remote/fork as needed, then restart pi. Each extension's docs describe any additional setup (for example, `vigil-todo` requires removing the old `rpiv-todo` / `pi-bg-run` packages first).
 

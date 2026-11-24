@@ -137,3 +137,22 @@ it("tolerates a missing root and default fields", () => {
   expect(text).toContain("exit ?");
   expect(text).toContain("No actionable tasks");
 });
+
+it("F163 wake messages keep the exact elapsed form (3m12s), coarse display does not leak in", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vigil-compose-"));
+  const log = join(dir, "r.log");
+  writeFileSync(log, "ok");
+  const jobs = createJobStore(dir);
+  jobs.put({
+    id: "R", rootId: "R", label: "r", command: "x", logPath: log, cwd: "/tmp", pid: 1,
+    status: "failed", exitCode: 1, exitCodeKnown: true, startedAt: 1_000, endedAt: 193_000,
+    fpVerdict: "fresh", interferers: [], attempt: 1, taskId: 1, sessionId: "S",
+    evidenceApplied: true, finalized: true, notifyState: "pending",
+    finalResult: { ok: false, note: "failed", trigger: "external", at: 2, jobId: "R" },
+  } as never);
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "t", status: "failed" as never }];
+  const text = composeWake(["R"], b, jobs, DEFAULTS, undefined);
+  expect(text).toContain("3m12s");
+  expect(text).not.toContain("3m ");
+});

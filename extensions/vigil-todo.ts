@@ -23,6 +23,7 @@ import { spawnJob, takeChild, trackSpawned, type SpawnRequest } from "../src/vig
 import { createJobStore, runDir, type JobStore } from "../src/vigil-todo/jobs/store.js";
 import type { Job } from "../src/vigil-todo/jobs/types.js";
 import { createConfigLoader } from "../src/vigil-todo/lib/config.js";
+import { quantizeNow } from "../src/vigil-todo/lib/format.js";
 import { collectFingerprint } from "../src/vigil-todo/lib/fingerprint.js";
 import { sanitizeMultiline, sanitizeTerminalText } from "../src/vigil-todo/lib/sanitize.js";
 import { tailLines } from "../src/vigil-todo/lib/tail.js";
@@ -33,7 +34,7 @@ import {
 import { createGuidanceLoader, DEFAULT_GUIDANCE, type ToolGuidance } from "../src/vigil-todo/tool/guidance.js";
 import { FIRST_RUN_MESSAGE, ONBOARDING_MESSAGE_TYPE, ONBOARDING_SECTION, createOnboardingCache } from "../src/vigil-todo/tool/onboarding.js";
 import { createOverlayController } from "../src/vigil-todo/ui/overlay.js";
-import { WIDGET_KEY, STATUS_KEY, renderDoctor, renderPanel, renderStatus, renderTodos } from "../src/vigil-todo/ui/panel.js";
+import { WIDGET_KEY, STATUS_KEY, panelStamp, renderDoctor, renderPanel, renderStatus, renderTodos, samePanelStamp } from "../src/vigil-todo/ui/panel.js";
 import { bgCompletions, panelCompletions, todosCompletions } from "../src/vigil-todo/ui/completions.js";
 import { clearRenudgeOnSettled, createAckTracker, markSent, resetOnUserInput } from "../src/vigil-todo/wake/ack.js";
 import { WAKE_CUSTOM_TYPE, composeWake } from "../src/vigil-todo/wake/compose.js";
@@ -79,6 +80,12 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   let timer: NodeJS.Timeout | undefined;
   let mergeTimer: NodeJS.Timeout | undefined;
   let lastModelAdvanced = false;
+  // §24 UI diff cache: skip ctx.ui calls (and panel rendering) when nothing visible changed
+  let statusSent = false;
+  let lastStatus: string | undefined;
+  let widgetSent = false;
+  let lastWidgetKey: string | undefined;
+  let uiStamp: ReturnType<typeof panelStamp> | undefined;
   let onboardingMessageSent = false;
   let pendingKill: string | undefined;
   const recovered = new Set<string>();
@@ -142,10 +149,26 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   const refreshOverlay = (): void => {
     const ctx = activeCtx;
     if (!ctx?.hasUI) return;
-    ctx.ui.setStatus(STATUS_KEY, renderStatus(boards.get(sid), jobs));   // C2: persistent status bar
-    overlay.update(boards.get(sid));
-    if (collapsed) { ctx.ui.setWidget(WIDGET_KEY, undefined); return; }
-    if (overlay.isRegistered()) ctx.ui.setWidget(WIDGET_KEY, renderPanel(boards.get(sid), jobs, getCfg()));
+    const board = boards.get(sid);
+    const cfg = getCfg();
+    const now = quantizeNow(Date.now(), cfg.elapsedGranularityMs);
+    // Cheap gate: when nothing the panel shows has changed, do not even render (§24).
+    const stamp = panelStamp(board, jobs, now, collapsed);
+    if (samePanelStamp(uiStamp, stamp)) return;
+    uiStamp = stamp;
+
+    overlay.update(board);
+    const status = renderStatus(board, jobs);                          // C2: persistent status bar
+    if (!statusSent || status !== lastStatus) {
+      ctx.ui.setStatus(STATUS_KEY, status);
+      lastStatus = status; statusSent = true;
+    }
+    const panel = collapsed ? undefined : (overlay.isRegistered() ? renderPanel(board, jobs, cfg, 100, now) : undefined);
+    const key = panel === undefined ? "\u0000none" : panel.join("\n");
+    if (!widgetSent || key !== lastWidgetKey) {
+      ctx.ui.setWidget(WIDGET_KEY, panel);
+      lastWidgetKey = key; widgetSent = true;
+    }
   };
 
   // ── Jobs ───────────────────────────────────────────────────────────────
@@ -385,6 +408,8 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     if (mergeTimer) { clearTimeout(mergeTimer); mergeTimer = undefined; }
     sid = nextSid;
     cwd = ctx.cwd;
+    statusSent = false; widgetSent = false; lastStatus = undefined; lastWidgetKey = undefined;
+    uiStamp = undefined;
     openJobs(runDir(cwd));
     batch(() => {
       const loaded = jobs.load();

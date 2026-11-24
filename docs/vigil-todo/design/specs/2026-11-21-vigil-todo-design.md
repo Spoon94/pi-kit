@@ -1657,6 +1657,7 @@ A real spawn probe (fake pi harness, default config) measured **~278 ms** from c
 | 4 | `scheduleDeliver` keeps its single `mergeTimer` dedupe, adds no timer and no disk I/O, and keeps counters / notifyState / ack / coalescer semantics unchanged. |
 | 5 | Busy sessions keep the existing async `steer` channel; the settle boundary may still emit at most one "next" nudge, never a second copy of the completion. |
 | 6 | `wakeMergeMs` stays configurable (default 250) and documented as "multi-root merge window". |
+| 7 | Pacing: `lastWakeSentAt` anchors real deliveries (sendWake and boundary); `wakeDelayMs(count, mergeMs, sinceLastWakeMs)` is pure — `mergeMs<=0` → 0, multi-root → full window, single root → immediate only when `since >= window`, otherwise the remainder of the window. While one timer is pending a still-arriving burst extends it (never shortens it) up to four windows, so staggered exits do not multiply wakes and a continuous stream still delivers regularly. |
 
 ### 23.3 Acceptance cases
 
@@ -1666,3 +1667,9 @@ A real spawn probe (fake pi harness, default config) measured **~278 ms** from c
 | F149 | Ten roots complete in one tick | Still exactly one merged message inside the window (F38 semantics) |
 | F150 | Two roots finishing outside the window | One message each, no repeats |
 | F151 | Busy session (`isIdle=false`) | Async channel only; no fabricated immediate delivery, no duplicate on settle |
+| F152 | Five exits 100 ms apart | First wake immediate, later ones throttled/merged into ≤2 wakes; every completion reported exactly once |
+| F153 | Quiet gap > `wakeMergeMs`, then one root | Immediate again, each delivery exactly once |
+| F154 | `wakeMergeMs: 0` | No throttle regression: each completion delivered immediately |
+| F155 | `session_shutdown`, repeated ticks | Merge/exit timers cleared; ticking adds no extra timer |
+| F156 | 650 real job cycles (gc soak) | Handles and monitor timers flat, heap growth does not climb per cycle |
+| F152b | 200 tasks × 8 evidence | `undeliveredRoots` stays linear: median well under 1 ms |

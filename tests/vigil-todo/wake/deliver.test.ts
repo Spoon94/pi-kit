@@ -196,13 +196,18 @@ it("settleSend swallows async rejections (BLOCKER)", async () => {
   expect((err as Error).message).toBe("boom");
 });
 
-it("F148/F149 wakeDelayMs: a single root is immediate, several share the merge window", () => {
+it("F148/F149/F152 wakeDelayMs: first single root immediate, later ones throttled by the window", () => {
   expect(wakeDelayMs(0, 250)).toBe(0);
-  expect(wakeDelayMs(1, 250)).toBe(0);
+  expect(wakeDelayMs(1, 250)).toBe(0);               // nothing delivered yet this session
+  expect(wakeDelayMs(1, 250, 10_000)).toBe(0);       // outside the window → immediate again
+  expect(wakeDelayMs(1, 250, 0)).toBe(250);          // just delivered → wait the rest of the window
+  expect(wakeDelayMs(1, 250, 100)).toBe(150);
+  expect(wakeDelayMs(1, 250, 249)).toBe(1);
   expect(wakeDelayMs(2, 250)).toBe(250);
-  expect(wakeDelayMs(10, 250)).toBe(250);
-  expect(wakeDelayMs(3, 0)).toBe(0);            // merge window explicitly disabled
-  expect(wakeDelayMs(3, -5)).toBe(0);           // never negative
+  expect(wakeDelayMs(10, 250, 10_000)).toBe(250);    // several roots always merge
+  expect(wakeDelayMs(3, 0)).toBe(0);                 // merge window explicitly disabled
+  expect(wakeDelayMs(3, -5)).toBe(0);                // never negative
+  expect(wakeDelayMs(1, 0, 0)).toBe(0);              // F154: mergeMs=0 never throttles
 });
 
 it("F148 undeliveredRoots uses the tryDeliver predicate, not queued exits", () => {

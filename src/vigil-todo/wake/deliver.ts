@@ -75,11 +75,18 @@ export function undeliveredRoots(i: Pick<DeliverInput, "board" | "jobs">, waterm
 }
 
 /**
- * Merge-window policy: a single pending root is delivered at the end of the current turn (0 ms);
- * several roots share one message via the configured merge window so 10 exits still cost one wake.
+ * Wake pacing policy (§23):
+ * - `mergeMs <= 0` → always immediate (no throttle regression for the disabled config);
+ * - several pending roots → wait out the full merge window so they share one message;
+ * - a single root → immediate only when nothing was delivered inside the last window,
+ *   otherwise wait for the rest of that window (staggered completions are throttled).
  */
-export function wakeDelayMs(pendingRootCount: number, mergeMs: number): number {
-  return pendingRootCount > 1 ? Math.max(0, mergeMs) : 0;
+export function wakeDelayMs(pendingRootCount: number, mergeMs: number, sinceLastWakeMs?: number): number {
+  const window = Math.max(0, mergeMs);
+  if (window === 0) return 0;
+  if (pendingRootCount > 1) return window;
+  if (sinceLastWakeMs === undefined) return 0;         // nothing delivered yet this session
+  return sinceLastWakeMs >= window ? 0 : window - sinceLastWakeMs;
 }
 
 export function tryDeliver(i: DeliverInput): DeliverResult {

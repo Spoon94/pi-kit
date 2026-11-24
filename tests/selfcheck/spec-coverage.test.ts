@@ -112,7 +112,7 @@ it("§23 F148-F151 all appear in test text (fast wake)", () => {
   const spec = readFileSync(join(ROOT, "docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md"), "utf8");
   const section = spec.slice(spec.indexOf("### 23.3"));
   const ids = extractFIds(section);
-  expect(ids.filter((n) => n >= 148)).toEqual([148, 149, 150, 151]);   // §23.3 also cites F38 semantics
+  expect(ids.filter((n) => n >= 148)).toEqual([148, 149, 150, 151, 152, 153, 154, 155, 156]);   // §23.3 also cites F38 semantics, F152b is prose
   const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
   expect(missingFIds(section, corpus)).toEqual([]);
 });

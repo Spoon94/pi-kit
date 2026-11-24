@@ -357,6 +357,7 @@ it("F150 two roots finishing outside the merge window each deliver exactly once"
   await vi.advanceTimersByTimeAsync(0);
   expect(h.sent).toHaveLength(1);
 
+  await vi.advanceTimersByTimeAsync(1000);        // second root arrives outside the window
   await h.runTool("bg_run", { command: "printf 'ok\n'", task_id: 2 });
   await waitForFinalized(cwd, 2);
   await vi.advanceTimersByTimeAsync(0);
@@ -395,6 +396,102 @@ it("F151 a busy session does not fake immediate delivery (async channel only, no
   }
   await vi.advanceTimersByTimeAsync(500);
   expect(h.sent).toHaveLength(1);               // fast path did not re-deliver
+});
+
+it("F152 five staggered exits throttle into at most two wakes", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  setupJobs(cwd, []);
+  const b = emptyBoard();
+  b.tasks = Array.from({ length: 5 }, (_, i) => ({
+    id: i + 1, subject: `t${i + 1}`, status: "in_progress" as const, inProgressSince: 0,
+  }));
+  b.nextId = 6;
+  const h = makeHarness(cwd, [snapshot(b)], true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+
+  for (let i = 1; i <= 5; i++) {
+    await h.runTool("bg_run", { command: "printf 'ok\n'", task_id: i });
+    await waitForFinalized(cwd, i);
+    await vi.advanceTimersByTimeAsync(0);          // let the exit flush and schedule
+    await vi.advanceTimersByTimeAsync(100);        // next job finishes 100ms later
+  }
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(h.sent.length).toBeLessThanOrEqual(2);    // was one wake per exit before the throttle
+  expect(h.sent.length).toBeGreaterThanOrEqual(1);
+  expect(h.sent[0].message.details.jobs).toHaveLength(1);   // first exit is immediate
+  const total = h.sent.flatMap((m: any) => m.message.details.jobs).length;
+  expect(total).toBe(5);                                    // every completion is reported exactly once
+  expect(new Set(h.sent.flatMap((m: any) => m.message.details.jobs)).size).toBe(5);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(h.sent.length).toBeLessThanOrEqual(2);             // no repeats after the window
+});
+
+it("F153 after a quiet window the next single root is immediate again", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  setupJobs(cwd, []);
+  const b = emptyBoard();
+  b.tasks = [
+    { id: 1, subject: "a", status: "in_progress", inProgressSince: 0 },
+    { id: 2, subject: "b", status: "in_progress", inProgressSince: 0 },
+  ];
+  b.nextId = 3;
+  const h = makeHarness(cwd, [snapshot(b)], true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+
+  await h.runTool("bg_run", { command: "printf 'ok\n'", task_id: 1 });
+  await waitForFinalized(cwd, 1);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(h.sent).toHaveLength(1);                 // first: immediate
+
+  await vi.advanceTimersByTimeAsync(1000);        // quiet well past the window
+  await h.runTool("bg_run", { command: "printf 'ok\n'", task_id: 2 });
+  await waitForFinalized(cwd, 2);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(h.sent).toHaveLength(2);                 // immediate again, no waiting for 250ms
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(h.sent).toHaveLength(2);                 // and each exactly once
+});
+
+it("F154 wakeMergeMs = 0 keeps delivering every completion immediately", async () => {
+  const home = mkdtempSync(join(tmpdir(), "vigil-ext-cfg-"));
+  mkdirSync(join(home, "pi-kit"), { recursive: true });
+  writeFileSync(join(home, "pi-kit", "config.json"), JSON.stringify({ wakeMergeMs: 0 }));
+  process.env.XDG_CONFIG_HOME = home;
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  setupJobs(cwd, []);
+  const b = emptyBoard();
+  b.tasks = [
+    { id: 1, subject: "a", status: "in_progress", inProgressSince: 0 },
+    { id: 2, subject: "b", status: "in_progress", inProgressSince: 0 },
+  ];
+  b.nextId = 3;
+  const h = makeHarness(cwd, [snapshot(b)], true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+
+  for (const id of [1, 2]) {
+    await h.runTool("bg_run", { command: "printf 'ok\n'", task_id: id });
+    await waitForFinalized(cwd, id);
+    await vi.advanceTimersByTimeAsync(0);
+  }
+  expect(h.sent).toHaveLength(2);                 // no throttle when the window is disabled
+  delete process.env.XDG_CONFIG_HOME;
+});
+
+it("F155 shutdown clears the merge timer and repeated ticks add no timers", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const h = makeHarness(cwd, [snapshot(emptyBoard())], true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+
+  const before = vi.getTimerCount();
+  for (let i = 0; i < 5; i++) await vi.advanceTimersByTimeAsync(1000);
+  expect(vi.getTimerCount()).toBeLessThanOrEqual(before + 1);   // only the single tick timer
+
+  await h.emit("session_shutdown", { type: "session_shutdown" });
+  expect(vi.getTimerCount()).toBe(0);
 });
 
 it("F10: notifications for two sessions in the same cwd go to the right session each (MINOR #8)", async () => {

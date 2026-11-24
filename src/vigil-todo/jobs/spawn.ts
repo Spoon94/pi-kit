@@ -7,6 +7,8 @@ export interface SpawnRequest {
   command: string; label?: string; cwd: string; taskId?: number; sessionId?: string;
   rootId?: string; retryOf?: string; attempt?: number; staleReverifyOf?: string;
   fpStart?: string;
+  /** Caller-provided clock so the job start and its task's inProgressSince come from one sample. */
+  now?: number;
 }
 
 export type SpawnResult =
@@ -65,7 +67,7 @@ export function spawnJob(req: SpawnRequest, dir: string, now: number): SpawnResu
     const job: Job = {
       id, label: req.label?.trim() || req.command.trim().slice(0, 50), command: req.command,
       logPath, cwd: req.cwd, pid: child.pid, status: "running",
-      exitCode: null, exitCodeKnown: false, startedAt: now, endedAt: null,
+      exitCode: null, exitCodeKnown: false, startedAt: req.now ?? now, endedAt: null,
       startStamp: readStartStamp(child.pid),
       fpStart: req.fpStart,
       fpVerdict: "unknown", interferers: [],

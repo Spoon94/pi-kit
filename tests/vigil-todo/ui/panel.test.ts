@@ -236,3 +236,28 @@ it("parked without reason, budget truncation, and renderTodos empty-evidence bra
   expect(renderTodos(doneNoFin, jobs())).toContain("[completed] #1 a");
   expect(renderTodos(emptyBoard(), jobs())).toBe("No tasks");
 });
+
+it("F169 doctor flags in_progress tasks that already have passing evidence", () => {
+  const jobs = createJobStore(mkdtempSync(join(tmpdir(), "vigil-doc-")));
+  jobs.put({
+    id: "bg_ok", rootId: "bg_ok", label: "ok", command: "true", logPath: "/tmp/x", cwd: "/tmp",
+    pid: 1, status: "completed", exitCode: 0, exitCodeKnown: true, startedAt: 5000, endedAt: 5001,
+    fpVerdict: "fresh", interferers: [], attempt: 1, taskId: 1, sessionId: "S",
+    evidenceApplied: true, finalized: true, notifyState: "pending",
+  } as never);
+  const b = emptyBoard();
+  b.tasks = [{
+    id: 1, subject: "stuck", status: "in_progress", inProgressSince: 5000, jobs: ["bg_ok"],
+    evidence: [{ ok: true, kind: "job", origin: "async", chainFinal: true, at: 5001,
+      known: true, fp: "fresh", exitCode: 0, ref: "bg_ok" }],
+  } as never];
+  b.nextId = 2;
+  const doc = renderDoctor(b, jobs, false);
+  expect(doc).toContain("passing evidence but were not completed");
+  expect(doc).toContain('todo({action:"update", id:1, status:"completed"})');
+
+  const clean = emptyBoard();
+  clean.tasks = [{ id: 1, subject: "fine", status: "in_progress", inProgressSince: 5000, jobs: ["bg_ok"] }];
+  clean.nextId = 2;
+  expect(renderDoctor(clean, jobs, false)).not.toContain("passing evidence");
+});

@@ -92,3 +92,46 @@ it("default label uses the command prefix; an unwritable log directory returns a
     chmodSync(locked, 0o700);
   }
 });
+
+it("F168 a caller-provided clock becomes startedAt; otherwise the passed clock is used", () => {
+  const d = dir();
+  const withNow = spawnJob({ command: "true", cwd: d, now: 4242 }, d, 99);
+  expect(withNow.ok).toBe(true);
+  if (withNow.ok) {
+    expect(withNow.job.startedAt).toBe(4242);
+    takeChild(withNow.job.id);
+  }
+
+  const fallback = spawnJob({ command: "true", cwd: d }, d, 777);
+  expect(fallback.ok).toBe(true);
+  if (fallback.ok) {
+    expect(fallback.job.startedAt).toBe(777);
+    takeChild(fallback.job.id);
+  }
+
+  const before = Date.now();
+  const implicit = spawnJob({ command: "true", cwd: d }, d, Date.now());
+  expect(implicit.ok).toBe(true);
+  if (implicit.ok) {
+    expect(implicit.job.startedAt).toBeGreaterThanOrEqual(before);
+    expect(implicit.job.startedAt).toBeLessThanOrEqual(Date.now());
+    takeChild(implicit.job.id);
+  }
+});
+
+it("a spawn failure (missing cwd) is returned as an error and leaves no child", () => {
+  const d = dir();
+  const r = spawnJob({ command: "true", cwd: join(d, "does-not-exist") }, d, 1);
+  expect(r.ok).toBe(false);
+  if (!r.ok) expect(r.error.length).toBeGreaterThan(0);
+});
+
+it("an empty label falls back to a trimmed command prefix", () => {
+  const d = dir();
+  const r = spawnJob({ command: "  printf hello  ", cwd: d, label: "   " }, d, 1);
+  expect(r.ok).toBe(true);
+  if (r.ok) {
+    expect(r.job.label).toBe("printf hello");
+    takeChild(r.job.id);
+  }
+});

@@ -100,9 +100,19 @@ it("§21 F133-F136 all appear in test text (full halt brake)", () => {
 
 it("§22 F137-F143 all appear in test text (onboarding)", () => {
   const spec = readFileSync(join(ROOT, "docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md"), "utf8");
-  const section = spec.slice(spec.indexOf("### 22.3"));
+  const end = spec.indexOf("## 25.");
+  const section = spec.slice(spec.indexOf("### 22.3"), end > 0 ? end : undefined);
   const ids = extractFIds(section);
   expect(ids).toEqual([137, 138, 139, 140, 141, 142, 143]);
+  const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
+  expect(missingFIds(section, corpus)).toEqual([]);
+});
+
+it("§25 F165-F170 all appear in test text (bg_run freshness order)", () => {
+  const spec = readFileSync(join(ROOT, "docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md"), "utf8");
+  const section = spec.slice(spec.indexOf("### 25.4"));
+  const ids = extractFIds(section);
+  expect(ids.filter((n) => n >= 165)).toEqual([165, 166, 167, 168, 169, 170]);
   const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
   expect(missingFIds(section, corpus)).toEqual([]);
 });

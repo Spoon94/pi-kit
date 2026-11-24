@@ -1638,3 +1638,36 @@ A first-time user had to remind the model to use `todo`; the guidance only cover
 | F141 | 2000-char subject | Total length stays ≤ 1200 |
 | F142 | Timer and purity | No new timer; builder has no fs/child_process/timer access |
 | F143 | Guideline ordering | Default first line is the onboarding line; user override still wins |
+
+---
+
+## 25. bg_run freshness ordering: task start must not be later than its job
+
+### 25.1 Phenomenon
+
+`bg_run({task_id, command})` advances a pending task to `in_progress` and binds the job. When the job exits 0 with complete evidence (`chainFinal:true, ok:true, known:true`), the task stays `in_progress` forever and `/vt doctor` still prints `✓ 0/1` — a silent stall reported as healthy. Reproduced 3/3 on the real first-use path.
+
+### 25.2 Root cause
+
+`createBgRunTool.execute` sampled the clock twice: the first sample happened inside `spawnJob` (the job's `startedAt`), the second after the spawn syscall when writing `next.inProgressSince`. The second is always larger (measured: `inProgressSince` 32 ms later). `passingEvidence` requires `job.startedAt >= task.inProgressSince` (R3 freshness, deliberately unchanged), so every job evidence for that task is rejected and autofill returns `recorded`. Earlier e2e tests always set `in_progress` first and started the job a turn later, hiding the inversion.
+
+### 25.3 Fix
+
+| # | Requirement |
+|---|---|
+| 1 | `bg_run` samples the clock **once** and uses it for both the spawn and the advance: `next.statusSince = next.inProgressSince = now`. |
+| 2 | `SpawnRequest` gains optional `now`; `spawnJob` uses `req.now ?? now` for `startedAt`, so the caller controls the ordering source. |
+| 3 | `passingEvidence` and its `>=` rule are unchanged — the timestamp source was wrong, not the rule. |
+| 4 | A task already `in_progress` keeps its `inProgressSince` when a second `bg_run` only binds a job (its job starts later anyway). |
+| 5 | `renderDoctor` gains visibility: an `in_progress` task that already has passing evidence reports `⚠ N in_progress tasks have passing evidence but were not completed (e.g. #N) → todo({action:"update", id:N, status:"completed"})`, so this class of mismatch can never be silent again. |
+
+### 25.4 Acceptance cases
+
+| # | Case | Expectation |
+|---|---|---|
+| F165 | `create` → `bg_run` directly (no prior update) → exit 0 | Task becomes `completed` automatically (red before the fix) |
+| F166 | Injected fixed clock | `job.startedAt === task.inProgressSince`; `passingEvidence` passes |
+| F167 | `update in_progress` then `bg_run` later | Existing path still works (`startedAt > inProgressSince`) |
+| F168 | `spawnJob` with and without `req.now` | `startedAt` equals the injected value, otherwise the passed clock |
+| F169 | Doctor with passing evidence on an `in_progress` task | New warning appears; clean state does not trigger it |
+| F170 | Spawn fails synchronously inside `bg_run` | Task stays `pending` (no residual `in_progress`) |

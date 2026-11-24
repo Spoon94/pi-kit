@@ -286,7 +286,7 @@ it("resume command explicitly sweeps and wakes next within budget (BLOCKER #10)"
   expect(h.sent[0].message.content).toContain("next: #1");
 });
 
-it("F6: real job exit → onJobExit → single delivery in the 250ms merge window (MINOR #5)", async () => {
+it("F6/F148: a single real exit delivers at the end of the turn, not after the merge window (§23)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   setupJobs(cwd, []);
   const b = emptyBoard();
@@ -304,14 +304,15 @@ it("F6: real job exit → onJobExit → single delivery in the 250ms merge windo
   expect(r.isError).toBeFalsy();
   await waitForFinalized(cwd, 1);
 
-  await vi.advanceTimersByTimeAsync(249);
-  expect(h.sent).toHaveLength(0);              // merge window not reached
-  await vi.advanceTimersByTimeAsync(1);
-  expect(h.sent).toHaveLength(1);              // ≤1s and exactly once
+  expect(h.sent).toHaveLength(0);              // nothing before the turn-end timer runs
+  await vi.advanceTimersByTimeAsync(0);        // single root: 0 ms fast path
+  expect(h.sent).toHaveLength(1);
   expect(h.sent[0].message.content).toContain("next: #2");
+  await vi.advanceTimersByTimeAsync(500);
+  expect(h.sent).toHaveLength(1);              // and never twice
 });
 
-it("F38: 10 real jobs merge into one delivery within the 250ms window (MINOR #5)", async () => {
+it("F38/F149: 10 real jobs still merge into one delivery inside the 250ms window (MINOR #5)", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
   setupJobs(cwd, []);
   const b = emptyBoard();
@@ -329,9 +330,71 @@ it("F38: 10 real jobs merge into one delivery within the 250ms window (MINOR #5)
     expect(r.isError).toBeFalsy();
   }
   await waitForFinalized(cwd, 10);
-  await vi.advanceTimersByTimeAsync(250);
+  await vi.advanceTimersByTimeAsync(249);
+  expect(h.sent).toHaveLength(0);              // several roots keep the merge window
+  await vi.advanceTimersByTimeAsync(1);
   expect(h.sent).toHaveLength(1);
   expect(h.sent[0].message.details.jobs).toHaveLength(10);
+  await vi.advanceTimersByTimeAsync(500);
+  expect(h.sent).toHaveLength(1);              // still exactly one
+});
+
+it("F150 two roots finishing outside the merge window each deliver exactly once", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  setupJobs(cwd, []);
+  const b = emptyBoard();
+  b.tasks = [
+    { id: 1, subject: "first", status: "in_progress", inProgressSince: 0 },
+    { id: 2, subject: "second", status: "in_progress", inProgressSince: 0 },
+  ];
+  b.nextId = 3;
+  const h = makeHarness(cwd, [snapshot(b)], true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+
+  await h.runTool("bg_run", { command: "printf 'ok\n'", task_id: 1 });
+  await waitForFinalized(cwd, 1);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(h.sent).toHaveLength(1);
+
+  await h.runTool("bg_run", { command: "printf 'ok\n'", task_id: 2 });
+  await waitForFinalized(cwd, 2);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(h.sent).toHaveLength(2);               // second fast path, no duplicate of the first
+  const refs = h.sent.map((m: any) => m.message.details.wakeId);
+  expect(new Set(refs).size).toBe(2);
+  await vi.advanceTimersByTimeAsync(500);
+  expect(h.sent).toHaveLength(2);               // neither one repeats later
+});
+
+it("F151 a busy session does not fake immediate delivery (async channel only, no duplicate)", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  setupJobs(cwd, []);
+  const b = emptyBoard();
+  b.tasks = [
+    { id: 1, subject: "run", status: "in_progress", inProgressSince: 0 },
+    { id: 2, subject: "next", status: "pending" },
+  ];
+  b.nextId = 3;
+  const h = makeHarness(cwd, [snapshot(b)], false);   // isIdle = false: model is working
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+
+  await h.runTool("bg_run", { command: "printf 'ok\n'", task_id: 1 });
+  await waitForFinalized(cwd, 1);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(h.sent).toHaveLength(1);               // async wake is queued by pi while busy
+  expect(h.sent[0].message.details.jobs).toHaveLength(1);
+  const boundary = await h.emit("agent_before_settle", { type: "agent_before_settle", messageType: "user" });
+  // The settle boundary is a separate channel: at most a one-shot "next" nudge, never a second
+  // copy of the completion itself (the evidence message above already carries the chain result).
+  if (boundary) {
+    const text = JSON.stringify(boundary);
+    expect(text).toContain("next: #2");
+    expect(text).not.toContain("vigil-todo] #1");
+  }
+  await vi.advanceTimersByTimeAsync(500);
+  expect(h.sent).toHaveLength(1);               // fast path did not re-deliver
 });
 
 it("F10: notifications for two sessions in the same cwd go to the right session each (MINOR #8)", async () => {

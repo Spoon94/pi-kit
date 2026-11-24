@@ -7,7 +7,7 @@ import { createJobStore } from "../../../src/vigil-todo/jobs/store.js";
 import type { Job } from "../../../src/vigil-todo/jobs/types.js";
 import { DEFAULTS } from "../../../src/vigil-todo/lib/config.js";
 import { markSent } from "../../../src/vigil-todo/wake/ack.js";
-import { needsTimer, recoveryWake, settleSend, tryDeliver } from "../../../src/vigil-todo/wake/deliver.js";
+import { needsTimer, recoveryWake, settleSend, tryDeliver, undeliveredRoots, wakeDelayMs } from "../../../src/vigil-todo/wake/deliver.js";
 
 let jobs: ReturnType<typeof createJobStore>;
 let board: BoardState;
@@ -194,4 +194,38 @@ it("settleSend swallows async rejections (BLOCKER)", async () => {
   settleSend(Promise.reject(new Error("boom")), (e) => { err = e; });
   await new Promise((res) => setTimeout(res, 0));
   expect((err as Error).message).toBe("boom");
+});
+
+it("F148/F149 wakeDelayMs: a single root is immediate, several share the merge window", () => {
+  expect(wakeDelayMs(0, 250)).toBe(0);
+  expect(wakeDelayMs(1, 250)).toBe(0);
+  expect(wakeDelayMs(2, 250)).toBe(250);
+  expect(wakeDelayMs(10, 250)).toBe(250);
+  expect(wakeDelayMs(3, 0)).toBe(0);            // merge window explicitly disabled
+  expect(wakeDelayMs(3, -5)).toBe(0);           // never negative
+});
+
+it("F148 undeliveredRoots uses the tryDeliver predicate, not queued exits", () => {
+  board.tasks = [
+    { id: 1, subject: "a", status: "completed", evidence: [ev()] },
+    { id: 2, subject: "b", status: "completed", evidence: [ev({ ref: "R2" })] },
+  ] as never;
+  jobs.put(root());
+  jobs.put(root({ id: "R2", rootId: "R2", taskId: 2 }));
+  expect(undeliveredRoots({ board, jobs }).sort()).toEqual(["R", "R2"]);
+
+  // already sent/acked/purged/self chains are not pending, so they must not inflate the count
+  jobs.put(root({ notifyState: "sent" }));
+  jobs.put(root({ id: "R2", rootId: "R2", taskId: 2, notifyState: "acked" }));
+  expect(undeliveredRoots({ board, jobs })).toEqual([]);
+
+  board.tasks[0].evidence = [ev({ trigger: "self" })];
+  board.tasks[1].evidence = [ev({ ref: "R2", chainFinal: false })];
+  expect(undeliveredRoots({ board, jobs })).toEqual([]);
+
+  // evidence without a resolvable root still counts as one delivery block
+  board.tasks[0].evidence = [ev({ ref: undefined, at: 10_000 })];
+  board.tasks[1].evidence = [];
+  expect(undeliveredRoots({ board, jobs }, 0)).toEqual([""]);
+  expect(undeliveredRoots({ board, jobs }, 10_000)).toEqual([]);   // watermark still applies to unknown refs
 });

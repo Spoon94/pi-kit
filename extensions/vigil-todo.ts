@@ -37,7 +37,7 @@ import { WIDGET_KEY, STATUS_KEY, renderDoctor, renderPanel, renderStatus, render
 import { bgCompletions, panelCompletions, todosCompletions } from "../src/vigil-todo/ui/completions.js";
 import { clearRenudgeOnSettled, createAckTracker, markSent, resetOnUserInput } from "../src/vigil-todo/wake/ack.js";
 import { WAKE_CUSTOM_TYPE, composeWake } from "../src/vigil-todo/wake/compose.js";
-import { needsTimer, recoveryWake, settleSend, tryDeliver } from "../src/vigil-todo/wake/deliver.js";
+import { needsTimer, recoveryWake, settleSend, tryDeliver, undeliveredRoots, wakeDelayMs } from "../src/vigil-todo/wake/deliver.js";
 
 const OWN_SOURCE = "pi-kit";
 const BOARD_CUSTOM_TYPE = "rpiv-todo-state";
@@ -432,10 +432,14 @@ export default function vigilTodo(pi: ExtensionAPI): void {
 
   const scheduleDeliver = (): void => {
     if (mergeTimer) return;
+    const board = boards.get(sid);
+    // Count real undelivered roots (same predicate as tryDeliver), not queued exits: a single
+    // completion is delivered at the end of this turn, several share the merge window (§23).
+    const pending = undeliveredRoots({ board, jobs }, board.counters.wakeWatermark).length;
     mergeTimer = setTimeout(() => {
       mergeTimer = undefined;
       deliverAsync();
-    }, getCfg().wakeMergeMs);
+    }, wakeDelayMs(pending, getCfg().wakeMergeMs));
     mergeTimer.unref?.();
   };
 

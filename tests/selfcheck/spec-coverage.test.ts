@@ -100,9 +100,7 @@ it("§21 F133-F136 all appear in test text (full halt brake)", () => {
 
 it("§22 F137-F143 all appear in test text (onboarding)", () => {
   const spec = readFileSync(join(ROOT, "docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md"), "utf8");
-  const after = spec.slice(spec.indexOf("## 22.") + 1);
-  const next = after.search(/\n## \d+\./);
-  const end = next >= 0 ? spec.indexOf("## 22.") + 1 + next : -1;
+  const end = spec.indexOf("## 23.");
   const section = spec.slice(spec.indexOf("### 22.3"), end > 0 ? end : undefined);
   const ids = extractFIds(section);
   expect(ids).toEqual([137, 138, 139, 140, 141, 142, 143]);
@@ -112,8 +110,6 @@ it("§22 F137-F143 all appear in test text (onboarding)", () => {
 
 it("§23 F148-F156 all appear in test text (fast wake)", () => {
   const spec = readFileSync(join(ROOT, "docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md"), "utf8");
-  // §23 ships with the fast-wake PR; this branch may merge before it, so guard only when present.
-  if (!spec.includes("## 23.")) return;
   const end = spec.indexOf("## 24.");
   const section = spec.slice(spec.indexOf("### 23.3"), end > 0 ? end : undefined);
   const ids = extractFIds(section);

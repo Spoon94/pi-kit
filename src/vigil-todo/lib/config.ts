@@ -7,6 +7,7 @@ export interface VigilConfig {
   notifyRetryMs: number;
   wakeMergeMs: number;
   onboardingPrompt: "off" | "once" | "live";
+  elapsedGranularityMs: number;
 }
 
 export const DEFAULTS: VigilConfig = {
@@ -19,6 +20,7 @@ export const DEFAULTS: VigilConfig = {
   notifyRetryMs: 600_000,
   wakeMergeMs: 250,
   onboardingPrompt: "live",
+  elapsedGranularityMs: 60_000,
 };
 
 type Bag = Record<string, unknown>;
@@ -41,6 +43,7 @@ export const CONFIG_KEYS: Record<keyof VigilConfig, { type: "int" | "int[]" | "s
   notifyRetryMs: { type: "int", min: 1, max: 86_400_000, reload: false, default: DEFAULTS.notifyRetryMs },
   wakeMergeMs: { type: "int", min: 0, max: 60_000, reload: false, default: DEFAULTS.wakeMergeMs },
   onboardingPrompt: { type: "string", reload: false, allowed: ["off", "once", "live"], default: DEFAULTS.onboardingPrompt },
+  elapsedGranularityMs: { type: "int", min: 1000, max: 3_600_000, reload: false, default: DEFAULTS.elapsedGranularityMs },
 };
 
 const posInt = (v: unknown, min: number, max?: number): number | undefined =>

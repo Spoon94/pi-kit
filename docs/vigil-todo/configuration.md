@@ -36,9 +36,12 @@ Each key is resolved independently: if the key appears at the highest layer with
 | `haltKey` | string | — | — | `alt+h` / `off` | **`/reload` required** (one-key forced halt) |
 | `notifyRetryMs` | int | 1 | 86400000 (24h) | 600000 (10 min) | Immediate (next catch-up scan) |
 | `wakeMergeMs` | int | 0 | 60000 (1 min) | 250 | Immediate (next wake merge window) |
+| `elapsedGranularityMs` | int | 1000 | 3600000 (1 h) | 60000 (1 min) | Immediate (next panel render) |
 | `onboardingPrompt` | string | — | — | `live` / `once` / `off` | Immediate (next `before_agent_start`) |
 
 `onboardingPrompt` controls the model-facing onboarding text injected through `before_agent_start`: `live` (default) adds a light board digest (current WIP plus the next actionable task) to the base sentence, `once` injects only the base sentence, and `off` injects nothing. An unknown value falls back to `live`. The base sentence can be replaced with `guidance.onboardingPromptText` (same priority chain as the rest of guidance).
+
+`elapsedGranularityMs` controls how the live panel quantizes elapsed time: `60000` (default) renders `<1m` / `5m` / `1h 5m`, `1000` restores second-level `5m43s`. Coarser values mean the panel text (and therefore the TUI widget) changes less often; the wake message keeps its exact `3m12s` formatting regardless.
 
 Values outside min/max **fall back to the default per key** without affecting other keys; the maxima prevent settings such as `maxTailBytes` from causing TB-scale buffers or disk reads.
 

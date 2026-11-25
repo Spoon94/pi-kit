@@ -1638,3 +1638,42 @@ A first-time user had to remind the model to use `todo`; the guidance only cover
 | F141 | 2000-char subject | Total length stays ≤ 1200 |
 | F142 | Timer and purity | No new timer; builder has no fs/child_process/timer access |
 | F143 | Guideline ordering | Default first line is the onboarding line; user override still wins |
+
+---
+
+## 24. No TUI flicker while the panel is idle
+
+### 24.1 Phenomenon
+
+With `tuiMode: fullscreen` and `fullscreenScrollbar: always`, a session with a running background job repaints (flicker/scroll) about once per second while the agent is idle: the `✶ 5m43s` elapsed marker changes every second.
+
+### 24.2 Root cause (three layers, all required)
+
+| # | Cause |
+|---|---|
+| 1 | `refreshTimer()` starts a 1 s interval whenever `needsTimer` is true — correct for liveness, but the tick also repaints. |
+| 2 | `tick()` called `refreshOverlay()` unconditionally, including the halted branch. |
+| 3 | `refreshOverlay()` had no content diff and always called `ctx.ui.setStatus` + `ctx.ui.setWidget`; `renderPanel` formatted elapsed time to the second and defaulted `now` to `Date.now()`, so the string changed every second. A diff alone would therefore never suppress a repaint. |
+
+### 24.3 Fix
+
+| # | Requirement |
+|---|---|
+| 1 | **Content diff**: cache the last status string and the last widget lines (joined). Skip the matching `ctx.ui` call when unchanged; `undefined` (unmount/collapsed) equal to the previous `undefined` also skips. The cache resets on session (`sid`/cwd) change so a switch can never inherit stale content. |
+| 2 | **Coarse elapsed display**: new `formatElapsedCoarse(ms, granMs)` — `<1m`, `Nm`, `Nh Nm`; `granMs <= 1000` keeps the second-level `5m43s` form. `renderPanel` uses it and defaults `now` to `quantizeNow(Date.now(), cfg.elapsedGranularityMs)` instead of a raw `Date.now()`. Wake messages keep `formatElapsed` (exact `3m12s`) — they are model-facing, not a repaint source. |
+| 3 | **Cheap gate before rendering**: `panelStamp`/`samePanelStamp` (board identity, job count, running count, retry count, quantized now, halted flag, `turnsUsed`, collapsed). Equal stamp → return before `renderPanel`; unchanged content → no `ctx.ui` call. `tick()` keeps drain/probe/sweep/gc/persist/schedule/refreshTimer untouched. |
+| 4 | New config `elapsedGranularityMs` (int, 1000..3600000, default 60000). No new timers, no new disk/git I/O. |
+| 5 | Overlay register/unregister semantics are unchanged (empty board unmounts, collapsed passes `undefined`). |
+
+### 24.4 Acceptance cases
+
+| # | Case | Expectation |
+|---|---|---|
+| F157 | 10 no-change ticks with a running job | `setWidget` and `setStatus` calls stay at their first-time count (no growth) |
+| F158 | Renders within one minute vs across a minute | Panel lines byte-identical (including `✶`), then change after the minute boundary |
+| F159 | Task completion / creation / park | Exactly one extra `setWidget` |
+| F160 | `elapsedGranularityMs` 1000 vs 60000 | `5m43s` vs `5m` |
+| F161 | Collapsed and empty board | Collapsed passes `undefined` once; expanding repaints once; empty board unmounts once |
+| F162 | Session switch | Cache resets: the same content still repaints for the new session |
+| F163 | Wake message | Still carries the exact `3m12s` form |
+| F164 | No-change tick cost (200 tasks / 10 jobs) | Extra overlay gate cost < 0.05 ms |

@@ -1,6 +1,8 @@
 import { completedSummary, selectNext, wipCount } from "../board/selectors.js";
 import type { BoardState } from "../board/types.js";
+import { passingEvidence } from "../board/evidence.js";
 import { detectCycle, formatCycle } from "../board/graph.js";
+import { jobFactsOf } from "../jobs/facts.js";
 import type { JobStore } from "../jobs/store.js";
 import { DEFAULTS, type VigilConfig } from "../lib/config.js";
 import { formatElapsedCoarse, quantizeNow } from "../lib/format.js";
@@ -168,6 +170,12 @@ export function renderDoctor(state: BoardState, jobs: JobStore, conflict: boolea
   }
   if (extra?.orphanJobs) {
     lines.push(`⚠ ${extra.orphanJobs} orphan jobs (no bound task in sidecar) → bg_list to inspect, bg_kill({job_id:"…"}) to reclaim`);
+  }
+  const facts = jobFactsOf(jobs);
+  const staleGate = state.tasks.filter((t) => t.status === "in_progress" && passingEvidence(t, facts) !== undefined);
+  if (staleGate.length) {
+    const id = staleGate[0].id;
+    lines.push(`⚠ ${staleGate.length} in_progress tasks have passing evidence but were not completed (e.g. #${id}) → todo({action:"update", id:${id}, status:"completed"})`);
   }
   const noEvidence = state.tasks.filter((t) => t.status === "in_progress" && (t.jobs?.length ?? 0) === 0);
   if (noEvidence.length) {

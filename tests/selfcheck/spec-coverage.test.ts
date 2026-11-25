@@ -120,9 +120,19 @@ it("§23 F148-F156 all appear in test text (fast wake)", () => {
 
 it("§24 F157-F164 all appear in test text (no TUI flicker)", () => {
   const spec = readFileSync(join(ROOT, "docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md"), "utf8");
-  const section = spec.slice(spec.indexOf("### 24.4"));
+  const end = spec.indexOf("## 25.");
+  const section = spec.slice(spec.indexOf("### 24.4"), end > 0 ? end : undefined);
   const ids = extractFIds(section);
   expect(ids.filter((n) => n >= 157)).toEqual([157, 158, 159, 160, 161, 162, 163, 164]);
+  const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
+  expect(missingFIds(section, corpus)).toEqual([]);
+});
+
+it("§25 F165-F170 all appear in test text (bg_run freshness order)", () => {
+  const spec = readFileSync(join(ROOT, "docs/vigil-todo/design/specs/2026-11-21-vigil-todo-design.md"), "utf8");
+  const section = spec.slice(spec.indexOf("### 25.4"));
+  const ids = extractFIds(section);
+  expect(ids.filter((n) => n >= 165)).toEqual([165, 166, 167, 168, 169, 170]);
   const corpus = walk(join(ROOT, "tests")).map((f) => readFileSync(f, "utf8")).join("\n");
   expect(missingFIds(section, corpus)).toEqual([]);
 });

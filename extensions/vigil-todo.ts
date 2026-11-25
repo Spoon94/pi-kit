@@ -178,7 +178,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   const spawnChain = (req: SpawnRequest): { ok: boolean; error?: string; jobId?: string } => {
     // Capture the start fingerprint before spawn: the process may modify the workspace immediately
     const fpStart = collectFingerprint(req.cwd);
-    const r = spawnJob({ ...req, fpStart }, runDir(req.cwd), Date.now());
+    const r = spawnJob({ ...req, fpStart }, runDir(req.cwd), req.now ?? Date.now());
     if (!r.ok) return { ok: false, error: r.error };
     const tracked = trackSpawned(r.job, enqueueJobExit, {
       put: (j) => jobs.put(j),

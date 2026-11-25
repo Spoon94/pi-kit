@@ -93,3 +93,24 @@ it("watch without a child no longer creates a 3s timer per job", () => {
     vi.useRealTimers();
   }
 });
+
+it("watching an already-exited child emits on the next microtask and returns a no-op stop", async () => {
+  const { spawnJob } = await import("../../../src/vigil-todo/jobs/spawn.js");
+  const d = mkdtempSync(join(tmpdir(), "vigil-mon-"));
+  const r = spawnJob({ command: "true", cwd: d }, d, 1);
+  if (!r.ok) throw new Error(r.error);
+  await new Promise<void>((res) => r.child.once("close", () => res()));
+  expect(r.child.exitCode).not.toBeNull();
+
+  const mon = createMonitor();
+  let seen = 0;
+  let code: number | null | undefined;
+  const stop = mon.watch(r.job, (j) => { seen++; code = j.exitCode; }, r.child);
+  expect(typeof stop).toBe("function");
+  await new Promise<void>((res) => queueMicrotask(res));
+  await new Promise<void>((res) => queueMicrotask(res));
+  expect(seen).toBe(1);
+  expect(code).toBe(0);
+  stop();
+  mon.clearAll();
+});

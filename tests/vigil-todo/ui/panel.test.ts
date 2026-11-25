@@ -321,3 +321,29 @@ it("F157 every differing stamp field is detected (no stale panel)", async () => 
   expect(samePanelStamp(base, panelStamp(b, jobs, 120_000, false))).toBe(false);   // quantized now
   expect(samePanelStamp(base, panelStamp(b, jobs, 60_000, true))).toBe(false);     // collapsed
 });
+
+
+it("F169 doctor flags in_progress tasks that already have passing evidence", () => {
+  const jobs = createJobStore(mkdtempSync(join(tmpdir(), "vigil-doc-")));
+  jobs.put({
+    id: "bg_ok", rootId: "bg_ok", label: "ok", command: "true", logPath: "/tmp/x", cwd: "/tmp",
+    pid: 1, status: "completed", exitCode: 0, exitCodeKnown: true, startedAt: 5000, endedAt: 5001,
+    fpVerdict: "fresh", interferers: [], attempt: 1, taskId: 1, sessionId: "S",
+    evidenceApplied: true, finalized: true, notifyState: "pending",
+  } as never);
+  const b = emptyBoard();
+  b.tasks = [{
+    id: 1, subject: "stuck", status: "in_progress", inProgressSince: 5000, jobs: ["bg_ok"],
+    evidence: [{ ok: true, kind: "job", origin: "async", chainFinal: true, at: 5001,
+      known: true, fp: "fresh", exitCode: 0, ref: "bg_ok" }],
+  } as never];
+  b.nextId = 2;
+  const doc = renderDoctor(b, jobs, false);
+  expect(doc).toContain("passing evidence but were not completed");
+  expect(doc).toContain('todo({action:"update", id:1, status:"completed"})');
+
+  const clean = emptyBoard();
+  clean.tasks = [{ id: 1, subject: "fine", status: "in_progress", inProgressSince: 5000, jobs: ["bg_ok"] }];
+  clean.nextId = 2;
+  expect(renderDoctor(clean, jobs, false)).not.toContain("passing evidence");
+});

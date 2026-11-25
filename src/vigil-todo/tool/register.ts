@@ -198,9 +198,12 @@ export function createBgRunTool(deps: ToolDeps, guidance: ToolGuidance = DEFAULT
       if (!admitNewSpawn(deps.jobs, deps.cfg.maxConcurrentJobs)) {
         return errResult(`capacity full (${deps.cfg.maxConcurrentJobs}/${deps.cfg.maxConcurrentJobs} jobs) → bg_kill to free a slot, or retry later (task stays pending, not parked)`);
       }
+      // One clock sample for both the spawn and the task advance: the job must not start
+      // earlier than the inProgressSince it is judged against (R3 freshness).
+      const now = deps.now();
       const spawned = deps.spawn({
         command, label,
-        cwd: deps.cwd(), taskId: task.id, sessionId: deps.sessionId(),
+        cwd: deps.cwd(), taskId: task.id, sessionId: deps.sessionId(), now,
       });
       if (!spawned.ok || !spawned.jobId) return errResult(spawned.error ?? "spawn failed");
       const boundElsewhere = state.tasks.find((t) => t.id !== task.id && (t.jobs ?? []).includes(spawned.jobId!));
@@ -211,7 +214,7 @@ export function createBgRunTool(deps: ToolDeps, guidance: ToolGuidance = DEFAULT
       try {
         const next: Task = { ...task, jobs: [...(task.jobs ?? []), spawned.jobId] };
         if (task.status === "pending") {
-          next.status = "in_progress"; next.statusSince = deps.now(); next.inProgressSince = deps.now();
+          next.status = "in_progress"; next.statusSince = now; next.inProgressSince = now;
         }
         const idx = state.tasks.indexOf(task);
         const tasks = [...state.tasks]; tasks[idx] = next;

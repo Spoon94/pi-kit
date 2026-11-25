@@ -1853,3 +1853,27 @@ it("finalizeTerminated writes note=killed for a killed chain", async () => {
   expect(h.sent).toHaveLength(1);
   expect(h.sent[0].message.content).toContain("killed");
 });
+
+it("F165 a first-use bg_run (no prior update) completes the task automatically", async () => {
+  vi.useRealTimers();                                  // the bug lives in a real spawn syscall gap
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  setupJobs(cwd, []);
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "first use", status: "pending" }];
+  b.nextId = 2;
+  const branch: unknown[] = [snapshot(b)];
+  const h = makeHarness(cwd, branch, true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+
+  const r = await h.runTool("bg_run", { command: "printf 'ok\n'", task_id: 1 });
+  expect(r.isError).toBeFalsy();
+  await waitForFinalized(cwd, 1);
+  await new Promise((r) => setTimeout(r, 50));
+
+  const last = (branch.filter((e: any) => e?.customType === "rpiv-todo-state") as any[]).at(-1)?.data;
+  const task = last.tasks.find((t: any) => t.id === 1);
+  expect(task.status).toBe("completed");
+  expect(task.evidence.some((e: any) => e.chainFinal && e.ok && e.known)).toBe(true);
+});
+

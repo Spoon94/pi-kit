@@ -337,3 +337,116 @@ const toolJob = (id: string): Job => ({
   fpVerdict: "unknown", interferers: [], rootId: id, attempt: 1,
   evidenceApplied: false, notifyState: "pending",
 });
+
+it("F166 bg_run advances from the same clock sample it hands to spawn", async () => {
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "fresh", status: "pending" }];
+  b.nextId = 2;
+  const seen: any[] = [];
+  let committed: any;
+  const deps = toolDeps(b, {
+    now: () => 5000,
+    spawn: (req) => { seen.push(req); return { ok: true, jobId: "bg_fixed" }; },
+    commit: (s) => { committed = s; },
+  });
+  const r = await createBgRunTool(deps).execute({ command: "true", task_id: 1 });
+  expect(r.isError).toBeFalsy();
+  expect(seen).toHaveLength(1);
+  expect(seen[0].now).toBe(5000);                       // spawn receives the injected clock
+  const task = committed.tasks.find((t: any) => t.id === 1);
+  expect(task.inProgressSince).toBe(5000);
+  expect(task.statusSince).toBe(5000);
+  expect(seen[0].now).toBe(task.inProgressSince);        // one source: equal, not "startedAt < since"
+
+  const jobs = createJobStore(mkdtempSync(join(tmpdir(), "vigil-reg-")));
+  jobs.put({
+    id: "bg_fixed", rootId: "bg_fixed", label: "l", command: "true", logPath: "/tmp/x", cwd: "/tmp",
+    pid: 1, status: "completed", exitCode: 0, exitCodeKnown: true, startedAt: 5000, endedAt: 5001,
+    fpVerdict: "fresh", interferers: [], attempt: 1, taskId: 1, sessionId: "S",
+    evidenceApplied: true, finalized: true, notifyState: "pending",
+  } as never);
+  const evidence = {
+    ok: true, kind: "job" as const, origin: "async" as const, chainFinal: true, at: 5001,
+    known: true, fp: "fresh" as const, exitCode: 0, ref: "bg_fixed",
+  };
+  const { passingEvidence } = await import("../../../src/vigil-todo/board/evidence.js");
+  const { jobFactsOf } = await import("../../../src/vigil-todo/jobs/facts.js");
+  expect(passingEvidence({ ...task, evidence: [evidence] }, jobFactsOf(jobs))).toBeTruthy();
+});
+
+it("F167 the update-then-bg_run path keeps startedAt later than inProgressSince", async () => {
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "later", status: "in_progress", inProgressSince: 1000, statusSince: 1000 }];
+  b.nextId = 2;
+  const seen: any[] = [];
+  let committed: any;
+  const deps = toolDeps(b, {
+    now: () => 2000,
+    spawn: (req) => { seen.push(req); return { ok: true, jobId: "bg_late" }; },
+    commit: (s) => { committed = s; },
+  });
+  const r = await createBgRunTool(deps).execute({ command: "true", task_id: 1 });
+  expect(r.isError).toBeFalsy();
+  const task = committed.tasks.find((t: any) => t.id === 1);
+  expect(task.inProgressSince).toBe(1000);              // not rewritten
+  expect(seen[0].now).toBe(2000);
+  expect(seen[0].now).toBeGreaterThan(task.inProgressSince);
+});
+
+it("F170 a synchronous spawn failure leaves the task pending, not in_progress", async () => {
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "will fail", status: "pending" }];
+  b.nextId = 2;
+  let committed = false;
+  const deps = toolDeps(b, {
+    now: () => 3000,
+    spawn: () => ({ ok: false, error: "boom" }),
+    commit: () => { committed = true; },
+  });
+  const r = await createBgRunTool(deps).execute({ command: "true", task_id: 1 });
+  expect(r.isError).toBe(true);
+  expect(committed).toBe(false);
+  expect(b.tasks[0].status).toBe("pending");
+  expect(b.tasks[0].inProgressSince).toBeUndefined();
+});
+
+it("parking an in_progress task cancels its bound chain in the same call", async () => {
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "busy", status: "in_progress", jobs: ["bg_chain"] }];
+  b.nextId = 2;
+  const killed: string[] = [];
+  const jobs = createJobStore(mkdtempSync(join(tmpdir(), "vigil-reg-")));
+  jobs.put({
+    id: "bg_chain", rootId: "bg_chain", label: "l", command: "true", logPath: "/tmp/x", cwd: "/tmp",
+    pid: 1, status: "running", exitCode: null, exitCodeKnown: false, startedAt: 1, endedAt: null,
+    fpVerdict: "unknown", interferers: [], attempt: 1, taskId: 1, sessionId: "S",
+    evidenceApplied: false, notifyState: "pending",
+  } as never);
+  const deps = toolDeps(b, { jobs, kill: (id) => { killed.push(id); }, now: () => 10 });
+  const r = await createTodoTool(deps).execute({ action: "update", id: 1, status: "parked", reason: "waiting" });
+  expect(r.isError).toBeFalsy();
+  expect(killed).toEqual(["bg_chain"]);
+});
+
+it("bg_run rejects parked tasks and refuses a job already bound elsewhere", async () => {
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "parked", status: "parked", park: { reason: "r", at: 1, from: "pending" } }];
+  b.nextId = 2;
+  const parked = await createBgRunTool(toolDeps(b)).execute({ command: "true", task_id: 1 });
+  expect(parked.isError).toBe(true);
+  expect(parked.content[0].text).toContain("cannot start a job");
+
+  const b2 = emptyBoard();
+  b2.tasks = [
+    { id: 1, subject: "mine", status: "pending" },
+    { id: 2, subject: "other", status: "pending", jobs: ["bg_dup"] },
+  ];
+  b2.nextId = 3;
+  const killed: string[] = [];
+  const dup = await createBgRunTool(toolDeps(b2, {
+    spawn: () => ({ ok: true, jobId: "bg_dup" }),
+    kill: (id) => { killed.push(id); },
+  })).execute({ command: "true", task_id: 1 });
+  expect(dup.isError).toBe(true);
+  expect(killed).toEqual(["bg_dup"]);
+});

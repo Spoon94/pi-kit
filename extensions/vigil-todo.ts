@@ -38,7 +38,7 @@ import { WIDGET_KEY, STATUS_KEY, panelStamp, renderDoctor, renderPanel, renderSt
 import { bgCompletions, panelCompletions, todosCompletions } from "../src/vigil-todo/ui/completions.js";
 import { clearRenudgeOnSettled, createAckTracker, markSent, resetOnUserInput } from "../src/vigil-todo/wake/ack.js";
 import { WAKE_CUSTOM_TYPE, composeWake } from "../src/vigil-todo/wake/compose.js";
-import { needsTimer, recoveryWake, settleSend, tryDeliver } from "../src/vigil-todo/wake/deliver.js";
+import { needsTimer, recoveryWake, settleSend, tryDeliver, undeliveredRoots, wakeDelayMs } from "../src/vigil-todo/wake/deliver.js";
 
 const OWN_SOURCE = "pi-kit";
 const BOARD_CUSTOM_TYPE = "rpiv-todo-state";
@@ -87,6 +87,9 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   let lastWidgetKey: string | undefined;
   let uiStamp: ReturnType<typeof panelStamp> | undefined;
   let onboardingMessageSent = false;
+  let lastWakeSentAt: number | undefined;
+  let mergeDeadline = 0;
+  let mergeBurstStart = 0;
   let pendingKill: string | undefined;
   const recovered = new Set<string>();
   let wired = false;
@@ -312,6 +315,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
         { customType: WAKE_CUSTOM_TYPE, content: text, display: false, details: { wakeId, jobs: roots } },
         { deliverAs: "steer", triggerTurn: true },
       );
+      lastWakeSentAt = Date.now();                      // pacing anchor: see wakeDelayMs (§23)
       settleSend(maybe, () => notify("vigil-todo: wake send failed; waiting for catch-up compensation", "warning"));
     } catch (e) {
       notify(`vigil-todo: wake send failed (${String(e)}); waiting for catch-up compensation`, "warning");
@@ -404,6 +408,9 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     const nextSid = ctx.sessionManager.getSessionId();
     if (nextSid === sid && ctx.cwd === cwd) return;
     onboardingMessageSent = false;
+    lastWakeSentAt = undefined;
+    mergeDeadline = 0;
+    mergeBurstStart = 0;
     flushExitQueue();                        // persist exits queued by the old session first
     if (mergeTimer) { clearTimeout(mergeTimer); mergeTimer = undefined; }
     sid = nextSid;
@@ -456,11 +463,40 @@ export default function vigilTodo(pi: ExtensionAPI): void {
   };
 
   const scheduleDeliver = (): void => {
-    if (mergeTimer) return;
+    const board = boards.get(sid);
+    // Count real undelivered roots (same predicate as tryDeliver), not queued exits: a single
+    // completion is delivered at the end of this turn, several share the merge window (§23).
+    const pending = undeliveredRoots({ board, jobs }, board.counters.wakeWatermark).length;
+    const mergeMs = getCfg().wakeMergeMs;
+    const since = lastWakeSentAt === undefined ? undefined : Date.now() - lastWakeSentAt;
+    const delay = wakeDelayMs(pending, mergeMs, since);
+    const now = Date.now();
+    const desired = now + delay;
+    if (mergeTimer) {
+      // One timer at a time. A burst that is still arriving extends that same timer (never
+      // shortens it) so five staggered exits cost one extra wake, not five; the extension is
+      // capped at four windows so a continuous stream still delivers regularly.
+      const cap = mergeBurstStart + Math.max(mergeMs, 0) * 4;
+      const next = Math.min(Math.max(desired, mergeDeadline), cap);
+      if (next > mergeDeadline) {
+        clearTimeout(mergeTimer);
+        mergeDeadline = next;
+        mergeTimer = setTimeout(() => {
+          mergeTimer = undefined;
+          mergeDeadline = 0;
+          deliverAsync();
+        }, Math.max(0, next - now));
+        mergeTimer.unref?.();
+      }
+      return;
+    }
+    mergeBurstStart = now;
+    mergeDeadline = desired;
     mergeTimer = setTimeout(() => {
       mergeTimer = undefined;
+      mergeDeadline = 0;
       deliverAsync();
-    }, getCfg().wakeMergeMs);
+    }, delay);
     mergeTimer.unref?.();
   };
 
@@ -477,6 +513,7 @@ export default function vigilTodo(pi: ExtensionAPI): void {
     persistCounters(board, d.counters);
     markSent(jobs, d.roots, d.wakeId, Date.now());
     saves.flush();
+    lastWakeSentAt = Date.now();                                 // boundary delivery counts for pacing too
     ackTracker.expectBoundary(d.wakeId, d.roots);
     return {
       entries: [{

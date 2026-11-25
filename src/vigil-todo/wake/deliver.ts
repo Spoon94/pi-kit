@@ -1,5 +1,5 @@
 import { selectNext } from "../board/selectors.js";
-import type { BoardCounters, BoardState } from "../board/types.js";
+import type { BoardCounters, BoardState, Evidence } from "../board/types.js";
 import type { JobStore } from "../jobs/store.js";
 import type { VigilConfig } from "../lib/config.js";
 import { composeWake } from "./compose.js";
@@ -51,23 +51,50 @@ export function settleSend(result: unknown, onError?: (e: unknown) => void): voi
   }
 }
 
-export function tryDeliver(i: DeliverInput): DeliverResult {
-  if (i.board.counters.halted) return { kind: "none" };           // R20: the human brake precedes everything
-  const c = i.board.counters;
-  if (c.turnsUsed >= i.cfg.maxTurns) return { kind: "none" };      // ★ first-line hard gate
-
-  const pending = i.board.tasks.flatMap((t) => t.evidence ?? [])
+/** Undelivered async chain-final evidence, using the same predicate as `tryDeliver`. */
+function pendingEvidence(i: Pick<DeliverInput, "board" | "jobs">, watermark: number): Evidence[] {
+  return i.board.tasks.flatMap((t) => t.evidence ?? [])
     .filter((e) => e.origin === "async" && e.chainFinal && e.trigger !== "self")
     .filter((e) => {
       // per-root sidecar state is authoritative; the watermark is only an optimization and
       // must not block never-delivered chains after a clock rollback (A3)
-      const withinWatermark = e.at > c.wakeWatermark;
+      const withinWatermark = e.at > watermark;
       if (typeof e.ref !== "string") return withinWatermark;
       const root = i.jobs.get(e.ref);
       if (!root || root.id !== root.rootId) return withinWatermark;
       if (root.purged) return false;
       return root.notifyState !== "sent" && root.notifyState !== "acked";
     });
+}
+
+/** Distinct roots that would be delivered right now (evidence without a resolvable root counts as one block). */
+export function undeliveredRoots(i: Pick<DeliverInput, "board" | "jobs">, watermark = 0): string[] {
+  const pending = pendingEvidence(i, watermark);
+  const roots = [...new Set(pending.map((e) => e.ref).filter((r): r is string => typeof r === "string"))];
+  return roots.length > 0 ? roots : pending.length > 0 ? [""] : [];
+}
+
+/**
+ * Wake pacing policy (§23):
+ * - `mergeMs <= 0` → always immediate (no throttle regression for the disabled config);
+ * - several pending roots → wait out the full merge window so they share one message;
+ * - a single root → immediate only when nothing was delivered inside the last window,
+ *   otherwise wait for the rest of that window (staggered completions are throttled).
+ */
+export function wakeDelayMs(pendingRootCount: number, mergeMs: number, sinceLastWakeMs?: number): number {
+  const window = Math.max(0, mergeMs);
+  if (window === 0) return 0;
+  if (pendingRootCount > 1) return window;
+  if (sinceLastWakeMs === undefined) return 0;         // nothing delivered yet this session
+  return sinceLastWakeMs >= window ? 0 : window - sinceLastWakeMs;
+}
+
+export function tryDeliver(i: DeliverInput): DeliverResult {
+  if (i.board.counters.halted) return { kind: "none" };           // R20: the human brake precedes everything
+  const c = i.board.counters;
+  if (c.turnsUsed >= i.cfg.maxTurns) return { kind: "none" };      // ★ first-line hard gate
+
+  const pending = pendingEvidence(i, c.wakeWatermark);
 
   const next = selectNext(i.board, i.cfg.wipLimit, i.capacityFull);
 

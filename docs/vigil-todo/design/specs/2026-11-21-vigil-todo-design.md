@@ -1641,6 +1641,38 @@ A first-time user had to remind the model to use `todo`; the guidance only cover
 
 ---
 
+## 23. Faster completion awareness: turn-end delivery for a single root
+
+### 23.1 Evidence
+
+A real spawn probe (fake pi harness, default config) measured **~278 ms** from child exit to `sendMessage`, while `wakeMergeMs: 0` measured **~47 ms**. Detection itself (close callback + `setImmediate`) is fast; the fixed 250 ms merge window dominates. Removing the window outright would break the 10-job single-message guarantee (F38).
+
+### 23.2 Design
+
+| # | Requirement |
+|---|---|
+| 1 | Delay is chosen by the number of **real undelivered roots** (same predicate as `tryDeliver`: async + chainFinal + not self + not purged + notifyState not sent/acked), never by the length of the exit queue. |
+| 2 | `wakeDelayMs(pendingRootCount, mergeMs)` is pure: `≤ 1` root → `0` (deliver at the end of the current turn); `≥ 2` roots → `mergeMs` (default 250). Negative merge values clamp to 0. |
+| 3 | `undeliveredRoots({board, jobs}, watermark)` is exported and shared with `tryDeliver` so the two cannot drift; evidence without a resolvable root counts as one block. |
+| 4 | `scheduleDeliver` keeps its single `mergeTimer` dedupe, adds no timer and no disk I/O, and keeps counters / notifyState / ack / coalescer semantics unchanged. |
+| 5 | Busy sessions keep the existing async `steer` channel; the settle boundary may still emit at most one "next" nudge, never a second copy of the completion. |
+| 6 | `wakeMergeMs` stays configurable (default 250) and documented as "multi-root merge window". |
+| 7 | Pacing: `lastWakeSentAt` anchors real deliveries (sendWake and boundary); `wakeDelayMs(count, mergeMs, sinceLastWakeMs)` is pure — `mergeMs<=0` → 0, multi-root → full window, single root → immediate only when `since >= window`, otherwise the remainder of the window. While one timer is pending a still-arriving burst extends it (never shortens it) up to four windows, so staggered exits do not multiply wakes and a continuous stream still delivers regularly. |
+
+### 23.3 Acceptance cases
+
+| # | Case | Expectation |
+|---|---|---|
+| F148 | One root completes | Delivery happens at the end of the turn (0 ms timer), not after 250 ms; exactly once |
+| F149 | Ten roots complete in one tick | Still exactly one merged message inside the window (F38 semantics) |
+| F150 | Two roots finishing outside the window | One message each, no repeats |
+| F151 | Busy session (`isIdle=false`) | Async channel only; no fabricated immediate delivery, no duplicate on settle |
+| F152 | Five exits 100 ms apart | First wake immediate, later ones throttled/merged into ≤2 wakes; every completion reported exactly once |
+| F153 | Quiet gap > `wakeMergeMs`, then one root | Immediate again, each delivery exactly once |
+| F154 | `wakeMergeMs: 0` | No throttle regression: each completion delivered immediately |
+| F155 | `session_shutdown`, repeated ticks | Merge/exit timers cleared; ticking adds no extra timer |
+| F156 | 650 real job cycles (gc soak) | Handles and monitor timers flat, heap growth does not climb per cycle |
+| F152b | 200 tasks × 8 evidence | `undeliveredRoots` stays linear: median well under 1 ms |
 ## 24. No TUI flicker while the panel is idle
 
 ### 24.1 Phenomenon

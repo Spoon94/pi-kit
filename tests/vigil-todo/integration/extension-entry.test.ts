@@ -42,7 +42,7 @@ function makeHarness(
   cwd: string, branch: unknown[], idle = true, sessionId = "S",
   opts: {
     hasUI?: boolean; allTools?: any[]; executeTool?: (name: string, args: unknown) => Promise<any>;
-    getSettings?: () => any; sendMessageThrows?: boolean; shortcutThrows?: boolean;
+    getSettings?: () => any; sendMessageThrows?: boolean; shortcutThrows?: boolean; getSessionId?: () => string;
   } = {},
 ) {
   const handlers = new Map<string, Handler[]>();
@@ -51,6 +51,7 @@ function makeHarness(
   const toolDefs = new Map<string, any>();
   const shortcuts = new Map<string, (ctx: any) => unknown>();
   const widgets: (string | undefined)[] = [];
+  const widgetArgs: unknown[] = [];
   const statuses: (string | undefined)[] = [];
   const aborts: unknown[] = [];
   const sent: any[] = [];
@@ -61,7 +62,7 @@ function makeHarness(
     cwd, hasUI, mode: "text",
     ui: {
       notify: (msg: string) => { notifications.push(msg); },
-      setWidget: (key?: string) => { widgets.push(key); },
+      setWidget: (key?: string, text?: unknown) => { widgets.push(key); widgetArgs.push(text); },
       setStatus: (_key: string, text?: string) => { statuses.push(text); },
     },
     isIdle: () => isIdle,
@@ -71,7 +72,7 @@ function makeHarness(
       result: { content: [{ type: "text", text: "ok" }], details: {}, structuredContent: { exit_code: 0 } },
     })),
     sessionManager: {
-      getSessionId: () => sessionId,
+      getSessionId: () => (opts.getSessionId ? opts.getSessionId() : sessionId),
       getCwd: () => cwd,
       getBranch: () => branch,
       getSessionDir: () => join(cwd, ".sessions"),
@@ -117,7 +118,7 @@ function makeHarness(
   };
   const setIdle = (v: boolean) => { isIdle = v; };
   return {
-    api, emit, runCommand, runTool, sent, notifications, toolDefs, shortcuts, widgets, statuses, aborts, commandDefs, setIdle, ctx,
+    api, emit, runCommand, runTool, sent, notifications, toolDefs, shortcuts, widgets, widgetArgs, statuses, aborts, commandDefs, setIdle, ctx,
   };
 }
 
@@ -334,27 +335,71 @@ it("F38: 10 real jobs merge into one delivery within the 250ms window (MINOR #5)
   expect(h.sent[0].message.details.jobs).toHaveLength(10);
 });
 
-it("F165 a first-use bg_run (no prior update) completes the task automatically", async () => {
-  vi.useRealTimers();                                  // the bug lives in a real spawn syscall gap
+it("F157 ten no-change ticks do not call setWidget/setStatus again", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
-  setupJobs(cwd, []);
+  setupJobs(cwd, [job({ id: "R", status: "running", endedAt: null, exitCode: null, exitCodeKnown: false })]);
   const b = emptyBoard();
-  b.tasks = [{ id: 1, subject: "first use", status: "pending" }];
+  b.tasks = [{ id: 1, subject: "run", status: "in_progress", inProgressSince: 0, jobs: ["R"] }];
   b.nextId = 2;
-  const branch: unknown[] = [snapshot(b)];
-  const h = makeHarness(cwd, branch, true);
+  const h = makeHarness(cwd, [snapshot(b)], true, "S", { hasUI: true });
   vigilTodo(h.api);
   await h.emit("session_start", { type: "session_start", reason: "startup" });
+  const widgets0 = h.widgets.length;
+  const statuses0 = h.statuses.length;
+  expect(statuses0).toBeGreaterThan(0);            // first paint happened
 
-  const r = await h.runTool("bg_run", { command: "printf 'ok\n'", task_id: 1 });
-  expect(r.isError).toBeFalsy();
-  await waitForFinalized(cwd, 1);
-  await new Promise((r) => setTimeout(r, 50));
+  for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(1000);
+  expect(h.widgets.length).toBe(widgets0);          // no repaint while idle inside one minute
+  expect(h.statuses.length).toBe(statuses0);
+});
 
-  const last = (branch.filter((e: any) => e?.customType === "rpiv-todo-state") as any[]).at(-1)?.data;
-  const task = last.tasks.find((t: any) => t.id === 1);
-  expect(task.status).toBe("completed");
-  expect(task.evidence.some((e: any) => e.chainFinal && e.ok && e.known)).toBe(true);
+it("F159 a real state change repaints exactly once", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const h = makeHarness(cwd, [snapshot(emptyBoard())], true, "S", { hasUI: true });
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  const before = h.widgets.length;
+  await h.runTool("todo", { action: "create", subject: "new task" });
+  expect(h.widgets.length).toBe(before + 1);        // exactly one repaint for one change
+  await h.runTool("todo", { action: "update", id: 1, status: "in_progress" });
+  expect(h.widgets.length).toBe(before + 2);
+  await h.runTool("todo", { action: "update", id: 1, status: "in_progress" });   // no-op mutation
+  expect(h.widgets.length).toBe(before + 2);
+});
+
+it("F161 collapse passes undefined once, expanding repaints once, empty board unmounts", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "keep", status: "pending" }];
+  b.nextId = 2;
+  const h = makeHarness(cwd, [snapshot(b)], true, "S", { hasUI: true });
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  const collapseKey = Object.keys(Object.fromEntries(h.shortcuts)).find((k) => k !== "alt+h")!;
+  const before = h.widgets.length;
+  await h.shortcuts.get(collapseKey)!(h.ctx);        // collapse
+  expect(h.widgets.length).toBe(before + 1);
+  expect(h.widgetArgs.at(-1)).toBeUndefined();       // only one undefined, then silence
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(h.widgets.length).toBe(before + 1);
+  await h.shortcuts.get(collapseKey)!(h.ctx);        // expand
+  expect(h.widgets.length).toBe(before + 2);
+  expect(Array.isArray(h.widgetArgs.at(-1))).toBe(true);
+});
+
+it("F162 a session switch resets the diff cache and repaints identical content", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  let session = "S1";
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "same", status: "pending" }];
+  b.nextId = 2;
+  const h = makeHarness(cwd, [snapshot(b)], true, "S1", { hasUI: true, getSessionId: () => session });
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+  const before = h.widgets.length;
+  session = "S2";
+  await h.emit("session_start", { type: "session_start", reason: "resume" });
+  expect(h.widgets.length).toBeGreaterThan(before);  // cache reset → repaint, even with same board
 });
 
 it("F10: notifications for two sessions in the same cwd go to the right session each (MINOR #8)", async () => {
@@ -1648,3 +1693,27 @@ it("finalizeTerminated writes note=killed for a killed chain", async () => {
   expect(h.sent).toHaveLength(1);
   expect(h.sent[0].message.content).toContain("killed");
 });
+
+it("F165 a first-use bg_run (no prior update) completes the task automatically", async () => {
+  vi.useRealTimers();                                  // the bug lives in a real spawn syscall gap
+  const cwd = mkdtempSync(join(tmpdir(), "vigil-ext-"));
+  setupJobs(cwd, []);
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "first use", status: "pending" }];
+  b.nextId = 2;
+  const branch: unknown[] = [snapshot(b)];
+  const h = makeHarness(cwd, branch, true);
+  vigilTodo(h.api);
+  await h.emit("session_start", { type: "session_start", reason: "startup" });
+
+  const r = await h.runTool("bg_run", { command: "printf 'ok\n'", task_id: 1 });
+  expect(r.isError).toBeFalsy();
+  await waitForFinalized(cwd, 1);
+  await new Promise((r) => setTimeout(r, 50));
+
+  const last = (branch.filter((e: any) => e?.customType === "rpiv-todo-state") as any[]).at(-1)?.data;
+  const task = last.tasks.find((t: any) => t.id === 1);
+  expect(task.status).toBe("completed");
+  expect(task.evidence.some((e: any) => e.chainFinal && e.ok && e.known)).toBe(true);
+});
+

@@ -5,7 +5,7 @@ import { detectCycle, formatCycle } from "../board/graph.js";
 import { jobFactsOf } from "../jobs/facts.js";
 import type { JobStore } from "../jobs/store.js";
 import { DEFAULTS, type VigilConfig } from "../lib/config.js";
-import { formatElapsed } from "../lib/format.js";
+import { formatElapsedCoarse, quantizeNow } from "../lib/format.js";
 import { sanitizeMultiline, sanitizeTerminalText } from "../lib/sanitize.js";
 
 export const WIDGET_KEY = "vigil-todo";
@@ -70,7 +70,7 @@ export function layoutRows(
   for (const t of state.tasks.filter((x) => x.status === "in_progress")) {
     if (used >= budget) break;
     const running = jobs.all().find((j) => j.taskId === t.id && j.status === "running");
-    const elapsed = running ? ` · ✶ ${formatElapsed(now - running.startedAt)}` : "";
+    const elapsed = running ? ` · ✶ ${formatElapsedCoarse(now - running.startedAt, cfg.elapsedGranularityMs)}` : "";
     const retry = running ? ` · ↻ retry ${running.attempt}/${1 + cfg.retries}` : "";
     rows.push(`├─ ◐ #${t.id} ${sanitizeTerminalText(t.subject)}${t.activeForm ? ` (${sanitizeTerminalText(t.activeForm)})` : ""}${elapsed}${retry}`);
     used++;
@@ -86,9 +86,38 @@ export function layoutRows(
   return { rows: rows.map((r) => truncateToWidth(sanitizeTerminalText(r), width)), hiddenParked };
 }
 
-export function renderPanel(state: BoardState, jobs: JobStore, cfg: VigilConfig, width = 100): string[] {
+export function renderPanel(
+  state: BoardState, jobs: JobStore, cfg: VigilConfig, width = 100, now = quantizeNow(Date.now(), cfg.elapsedGranularityMs),
+): string[] {
   if (state.tasks.every((t) => t.status === "deleted")) return [];
-  return [...layoutRows(state, jobs, cfg.maxWidgetLines, cfg, Date.now(), width).rows, ""];
+  return [...layoutRows(state, jobs, cfg.maxWidgetLines, cfg, now, width).rows, ""];
+}
+
+/** Cheap identity of everything the live panel shows; equal stamps mean "no re-render needed". */
+export interface PanelStamp {
+  board: unknown; jobs: number; running: number; retry: number;
+  now: number; halted: boolean | undefined; turns: number; collapsed: boolean;
+}
+
+export function panelStamp(
+  board: BoardState, jobs: JobStore, now: number, collapsed: boolean,
+): PanelStamp {
+  let running = 0;
+  let retry = 0;
+  for (const j of jobs.all()) {
+    if (j.status === "running") running++;
+    if (j.retryAt != null) retry++;
+  }
+  return {
+    board, jobs: jobs.all().length, running, retry,
+    now, halted: board.counters.halted, turns: board.counters.turnsUsed, collapsed,
+  };
+}
+
+export function samePanelStamp(a: PanelStamp | undefined, b: PanelStamp): boolean {
+  return a !== undefined && a.board === b.board && a.jobs === b.jobs && a.running === b.running
+    && a.retry === b.retry && a.now === b.now && a.halted === b.halted
+    && a.turns === b.turns && a.collapsed === b.collapsed;
 }
 
 export function renderTodos(state: BoardState, _jobs: JobStore): string {

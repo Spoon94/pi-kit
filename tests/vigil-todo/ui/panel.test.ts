@@ -158,7 +158,9 @@ it("in_progress row shows ✶ elapsed; retry limit follows config (§8.1)", () =
   jj.put(running);
   const { rows } = layoutRows(s, jj, 12, DEFAULTS, now);
   const line = rows.find((r) => r.includes("#1")) ?? "";
-  expect(line).toContain("✶ 2m10s");
+  expect(line).toContain("✶ 2m");                       // default granularity is one minute (§24)
+  const seconds = layoutRows(s, jj, 12, { ...DEFAULTS, elapsedGranularityMs: 1000 }, now);
+  expect(seconds.rows.find((r) => r.includes("#1")) ?? "").toContain("✶ 2m10s");
   expect(line).toContain("retry 1/6");                 // default total attempts is 6
   const custom = layoutRows(s, jj, 12, { ...DEFAULTS, retries: 1 }, now);
   expect(custom.rows.find((r) => r.includes("#1")) ?? "").toContain("retry 1/2");
@@ -236,6 +238,90 @@ it("parked without reason, budget truncation, and renderTodos empty-evidence bra
   expect(renderTodos(doneNoFin, jobs())).toContain("[completed] #1 a");
   expect(renderTodos(emptyBoard(), jobs())).toBe("No tasks");
 });
+
+it("F160 elapsed display is coarse by default and second-level at granularity 1000", async () => {
+  const { formatElapsedCoarse } = await import("../../../src/vigil-todo/lib/format.js");
+  expect(formatElapsedCoarse(343_000, 60_000)).toBe("5m");
+  expect(formatElapsedCoarse(59_000, 60_000)).toBe("<1m");
+  expect(formatElapsedCoarse(3_900_000, 60_000)).toBe("1h 5m");
+  expect(formatElapsedCoarse(343_000, 1_000)).toBe("5m43s");
+  expect(formatElapsedCoarse(343_000, 1_000)).toContain("s");
+});
+
+it("F158 panel lines stay byte-identical inside one minute and change after it", async () => {
+  const { panelStamp, samePanelStamp } = await import("../../../src/vigil-todo/ui/panel.js");
+  const jobs = createJobStore(mkdtempSync(join(tmpdir(), "vigil-panel-")));
+  jobs.put({
+    id: "R", rootId: "R", label: "r", command: "x", logPath: "/tmp/x", cwd: "/tmp", pid: 1,
+    status: "running", exitCode: null, exitCodeKnown: false, startedAt: 0, endedAt: null,
+    fpVerdict: "unknown", interferers: [], attempt: 1, taskId: 1, sessionId: "S",
+    evidenceApplied: false, notifyState: "pending",
+  } as Job);
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "run", status: "in_progress", inProgressSince: 0, jobs: ["R"] }];
+  b.nextId = 2;
+
+  const a = renderPanel(b, jobs, DEFAULTS, 100, 300_000);   // 5m
+  const sameMinute = renderPanel(b, jobs, DEFAULTS, 100, 330_000);
+  const nextMinute = renderPanel(b, jobs, DEFAULTS, 100, 360_000);
+  expect(sameMinute).toEqual(a);
+  expect(sameMinute.join("\n")).toContain("✶ 5m");
+  expect(nextMinute.join("\n")).toContain("✶ 6m");
+  expect(nextMinute).not.toEqual(a);
+
+  const stamp = panelStamp(b, jobs, 300_000, false);
+  expect(samePanelStamp(stamp, panelStamp(b, jobs, 300_000, false))).toBe(true);
+  expect(samePanelStamp(stamp, panelStamp(b, jobs, 360_000, false))).toBe(false);
+  expect(samePanelStamp(stamp, panelStamp({ ...b }, jobs, 300_000, false))).toBe(false);
+});
+
+it("F157 status line singular/plural and todos drill-down without exit code", async () => {
+  const jobs = createJobStore(mkdtempSync(join(tmpdir(), "vigil-status-")));
+  const one = emptyBoard();
+  one.tasks = [{ id: 1, subject: "a", status: "in_progress" }];
+  jobs.put({
+    id: "R", rootId: "R", label: "r", command: "x", logPath: "/tmp/x", cwd: "/tmp", pid: 1,
+    status: "running", exitCode: null, exitCodeKnown: false, startedAt: 0, endedAt: null,
+    fpVerdict: "unknown", interferers: [], attempt: 1, taskId: 1, sessionId: "S",
+    evidenceApplied: false, notifyState: "pending",
+  } as Job);
+  expect(renderStatus(one, jobs)).toBe("vigil ● 1 job");
+  jobs.put({
+    id: "R2", rootId: "R2", label: "r", command: "x", logPath: "/tmp/x", cwd: "/tmp", pid: 2,
+    status: "running", exitCode: null, exitCodeKnown: false, startedAt: 0, endedAt: null,
+    fpVerdict: "unknown", interferers: [], attempt: 1, taskId: 1, sessionId: "S",
+    evidenceApplied: false, notifyState: "pending",
+  } as Job);
+  expect(renderStatus(one, jobs)).toBe("vigil ● 2 jobs");
+
+  const b2 = emptyBoard();
+  b2.tasks = [{ id: 1, subject: "done", status: "completed", evidence: [ev({ exitCode: undefined })] }];
+  expect(renderTodos(b2, jobs)).toContain("exit ?");
+});
+
+it("F157 every differing stamp field is detected (no stale panel)", async () => {
+  const { panelStamp, samePanelStamp } = await import("../../../src/vigil-todo/ui/panel.js");
+  const jobs = createJobStore(mkdtempSync(join(tmpdir(), "vigil-stamp-")));
+  const b = emptyBoard();
+  b.tasks = [{ id: 1, subject: "a", status: "pending" }];
+  b.nextId = 2;
+  const base = panelStamp(b, jobs, 60_000, false);
+  expect(samePanelStamp(undefined, base)).toBe(false);              // first paint
+  expect(samePanelStamp(base, panelStamp(b, jobs, 60_000, false))).toBe(true);
+  expect(samePanelStamp(base, panelStamp({ ...b }, jobs, 60_000, false))).toBe(false);   // board identity
+  jobs.put({
+    id: "R", rootId: "R", label: "r", command: "x", logPath: "/tmp/x", cwd: "/tmp", pid: 1,
+    status: "completed", exitCode: 0, exitCodeKnown: true, startedAt: 0, endedAt: 1,
+    fpVerdict: "fresh", interferers: [], attempt: 1, taskId: 1, sessionId: "S",
+    evidenceApplied: true, finalized: true, notifyState: "acked", retryAt: 5,
+  } as Job);
+  expect(samePanelStamp(base, panelStamp(b, jobs, 60_000, false))).toBe(false);   // jobs/retry
+  const busy = { ...b, counters: { ...b.counters, halted: true, turnsUsed: 3 } };
+  expect(samePanelStamp(base, panelStamp(busy, jobs, 60_000, false))).toBe(false); // halted/turns
+  expect(samePanelStamp(base, panelStamp(b, jobs, 120_000, false))).toBe(false);   // quantized now
+  expect(samePanelStamp(base, panelStamp(b, jobs, 60_000, true))).toBe(false);     // collapsed
+});
+
 
 it("F169 doctor flags in_progress tasks that already have passing evidence", () => {
   const jobs = createJobStore(mkdtempSync(join(tmpdir(), "vigil-doc-")));

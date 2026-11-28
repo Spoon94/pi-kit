@@ -22,7 +22,7 @@
 pi install git:github.com/Spoon94/pi-kit
 ```
 
-**npm —— 等首个版本发布后（尚未发布）：**
+**npm —— 推荐使用者使用：**
 
 ```bash
 pi install npm:pi-kit

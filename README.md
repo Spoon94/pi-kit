@@ -22,7 +22,7 @@ Three installation modes, depending on your situation:
 pi install git:github.com/Spoon94/pi-kit
 ```
 
-**npm — once the first release is published (not yet):**
+**npm — recommended for users:**
 
 ```bash
 pi install npm:pi-kit

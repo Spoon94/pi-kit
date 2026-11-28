@@ -25,7 +25,7 @@ pi install git:github.com/Spoon94/pi-kit
 **npm —— 推荐使用者使用：**
 
 ```bash
-pi install npm:pi-kit
+pi install npm:@spoon94/pi-kit
 ```
 
 **本地检出 —— 用于开发；代码改动通过 `/reload` 生效：**

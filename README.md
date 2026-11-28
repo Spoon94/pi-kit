@@ -25,7 +25,7 @@ pi install git:github.com/Spoon94/pi-kit
 **npm — recommended for users:**
 
 ```bash
-pi install npm:pi-kit
+pi install npm:@spoon94/pi-kit
 ```
 
 **local checkout — for development; code changes take effect with `/reload`:**

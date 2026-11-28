@@ -1,3 +1,5 @@
+[English](./README.md) | [中文](./README.zh-CN.md)
+
 # pi-kit
 
 A pi extension collection: one repository, one install, N extensions.
